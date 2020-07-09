@@ -1,0 +1,73 @@
+[package]
+name = "wilds"
+version = "0.1.0"
+authors = ["Zakarum <zakarumych@ya.ru>"]
+edition = "2018"
+
+[features]
+# Graphics backend
+vulkan = ["illume-erupt"]
+
+# Image formats support
+gif = ["image/gif"]
+jpeg = ["image/jpeg"]
+ico = ["image/ico"]
+png = ["image/png"]
+pnm = ["image/pnm"]
+tga = ["image/tga"]
+tiff = ["image/tiff"]
+webp = ["image/webp"]
+bmp = ["image/bmp"]
+hdr = ["image/hdr"]
+dxt = ["image/dxt"]
+dds = ["image/dds"]
+farbfeld = ["image/farbfeld"]
+
+[dependencies]
+# Assets
+goods = { version = "0.5", features = ["fs", "tokio-spawn"] }
+gltf = "0.15"
+
+# Graphics
+illume = { path = "../illume", features = ["ultraviolet"] }
+illume-erupt = { path = "../erupt", optional = true, features = ["shader-compiler"] }
+genmesh = { version = "0.6", optional = true }
+image = { version = "0.23", default-features = false, features = ["png"] }
+palette = { version = "0.5", default-features = false, features = ["std"] }
+
+# ECS
+hecs = "0.2"
+
+# Linear algebra
+ultraviolet = "0.4"
+
+# Windowing
+winit = "0.22"
+
+# Low-Level
+maybe-sync = "0.1"
+bytemuck = "1.2"
+byteorder = "1.3"
+bumpalo = { version = "3.4", features = ["collections"] }
+
+# Error handling
+eyre = "0.6"
+color-eyre = "0.5"
+thiserror = "1.0"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+ron = "0.6"
+
+# Logs and traces
+tracing = { version = "0.1", features = ["log"] }
+tracing-subscriber = { version = "0.2", features = ["fmt"] }
+
+# Support
+cfg-if = "0.1"
+futures = "0.3"
+lazy_static = "1.4"
+flume = "0.7"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "0.2", features = ["macros", "rt-threaded", "blocking"] }

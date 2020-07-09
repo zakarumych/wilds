@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "tvma",
+    "illume",
+    "erupt",
+    "engine",
+    "game",
+]

@@ -1,0 +1,30 @@
+#version 460
+#extension GL_EXT_ray_tracing : require
+#extension GL_GOOGLE_include_directive : enable
+#extension GL_EXT_scalar_block_layout : enable
+#include "raycommon.glsl"
+
+#include "rayhelpers.glsl"
+
+layout(location = 0) rayPayloadEXT HitPayload prd;
+
+layout(binding = 5, set = 0, rgba32f) uniform image2D output_image;
+
+void main() 
+{
+  const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
+  const vec2 inUV = pixelCenter/vec2(gl_LaunchSizeEXT.xy);
+  vec2 d = inUV * 2.0 - 1.0;
+
+  vec4 proj  = globals.cam.iproj * vec4(d.x, d.y, 1, 1);
+  vec4 target = globals.cam.iview * vec4(normalize(proj.xyz), 1.0);
+
+  vec4 origin = globals.cam.iview * vec4(0, 0, 0, 1);
+  prd.hit_value = vec3(0, 0, 0);
+  prd.co = vec2(gl_LaunchIDEXT.xy);
+  prd.depth = 3;
+  traceRayEXT(tlas, 0, 0xff, 0, 0, 0, origin.xyz, 0.0, normalize((target - origin).xyz), 1000.0, 0);
+
+  vec4 color = vec4(prd.hit_value / (prd.hit_value + vec3(1, 1, 1)), 1);
+  imageStore(output_image, ivec2(gl_LaunchIDEXT.xy), color);
+}
