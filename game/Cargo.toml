@@ -1,0 +1,23 @@
+[package]
+name = "wilds-game"
+version = "0.1.0"
+authors = ["Zakarum <zakarumych@ya.ru>"]
+edition = "2018"
+publish = false
+
+[dependencies]
+goods = { version = "0.5" }
+hecs = "0.2"
+wilds = { path = "../engine", features = ["vulkan"] }
+
+bumpalo = { version = "3.4", features = ["collections"] }
+eyre = "0.6"
+color-eyre = "0.5"
+serde = { version = "1.0", features = ["derive"] }
+ron = "0.6"
+tracing = "0.1"
+winit = "0.22"
+ultraviolet = "0.4"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "0.2", features = ["time"] }

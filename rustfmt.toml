@@ -1,0 +1,7 @@
+max_width = 80
+newline_style = "Native"
+reorder_impl_items = true
+use_field_init_shorthand = true
+wrap_comments = true
+# error_on_line_overflow = true
+# match_arm_leading_pipes = KeepExisting

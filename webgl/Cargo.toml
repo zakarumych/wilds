@@ -1,0 +1,30 @@
+[package]
+name = "illume-webgl"
+version = "0.1.0"
+authors = ["zakarum"]
+edition = "2018"
+
+[dependencies]
+illume-core = { path = "../core" }
+bitflags = "*"
+raw-window-handle = "*"
+smallvec = "1.0"
+thiserror = "*"
+tracing = { version = "0.1.15" }
+js-sys = "0.3.39"
+web-sys = { version = "0.3.39", optional = true, features = [
+        "Document",
+        "Window",
+        "Element",
+        "HtmlCanvasElement",
+        "WebGl2RenderingContext",
+        "WebGlBuffer",
+        "WebGlTexture",
+        "WebGlRenderbuffer",
+        "WebGlShader",
+        "WebGlProgram",
+        "WebGlFramebuffer",
+        "WebGlSync",
+        "Performance",
+]}
+wasm-bindgen = { version = "0.2.62", optional = true, features = [] }
