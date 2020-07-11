@@ -2,7 +2,7 @@ use {
     bumpalo::Bump,
     color_eyre::Report,
     hecs::World,
-    ultraviolet::Mat4,
+    ultraviolet::{Mat4, Vec3},
     wilds::{
         Camera, Clocks, DirectionalLight, Engine, /* Event, */ Gltf,
         GltfFormat, GltfNode, Renderer, /* WindowEvent, */
@@ -34,11 +34,11 @@ fn main() -> Result<(), Report> {
                 z_near: 0.1,
                 z_far: 1000.0,
             },
-            Mat4::identity(),
+            Mat4::from_translation(Vec3::new(0.0, 20.0, 30.0)),
         ));
 
         let mut city_opt = Some(engine.assets.load_with_format(
-            "desert-city.gltf".to_owned(),
+            "thor_and_the_midgard_serpent/scene.gltf".to_owned(),
             GltfFormat {
                 raster: false,
                 blas: true,
@@ -49,7 +49,12 @@ fn main() -> Result<(), Report> {
         loop {
             if let Some(city) = &mut city_opt {
                 if let Some(city) = city.get() {
-                    load_gltf_scene(city, &mut engine.world);
+                    tracing::info!("Scene loaded");
+                    load_gltf_scene(
+                        city,
+                        &mut engine.world,
+                        Mat4::from_scale(0.01),
+                    );
                     city_opt = None;
                 }
             }
@@ -82,12 +87,12 @@ fn main() -> Result<(), Report> {
     })
 }
 
-pub fn load_gltf_scene(gltf: &Gltf, world: &mut World) {
+pub fn load_gltf_scene(gltf: &Gltf, world: &mut World, transform: Mat4) {
     let scene = gltf.scene.unwrap();
 
     for &node in &*gltf.scenes[scene].nodes {
         let node = &gltf.nodes[node];
-        load_gltf_node(gltf, node, Mat4::identity(), world);
+        load_gltf_node(gltf, node, transform, world);
     }
 }
 

@@ -16,7 +16,7 @@ use {
     tokio::{runtime::Runtime, task::yield_now},
     winit::{
         dpi::{PhysicalPosition, PhysicalSize},
-        event::{Event as WinitEvent, WindowEvent as WinitWindowEvent},
+        event::{Event, WindowEvent},
         event_loop::{ControlFlow, EventLoop, EventLoopWindowTarget},
         window::{Theme, Window, WindowBuilder, WindowId},
     },
@@ -27,78 +27,9 @@ pub use winit::event::{
     MouseButton, MouseScrollDelta, Touch, TouchPhase,
 };
 
-pub enum WindowEvent {
-    Resized(PhysicalSize<u32>),
-    Moved(PhysicalPosition<i32>),
-    CloseRequested,
-    Destroyed,
-    Focused(bool),
-    KeyboardInput {
-        device_id: DeviceId,
-        input: KeyboardInput,
-        is_synthetic: bool,
-    },
-    ModifiersChanged(ModifiersState),
-    CursorMoved {
-        device_id: DeviceId,
-        position: PhysicalPosition<f64>,
-        modifiers: ModifiersState,
-    },
-    CursorEntered {
-        device_id: DeviceId,
-    },
-    CursorLeft {
-        device_id: DeviceId,
-    },
-    MouseWheel {
-        device_id: DeviceId,
-        delta: MouseScrollDelta,
-        phase: TouchPhase,
-        modifiers: ModifiersState,
-    },
-    MouseInput {
-        device_id: DeviceId,
-        state: ElementState,
-        button: MouseButton,
-        modifiers: ModifiersState,
-    },
-
-    TouchpadPressure {
-        device_id: DeviceId,
-        pressure: f32,
-        stage: i64,
-    },
-    AxisMotion {
-        device_id: DeviceId,
-        axis: AxisId,
-        value: f64,
-    },
-    Touch(Touch),
-    ScaleFactorChanged {
-        scale_factor: f64,
-    },
-    ThemeChanged(Theme),
-}
-
-pub enum Event {
-    WindowEvent {
-        window_id: WindowId,
-        event: WindowEvent,
-    },
-    DeviceEvent {
-        device_id: DeviceId,
-        event: DeviceEvent,
-    },
-    Suspended,
-    Resumed,
-    RedrawRequested(WindowId),
-    RedrawEventsCleared,
-    LoopDestroyed,
-}
-
 struct Shared {
     event_loop_ptr: Cell<*const EventLoopWindowTarget<()>>,
-    next_event: Cell<Option<WinitEvent<'static, ()>>>,
+    next_event: Cell<Option<Event<'static, ()>>>,
     waiting_for_event: Cell<bool>,
 }
 
@@ -107,7 +38,6 @@ pub struct Engine {
     pub world: World,
     pub assets: Cache<String>,
     schedule: Vec<Box<dyn FnMut(&mut World)>>,
-    events: flume::Receiver<Event>,
     shared: Rc<Shared>,
 }
 
@@ -146,7 +76,7 @@ impl Engine {
     }
 
     /// Asynchronously wait for next event.
-    pub async fn next(&mut self) -> WinitEvent<'static, ()> {
+    pub async fn next(&mut self) -> Event<'static, ()> {
         self.shared.waiting_for_event.set(true);
         // let event = self.events.recv_async().await;
 
@@ -182,27 +112,30 @@ impl Engine {
         let registry = config
             .sources
             .iter()
-            .try_fold(goods::RegistryBuilder::new(), |builder, source| -> Result<_, Report> { match source {
+            .fold(goods::RegistryBuilder::new(), |builder, source| match source {
                 AssetSource::FileSystem { path } => {
                     cfg_if! {
                         if #[cfg(target_arch = "wasm32")] {
-                            tracing::warn!("FileSystem asset source ignored on WASM target");
+                            tracing::error!("FileSystem asset source with path '{}' ignored on WASM target", path.display());
                             Ok(builder)
                         } else {
-                            let path = std::fs::canonicalize(path).wrap_err_with(|| {
-                                format!("Failed to canonicalize asset source path '{}'", path.display())
-                            })?;
-                            Ok(builder.with(goods::FileSource::new(path)))
+                            let path = match std::env::current_dir() {
+                                Ok(cd) => { cd.join(path) }
+                                Err(err) => {
+                                    tracing::error!("Failed to fetch current dir: {}", err);
+                                    path.clone()
+                                }
+                            };
+                            builder.with(goods::FileSource::new(path))
                         }
                     }
-                }}
-            })?;
+                }
+            });
 
         let assets = Cache::new(
             registry.build(),
             goods::Tokio(runtime.handle().clone()),
         );
-        let (sender, receiver) = flume::unbounded();
 
         let shared = Rc::new(Shared {
             event_loop_ptr: Cell::new(std::ptr::null()),
@@ -216,7 +149,6 @@ impl Engine {
             assets,
             schedule: Vec::new(),
             world: World::new(),
-            events: receiver,
             shared: shared.clone(),
         };
 
@@ -228,71 +160,20 @@ impl Engine {
 
         // Here goes magic
         event_loop.run(move |event, el, flow| {
-            tracing::debug!("Event {:#?}", event);
-            // match event {
-            //     WinitEvent::MainEventsCleared => {
-            //         if let Some(app) = &mut app_opt {
-            //             // Set pointer. We ensure it is always valid while
-            //             // non-null.
-            //             shared.event_loop_ptr.set(el);
-
-            //             // Poll closure only once.
-            //             if let Poll::Ready(result) = runtime
-            //                 .block_on(AppEventWaitFuture { app: app.as_mut()
-            // })             {
-            //                 // No place where we could return this error.
-            //                 // log and panic are only options.
-            //                 if let Err(err) = result {
-            //                     tracing::error!("Error: {}", err);
-            //                 }
-
-            //                 // Exit when closure resolves.
-            //                 *flow = ControlFlow::Exit;
-            //                 app_opt = None;
-            //             } else {
-            //                 if shared.waiting_for_event.get() {
-            //                     *flow = ControlFlow::Wait;
-            //                 } else {
-            //                     *flow = ControlFlow::Poll;
-            //                 }
-            //             }
-
-            //             // Unset event loop before it is invalidated.
-            //             shared.event_loop_ptr.set(std::ptr::null());
-            //         }
-            //     }
-            //     rest => {
-            //         match rest {
-            //             WinitEvent::WindowEvent { window_id, event } => {
-            //                 convert_window_event(event).map(|event| {
-            //                     Event::WindowEvent { window_id, event }
-            //                 })
-            //             }
-            //             WinitEvent::DeviceEvent { device_id, event } => {
-            //                 Event::DeviceEvent { device_id, event }.into()
-            //             }
-            //             WinitEvent::Suspended => Event::Suspended.into(),
-            //             WinitEvent::Resumed => Event::Resumed.into(),
-            //             WinitEvent::RedrawRequested(window) => {
-            //                 Event::RedrawRequested(window).into()
-            //             }
-            //             WinitEvent::RedrawEventsCleared => {
-            //                 Event::RedrawEventsCleared.into()
-            //             }
-            //             WinitEvent::LoopDestroyed => {
-            //                 Event::LoopDestroyed.into()
-            //             }
-            //             _ => None,
-            //         }
-            //         .map(|event| {
-            //             let _ = sender.send(event);
-            //         });
-            //     }
-            // }
+            tracing::trace!("Event {:#?}", event);
 
             if let Some(app) = &mut app_opt {
                 // Set event. Excluding an event bound to a lifetime.
-                shared.next_event.set(event.to_static());
+                let old = match event.to_static() {
+                    Some(event) => {
+                        shared.next_event.replace(Some(event))
+                    }
+                    None => {
+                        shared.next_event.take()
+                    }
+                };
+
+                assert!(old.is_none(), "Control flow must not return to event loop until event is consumed by the application");
 
                 // Set pointer. We ensure it is always valid while
                 // non-null.
@@ -342,6 +223,9 @@ impl Engine {
     }
 }
 
+/// Future that polls main application future
+/// until it finishes or awaits in `Engine::next` function.
+#[must_use = "futures/streams/sinks do nothing unless you `.await` or poll them"]
 struct AppEventWaitFuture<'a, A> {
     app: Pin<&'a mut A>,
     ready: &'a Cell<bool>,
@@ -364,100 +248,5 @@ where
             Poll::Pending if this.ready.get() => Poll::Ready(Poll::Pending),
             Poll::Pending => Poll::Pending,
         }
-    }
-}
-
-fn convert_window_event(event: WinitWindowEvent<'_>) -> Option<WindowEvent> {
-    match event {
-        WinitWindowEvent::Resized(size) => WindowEvent::Resized(size).into(),
-        WinitWindowEvent::Moved(position) => {
-            WindowEvent::Moved(position).into()
-        }
-        WinitWindowEvent::CloseRequested => WindowEvent::CloseRequested.into(),
-        WinitWindowEvent::Destroyed => WindowEvent::Destroyed.into(),
-        WinitWindowEvent::Focused(focused) => {
-            WindowEvent::Focused(focused).into()
-        }
-        WinitWindowEvent::KeyboardInput {
-            device_id,
-            input,
-            is_synthetic,
-        } => WindowEvent::KeyboardInput {
-            device_id,
-            input,
-            is_synthetic,
-        }
-        .into(),
-        WinitWindowEvent::ModifiersChanged(state) => {
-            WindowEvent::ModifiersChanged(state).into()
-        }
-        WinitWindowEvent::CursorMoved {
-            device_id,
-            position,
-            modifiers,
-        } => WindowEvent::CursorMoved {
-            device_id,
-            position,
-            modifiers,
-        }
-        .into(),
-        WinitWindowEvent::CursorEntered { device_id } => {
-            WindowEvent::CursorEntered { device_id }.into()
-        }
-        WinitWindowEvent::CursorLeft { device_id } => {
-            WindowEvent::CursorLeft { device_id }.into()
-        }
-        WinitWindowEvent::MouseWheel {
-            device_id,
-            delta,
-            phase,
-            modifiers,
-        } => WindowEvent::MouseWheel {
-            device_id,
-            delta,
-            phase,
-            modifiers,
-        }
-        .into(),
-        WinitWindowEvent::MouseInput {
-            device_id,
-            state,
-            button,
-            modifiers,
-        } => WindowEvent::MouseInput {
-            device_id,
-            state,
-            button,
-            modifiers,
-        }
-        .into(),
-        WinitWindowEvent::TouchpadPressure {
-            device_id,
-            pressure,
-            stage,
-        } => WindowEvent::TouchpadPressure {
-            device_id,
-            pressure,
-            stage,
-        }
-        .into(),
-        WinitWindowEvent::AxisMotion {
-            device_id,
-            axis,
-            value,
-        } => WindowEvent::AxisMotion {
-            device_id,
-            axis,
-            value,
-        }
-        .into(),
-        WinitWindowEvent::Touch(touch) => WindowEvent::Touch(touch).into(),
-        WinitWindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-            WindowEvent::ScaleFactorChanged { scale_factor }.into()
-        }
-        WinitWindowEvent::ThemeChanged(theme) => {
-            WindowEvent::ThemeChanged(theme).into()
-        }
-        _ => None,
     }
 }

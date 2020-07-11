@@ -6,7 +6,7 @@ edition = "2018"
 publish = false
 
 [dependencies]
-goods = { version = "0.5" }
+goods = { version = "0.5", path = "../../goods" }
 hecs = "0.2"
 wilds = { path = "../engine", features = ["vulkan"] }
 
