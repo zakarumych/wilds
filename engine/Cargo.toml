@@ -25,7 +25,7 @@ farbfeld = ["image/farbfeld"]
 
 [dependencies]
 # Assets
-goods = { version = "0.5", features = ["fs", "tokio-spawn"] }
+goods = { version = "0.5", features = ["fs", "tokio-spawn"], path = "../../goods" }
 gltf = "0.15"
 
 # Graphics

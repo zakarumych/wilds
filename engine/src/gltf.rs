@@ -423,36 +423,48 @@ impl goods::SyncAsset for Gltf {
             .gltf
             .nodes()
             .map(|node| {
-                let transform = match node.transform() {
-                    gltf::scene::Transform::Matrix { matrix: m } => {
-                        Mat4::from([
-                            m[0][0], m[1][0], m[2][0], m[3][0], m[0][1],
-                            m[1][1], m[2][1], m[3][1], m[0][2], m[1][2],
-                            m[2][2], m[3][2], m[0][3], m[1][3], m[2][3],
-                            m[3][3],
-                        ])
-                    }
-                    gltf::scene::Transform::Decomposed {
-                        translation,
-                        rotation,
-                        scale,
-                    } => {
-                        Mat4::from_translation(translation.into())
-                            * Rotor3::new(
-                                rotation[3],
-                                Bivec3 {
-                                    xy: -rotation[2],
-                                    xz: rotation[1],
-                                    yz: -rotation[0],
-                                },
-                            )
-                            .into_matrix()
-                            .into_homogeneous()
-                            * Mat4::from_nonuniform_scale(Vec4::new(
-                                scale[0], scale[1], scale[2], 1.0,
-                            ))
-                    }
-                };
+                // let transform = match node.transform() {
+                //     gltf::scene::Transform::Matrix { matrix: m } => {
+                //         Mat4::from([
+                //             m[0][0], m[1][0], m[2][0], m[3][0], m[0][1],
+                //             m[1][1], m[2][1], m[3][1], m[0][2], m[1][2],
+                //             m[2][2], m[3][2], m[0][3], m[1][3], m[2][3],
+                //             m[3][3],
+                //         ])
+                //     }
+                //     gltf::scene::Transform::Decomposed {
+                //         translation,
+                //         rotation,
+                //         scale,
+                //     } => {
+                //         let rotor = Rotor3::new(
+                //             rotation[3],
+                //             Bivec3 {
+                //                 xy: rotation[0],
+                //                 xz: rotation[2],
+                //                 yz: rotation[1],
+                //             },
+                //         )
+                //         .into_matrix()
+                //         .into_homogeneous();
+
+                //         Mat4::from_translation(translation.into())
+                //             * rotor
+                //             * Mat4::from_nonuniform_scale(Vec4::new(
+                //               scale[0], scale[1], scale[2], 1.0,
+                //             ))
+                //     }
+                // };
+
+                let m = node.transform().matrix();
+
+                let transform = Mat4::new(
+                    m[0].into(),
+                    m[1].into(),
+                    m[2].into(),
+                    m[3].into(),
+                );
+
                 GltfNode {
                     transform,
                     children: node
