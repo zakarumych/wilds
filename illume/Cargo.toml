@@ -16,7 +16,7 @@ serde_bytes = { version = "0.11", optional = true }
 smallvec = "1.4"
 thiserror = "1.0"
 tracing = "0.1"
-ordered-float = "1.1"
+ordered-float = "2.0"
 ultraviolet = { version = "0.4", optional = true }
 
 maybe-sync = "0.1"

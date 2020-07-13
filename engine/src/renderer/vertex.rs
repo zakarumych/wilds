@@ -73,6 +73,7 @@ impl FromBytes for u32 {
 
 /// Trait for vertex layouts.
 pub trait VertexType: FromBytes + Pod {
+    const NAME: &'static str;
     const LOCATIONS: &'static [VertexLocation];
     const RATE: VertexInputRate;
 
@@ -122,6 +123,7 @@ impl VertexType for Position3d {
         format: Format::RGB32Sfloat,
         offset: 0,
     }];
+    const NAME: &'static str = "Position3d";
     const RATE: VertexInputRate = VertexInputRate::Vertex;
 }
 
@@ -147,6 +149,33 @@ impl VertexType for Normal3d {
         format: Format::RGB32Sfloat,
         offset: 0,
     }];
+    const NAME: &'static str = "Normal3d";
+    const RATE: VertexInputRate = VertexInputRate::Vertex;
+}
+
+/// Attribute for vertex position in 3d world.
+#[derive(Clone, Copy, Debug)]
+#[repr(transparent)]
+#[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
+pub struct Tangent3d(pub [f32; 4]);
+
+unsafe impl Zeroable for Tangent3d {}
+unsafe impl Pod for Tangent3d {}
+
+impl FromBytes for Tangent3d {
+    fn from_bytes<E: ByteOrder>(bytes: &[u8]) -> Self {
+        let mut xyz = [0.0; 4];
+        E::read_f32_into(bytes, &mut xyz);
+        Tangent3d(xyz)
+    }
+}
+
+impl VertexType for Tangent3d {
+    const LOCATIONS: &'static [VertexLocation] = &[VertexLocation {
+        format: Format::RGBA32Sfloat,
+        offset: 0,
+    }];
+    const NAME: &'static str = "Tangent3d";
     const RATE: VertexInputRate = VertexInputRate::Vertex;
 }
 
@@ -172,6 +201,7 @@ impl VertexType for Color {
         format: Format::RGBA32Sfloat,
         offset: 0,
     }];
+    const NAME: &'static str = "Color";
     const RATE: VertexInputRate = VertexInputRate::Vertex;
 }
 
@@ -197,6 +227,7 @@ impl VertexType for UV {
         format: Format::RG32Sfloat,
         offset: 0,
     }];
+    const NAME: &'static str = "UV";
     const RATE: VertexInputRate = VertexInputRate::Vertex;
 }
 
@@ -213,12 +244,16 @@ unsafe impl Pod for Position3dUV {}
 
 impl FromBytes for Position3dUV {
     fn from_bytes<E: ByteOrder>(bytes: &[u8]) -> Self {
-        let mut xyzuv = [0.0; 5];
-        E::read_f32_into(bytes, &mut xyzuv);
-        Position3dUV {
-            position: Position3d([xyzuv[0], xyzuv[1], xyzuv[2]]),
-            uv: UV([xyzuv[3], xyzuv[4]]),
-        }
+        let mut array = [0.0; 5];
+        E::read_f32_into(bytes, &mut array);
+
+        let [x, y, z, ..] = array;
+        let position = Position3d([x, y, z]);
+
+        let [_, _, _, u, v] = array;
+        let uv = UV([u, v]);
+
+        Position3dUV { position, uv }
     }
 }
 
@@ -233,6 +268,7 @@ impl VertexType for Position3dUV {
             offset: size_of::<Position3d>() as u32,
         },
     ];
+    const NAME: &'static str = "Position3dUV";
     const RATE: VertexInputRate = VertexInputRate::Vertex;
 }
 
@@ -249,12 +285,16 @@ unsafe impl Pod for Position3dColor {}
 
 impl FromBytes for Position3dColor {
     fn from_bytes<E: ByteOrder>(bytes: &[u8]) -> Self {
-        let mut xyzrgba = [0.0; 7];
-        E::read_f32_into(bytes, &mut xyzrgba);
-        Position3dColor {
-            position: Position3d([xyzrgba[0], xyzrgba[1], xyzrgba[2]]),
-            color: Color([xyzrgba[3], xyzrgba[4], xyzrgba[5], xyzrgba[6]]),
-        }
+        let mut array = [0.0; 7];
+        E::read_f32_into(bytes, &mut array);
+
+        let [x, y, z, ..] = array;
+        let position = Position3d([x, y, z]);
+
+        let [_, _, _, r, g, b, a] = array;
+        let color = Color([r, g, b, a]);
+
+        Position3dColor { position, color }
     }
 }
 
@@ -269,32 +309,37 @@ impl VertexType for Position3dColor {
             offset: size_of::<Position3d>() as u32,
         },
     ];
+    const NAME: &'static str = "Position3dColor";
     const RATE: VertexInputRate = VertexInputRate::Vertex;
 }
 
 #[derive(Clone, Copy, Debug)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
 #[repr(C)]
-pub struct Position3dNormal3d {
+pub struct PositionNormal3d {
     pub position: Position3d,
     pub normal: Normal3d,
 }
 
-unsafe impl Zeroable for Position3dNormal3d {}
-unsafe impl Pod for Position3dNormal3d {}
+unsafe impl Zeroable for PositionNormal3d {}
+unsafe impl Pod for PositionNormal3d {}
 
-impl FromBytes for Position3dNormal3d {
+impl FromBytes for PositionNormal3d {
     fn from_bytes<E: ByteOrder>(bytes: &[u8]) -> Self {
-        let mut xyzxyz = [0.0; 6];
-        E::read_f32_into(bytes, &mut xyzxyz);
-        Position3dNormal3d {
-            position: Position3d([xyzxyz[0], xyzxyz[1], xyzxyz[2]]),
-            normal: Normal3d([xyzxyz[3], xyzxyz[4], xyzxyz[5]]),
-        }
+        let mut array = [0.0; 6];
+        E::read_f32_into(bytes, &mut array);
+
+        let [x, y, z, ..] = array;
+        let position = Position3d([x, y, z]);
+
+        let [_, _, _, x, y, z] = array;
+        let normal = Normal3d([x, y, z]);
+
+        PositionNormal3d { position, normal }
     }
 }
 
-impl VertexType for Position3dNormal3d {
+impl VertexType for PositionNormal3d {
     const LOCATIONS: &'static [VertexLocation] = &[
         VertexLocation {
             format: Format::RGB32Sfloat,
@@ -305,34 +350,99 @@ impl VertexType for Position3dNormal3d {
             offset: size_of::<Position3d>() as u32,
         },
     ];
+    const NAME: &'static str = "PositionNormal3d";
     const RATE: VertexInputRate = VertexInputRate::Vertex;
 }
 
 #[derive(Clone, Copy, Debug)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
 #[repr(C)]
-pub struct Position3dNormal3dUV {
+pub struct PositionNormalTangent3d {
+    pub position: Position3d,
+    pub normal: Normal3d,
+    pub tangent: Tangent3d,
+}
+
+unsafe impl Zeroable for PositionNormalTangent3d {}
+unsafe impl Pod for PositionNormalTangent3d {}
+
+impl FromBytes for PositionNormalTangent3d {
+    fn from_bytes<E: ByteOrder>(bytes: &[u8]) -> Self {
+        let mut array = [0.0; 10];
+        E::read_f32_into(bytes, &mut array);
+
+        let [x, y, z, ..] = array;
+        let position = Position3d([x, y, z]);
+
+        let [_, _, _, x, y, z, ..] = array;
+        let normal = Normal3d([x, y, z]);
+
+        let [_, _, _, _, _, _, x, y, z, w] = array;
+        let tangent = Tangent3d([x, y, z, w]);
+
+        PositionNormalTangent3d {
+            position,
+            normal,
+            tangent,
+        }
+    }
+}
+
+impl VertexType for PositionNormalTangent3d {
+    const LOCATIONS: &'static [VertexLocation] = &[
+        VertexLocation {
+            format: Format::RGB32Sfloat,
+            offset: 0,
+        },
+        VertexLocation {
+            format: Format::RGB32Sfloat,
+            offset: size_of::<Position3d>() as u32,
+        },
+        VertexLocation {
+            format: Format::RGBA32Sfloat,
+            offset: size_of::<Position3d>() as u32
+                + size_of::<Normal3d>() as u32,
+        },
+    ];
+    const NAME: &'static str = "PositionNormalTangent3d";
+    const RATE: VertexInputRate = VertexInputRate::Vertex;
+}
+
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
+#[repr(C)]
+pub struct PositionNormal3dUV {
     pub position: Position3d,
     pub normal: Normal3d,
     pub uv: UV,
 }
 
-unsafe impl Zeroable for Position3dNormal3dUV {}
-unsafe impl Pod for Position3dNormal3dUV {}
+unsafe impl Zeroable for PositionNormal3dUV {}
+unsafe impl Pod for PositionNormal3dUV {}
 
-impl FromBytes for Position3dNormal3dUV {
+impl FromBytes for PositionNormal3dUV {
     fn from_bytes<E: ByteOrder>(bytes: &[u8]) -> Self {
-        let mut xyzxyzuv = [0.0; 8];
-        E::read_f32_into(bytes, &mut xyzxyzuv);
-        Position3dNormal3dUV {
-            position: Position3d([xyzxyzuv[0], xyzxyzuv[1], xyzxyzuv[2]]),
-            normal: Normal3d([xyzxyzuv[3], xyzxyzuv[4], xyzxyzuv[5]]),
-            uv: UV([xyzxyzuv[6], xyzxyzuv[7]]),
+        let mut array = [0.0; 8];
+        E::read_f32_into(bytes, &mut array);
+
+        let [x, y, z, ..] = array;
+        let position = Position3d([x, y, z]);
+
+        let [_, _, _, x, y, z, ..] = array;
+        let normal = Normal3d([x, y, z]);
+
+        let [_, _, _, _, _, _, u, v] = array;
+        let uv = UV([u, v]);
+
+        PositionNormal3dUV {
+            position,
+            normal,
+            uv,
         }
     }
 }
 
-impl VertexType for Position3dNormal3dUV {
+impl VertexType for PositionNormal3dUV {
     const LOCATIONS: &'static [VertexLocation] = &[
         VertexLocation {
             format: Format::RGB32Sfloat,
@@ -348,39 +458,110 @@ impl VertexType for Position3dNormal3dUV {
                 + size_of::<Normal3d>() as u32,
         },
     ];
+    const NAME: &'static str = "PositionNormal3dUV";
     const RATE: VertexInputRate = VertexInputRate::Vertex;
 }
 
 #[derive(Clone, Copy, Debug)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
 #[repr(C)]
-pub struct Position3dNormal3dColor {
+pub struct PositionNormalTangent3dUV {
+    pub position: Position3d,
+    pub normal: Normal3d,
+    pub tangent: Tangent3d,
+    pub uv: UV,
+}
+
+unsafe impl Zeroable for PositionNormalTangent3dUV {}
+unsafe impl Pod for PositionNormalTangent3dUV {}
+
+impl FromBytes for PositionNormalTangent3dUV {
+    fn from_bytes<E: ByteOrder>(bytes: &[u8]) -> Self {
+        let mut array = [0.0; 12];
+        E::read_f32_into(bytes, &mut array);
+
+        let [x, y, z, ..] = array;
+        let position = Position3d([x, y, z]);
+
+        let [_, _, _, x, y, z, ..] = array;
+        let normal = Normal3d([x, y, z]);
+
+        let [_, _, _, _, _, _, x, y, z, w, ..] = array;
+        let tangent = Tangent3d([x, y, z, w]);
+
+        let [_, _, _, _, _, _, _, _, _, _, u, v] = array;
+        let uv = UV([u, v]);
+
+        PositionNormalTangent3dUV {
+            position,
+            normal,
+            tangent,
+            uv,
+        }
+    }
+}
+
+impl VertexType for PositionNormalTangent3dUV {
+    const LOCATIONS: &'static [VertexLocation] = &[
+        VertexLocation {
+            format: Format::RGB32Sfloat,
+            offset: 0,
+        },
+        VertexLocation {
+            format: Format::RGB32Sfloat,
+            offset: size_of::<Position3d>() as u32,
+        },
+        VertexLocation {
+            format: Format::RGBA32Sfloat,
+            offset: size_of::<Position3d>() as u32
+                + size_of::<Normal3d>() as u32,
+        },
+        VertexLocation {
+            format: Format::RG32Sfloat,
+            offset: size_of::<Position3d>() as u32
+                + size_of::<Normal3d>() as u32
+                + size_of::<Tangent3d>() as u32,
+        },
+    ];
+    const NAME: &'static str = "PositionNormalTangent3dUV";
+    const RATE: VertexInputRate = VertexInputRate::Vertex;
+}
+
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
+#[repr(C)]
+pub struct PositionNormal3dColor {
     pub position: Position3d,
     pub normal: Normal3d,
     pub color: Color,
 }
 
-unsafe impl Zeroable for Position3dNormal3dColor {}
-unsafe impl Pod for Position3dNormal3dColor {}
+unsafe impl Zeroable for PositionNormal3dColor {}
+unsafe impl Pod for PositionNormal3dColor {}
 
-impl FromBytes for Position3dNormal3dColor {
+impl FromBytes for PositionNormal3dColor {
     fn from_bytes<E: ByteOrder>(bytes: &[u8]) -> Self {
-        let mut xyzxyzrgba = [0.0; 10];
-        E::read_f32_into(bytes, &mut xyzxyzrgba);
-        Position3dNormal3dColor {
-            position: Position3d([xyzxyzrgba[0], xyzxyzrgba[1], xyzxyzrgba[2]]),
-            normal: Normal3d([xyzxyzrgba[3], xyzxyzrgba[4], xyzxyzrgba[5]]),
-            color: Color([
-                xyzxyzrgba[6],
-                xyzxyzrgba[7],
-                xyzxyzrgba[8],
-                xyzxyzrgba[9],
-            ]),
+        let mut array = [0.0; 10];
+        E::read_f32_into(bytes, &mut array);
+
+        let [x, y, z, ..] = array;
+        let position = Position3d([x, y, z]);
+
+        let [_, _, _, x, y, z, ..] = array;
+        let normal = Normal3d([x, y, z]);
+
+        let [_, _, _, _, _, _, r, g, b, a] = array;
+        let color = Color([r, g, b, a]);
+
+        PositionNormal3dColor {
+            position,
+            normal,
+            color,
         }
     }
 }
 
-impl VertexType for Position3dNormal3dColor {
+impl VertexType for PositionNormal3dColor {
     const LOCATIONS: &'static [VertexLocation] = &[
         VertexLocation {
             format: Format::RGB32Sfloat,
@@ -396,6 +577,7 @@ impl VertexType for Position3dNormal3dColor {
                 + size_of::<Normal3d>() as u32,
         },
     ];
+    const NAME: &'static str = "PositionNormal3dColor";
     const RATE: VertexInputRate = VertexInputRate::Vertex;
 }
 
@@ -440,6 +622,7 @@ impl VertexType for Transformation3d {
             offset: size_of::<[[f32; 4]; 3]>() as u32,
         },
     ];
+    const NAME: &'static str = "Transformation3d";
     const RATE: VertexInputRate = VertexInputRate::Instance;
 }
 
@@ -492,9 +675,9 @@ mod gm {
         }
     }
 
-    impl From<Vertex> for Position3dNormal3d {
+    impl From<Vertex> for PositionNormal3d {
         fn from(v: Vertex) -> Self {
-            Position3dNormal3d {
+            PositionNormal3d {
                 position: v.into(),
                 normal: v.into(),
             }
