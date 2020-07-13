@@ -269,6 +269,13 @@ impl Size {
 }
 
 impl ChunkedAllocator {
+    pub fn can_allocate(&self, size: u64, align: u64) -> bool {
+        match align_up(align, size) {
+            Some(size) => size < self.device_alloc_treshold,
+            None => false,
+        }
+    }
+
     fn mappable_memory(&self) -> bool {
         self.flags
             .contains(vk1_0::MemoryPropertyFlags::HOST_VISIBLE)
@@ -492,6 +499,11 @@ impl ChunkedAllocator {
         align: u64,
     ) -> Option<ChunkedMemoryBlock> {
         let aligned_size = align_up(align, size)?;
+        debug_assert!(aligned_size < self.device_alloc_treshold,
+            "Requested size with alignment {} is larger than treshold size {}. This allocation must be handled by DedicatedAllocator",
+            aligned_size,
+            self.device_alloc_treshold);
+
         let size_entry = self
             .sizes
             .entry(aligned_size)

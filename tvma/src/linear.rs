@@ -90,6 +90,10 @@ impl LinearAllocator {
         }
     }
 
+    pub fn can_allocate(&self, size: u64, align: u64) -> bool {
+        size <= self.chunk_size / 2
+    }
+
     fn mappable_memory(&self) -> bool {
         self.flags
             .contains(vk1_0::MemoryPropertyFlags::HOST_VISIBLE)
@@ -103,7 +107,10 @@ impl LinearAllocator {
         align: u64,
     ) -> Option<LinearMemoryBlock> {
         tracing::trace!("allocating");
-        debug_assert!(size < self.chunk_size);
+        debug_assert!(size < self.chunk_size / 2,
+            "Requested size {} is larger than half chunk size {}. This allocation must be handled by DedicatedAllocator",
+            size,
+            self.chunk_size);
 
         for (index, chunk) in self.chunks.iter_mut().enumerate() {
             if let Some((memory, offset, ptr)) =

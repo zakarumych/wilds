@@ -220,17 +220,40 @@ impl Allocator {
                 &self.heaps[self.type_to_pool[memory_type as usize] as usize];
             if pool.can_allocate(size) {
                 let result = match strategy {
-                    Strategy::Dedicated => self.dedicated[memory_type as usize]
+                    Strategy::Linear => {
+                        let mut allocator =
+                            self.linear[memory_type as usize].lock();
+
+                        if allocator.can_allocate(size, align) {
+                            allocator
+                                .alloc(device, size, align)
+                                .map(BlockFlavor::Linear)
+                        } else {
+                            drop(allocator);
+                            self.dedicated[memory_type as usize]
+                                .alloc(device, size)
+                                .map(BlockFlavor::Dedicated)
+                        }
+                    }
+                    Strategy::Chunked => {
+                        let mut allocator =
+                            self.chunked[memory_type as usize].lock();
+
+                        if allocator.can_allocate(size, align) {
+                            allocator
+                                .alloc(device, size, align)
+                                .map(BlockFlavor::Chunked)
+                        } else {
+                            drop(allocator);
+                            self.dedicated[memory_type as usize]
+                                .alloc(device, size)
+                                .map(BlockFlavor::Dedicated)
+                        }
+                    }
+
+                    _ => self.dedicated[memory_type as usize]
                         .alloc(device, size)
                         .map(BlockFlavor::Dedicated),
-                    Strategy::Linear => self.linear[memory_type as usize]
-                        .lock()
-                        .alloc(device, size, align)
-                        .map(BlockFlavor::Linear),
-                    Strategy::Chunked => self.chunked[memory_type as usize]
-                        .lock()
-                        .alloc(device, size, align)
-                        .map(BlockFlavor::Chunked),
                 };
                 match result {
                     Some(block) => {

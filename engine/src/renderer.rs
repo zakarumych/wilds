@@ -1,7 +1,8 @@
+mod material;
 mod mesh;
 mod vertex;
 
-pub use self::{mesh::*, vertex::*};
+pub use self::{material::*, mesh::*, vertex::*};
 
 use {
     crate::{camera::Camera, clocks::ClockIndex, light::DirectionalLight},
@@ -31,7 +32,9 @@ pub enum Error {
 }
 
 pub struct Renderable {
-    index: u16,
+    mesh_index: u32,
+    albedo_index: u32,
+    normal_index: u32,
 }
 
 pub struct Renderer {
@@ -44,7 +47,7 @@ pub struct Renderer {
     prepass_pipeline: RayTracingPipeline,
 
     tlas: AccelerationStructure,
-    instances: Vec<AccelerationStructureInstance>,
+    acc_instances: Vec<AccelerationStructureInstance>,
     tlas_scratch: Buffer,
 
     buffer: Buffer,
@@ -53,11 +56,16 @@ pub struct Renderer {
 
     blue_noise_buffer_64x64x64: Buffer,
 
-    meshes: HashMap<Mesh, u16>,
+    meshes: HashMap<Mesh, u32>,
     blases: Vec<(Mesh, AccelerationStructure)>,
-    scene_instances: Vec<SceneInstance>,
+    instances: Vec<ShaderInstance>,
+    albedo: HashMap<Texture, u32>,
+    albedo_set: BitSet,
+    normals: HashMap<Texture, u32>,
+    normals_set: BitSet,
 
-    normals: (Image, ImageView),
+    output_albedo: (Image, ImageView),
+    output_normals: (Image, ImageView),
     frame: u32,
 }
 
@@ -151,7 +159,7 @@ impl Renderer {
                 bindings: vec![
                     // TLAS.
                     DescriptorSetLayoutBinding {
-                        binding: TLAS_BINDING,
+                        binding: Bindings::Tlas as _,
                         ty: DescriptorType::AccelerationStructure,
                         count: 1,
                         stages: ShaderStageFlags::RAYGEN
@@ -160,8 +168,17 @@ impl Renderer {
                     },
                     // Globals
                     DescriptorSetLayoutBinding {
-                        binding: GLOBAL_BINDING,
+                        binding: Bindings::Globals as _,
                         ty: DescriptorType::UniformBuffer,
+                        count: 1,
+                        stages: ShaderStageFlags::RAYGEN
+                            | ShaderStageFlags::CLOSEST_HIT,
+                        flags: DescriptorBindingFlags::empty(),
+                    },
+                    // Blue noise
+                    DescriptorSetLayoutBinding {
+                        binding: Bindings::BlueNoise as _,
+                        ty: DescriptorType::StorageBuffer,
                         count: 1,
                         stages: ShaderStageFlags::RAYGEN
                             | ShaderStageFlags::CLOSEST_HIT,
@@ -169,16 +186,15 @@ impl Renderer {
                     },
                     // Scene
                     DescriptorSetLayoutBinding {
-                        binding: SCENE_BINDING,
+                        binding: Bindings::Instances as _,
                         ty: DescriptorType::StorageBuffer,
                         count: 1,
-                        stages: ShaderStageFlags::RAYGEN
-                            | ShaderStageFlags::CLOSEST_HIT,
+                        stages: ShaderStageFlags::CLOSEST_HIT,
                         flags: DescriptorBindingFlags::PARTIALLY_BOUND,
                     },
                     // Vertex input.
                     DescriptorSetLayoutBinding {
-                        binding: VERTICES_BINDING,
+                        binding: Bindings::Vertices as _,
                         ty: DescriptorType::StorageBuffer,
                         count: MAX_INSTANCE_COUNT.into(),
                         stages: ShaderStageFlags::CLOSEST_HIT,
@@ -186,16 +202,39 @@ impl Renderer {
                     },
                     // Indices
                     DescriptorSetLayoutBinding {
-                        binding: INDICES_BINDING,
+                        binding: Bindings::Indices as _,
                         ty: DescriptorType::StorageBuffer,
                         count: MAX_INSTANCE_COUNT.into(),
                         stages: ShaderStageFlags::CLOSEST_HIT,
                         flags: DescriptorBindingFlags::PARTIALLY_BOUND | DescriptorBindingFlags::UPDATE_UNUSED_WHILE_PENDING,
                     },
-                    // G-Buffer
-                    // Normal
+                    // Textures
                     DescriptorSetLayoutBinding {
-                        binding: NORMALS_BINDING,
+                        binding: Bindings::MaterialsAlbedo as _,
+                        ty: DescriptorType::CombinedImageSampler,
+                        count: MAX_INSTANCE_COUNT.into(),
+                        stages: ShaderStageFlags::CLOSEST_HIT,
+                        flags: DescriptorBindingFlags::PARTIALLY_BOUND | DescriptorBindingFlags::UPDATE_UNUSED_WHILE_PENDING,
+                    },
+                    DescriptorSetLayoutBinding {
+                        binding: Bindings::MaterialsNormals as _,
+                        ty: DescriptorType::CombinedImageSampler,
+                        count: MAX_INSTANCE_COUNT.into(),
+                        stages: ShaderStageFlags::CLOSEST_HIT,
+                        flags: DescriptorBindingFlags::PARTIALLY_BOUND | DescriptorBindingFlags::UPDATE_UNUSED_WHILE_PENDING,
+                    },
+                    // G-Buffer
+                    // Albedo
+                    DescriptorSetLayoutBinding {
+                        binding: Bindings::OutputAlbedo as _,
+                        ty: DescriptorType::StorageImage,
+                        count: 1,
+                        stages: ShaderStageFlags::RAYGEN,
+                        flags: DescriptorBindingFlags::empty(),
+                    },
+                    // Albedo
+                    DescriptorSetLayoutBinding {
+                        binding: Bindings::OutputMaterialsNormals as _,
                         ty: DescriptorType::StorageImage,
                         count: 1,
                         stages: ShaderStageFlags::RAYGEN,
@@ -267,7 +306,7 @@ impl Renderer {
                 &prepass_pipeline,
                 ShaderBindingTableInfo {
                     raygen: Some(0),
-                    miss: &[1],
+                    miss: &[1, 2],
                     hit: &[3],
                     callable: &[],
                 },
@@ -315,6 +354,20 @@ impl Renderer {
         };
 
         // Image matching surface extent.
+        let albedo_image = device.create_image(ImageInfo {
+            extent: surface_extent.into(),
+            format: Format::RGBA32Sfloat,
+            levels: 1,
+            layers: 1,
+            samples: Samples::Samples1,
+            usage: ImageUsage::STORAGE | ImageUsage::TRANSFER_SRC,
+            memory: MemoryUsageFlags::empty(),
+        })?;
+
+        // View for whole image
+        let albedo_view = device
+            .create_image_view(ImageViewInfo::new(albedo_image.clone()))?;
+
         let normals_image = device.create_image(ImageInfo {
             extent: surface_extent.into(),
             format: Format::RGBA32Sfloat,
@@ -322,16 +375,14 @@ impl Renderer {
             layers: 1,
             samples: Samples::Samples1,
             usage: ImageUsage::STORAGE | ImageUsage::TRANSFER_SRC,
+            memory: MemoryUsageFlags::empty(),
         })?;
 
         // View for whole image
-        let normals_view = device.create_image_view(ImageViewInfo {
-            image: normals_image.clone(),
-            view_kind: ImageViewKind::D2,
-            subresource: ImageSubresourceRange::whole(normals_image.info()),
-        })?;
+        let normals_view = device
+            .create_image_view(ImageViewInfo::new(normals_image.clone()))?;
 
-        tracing::trace!("Normals image created");
+        tracing::trace!("MaterialsNormals image created");
 
         let set0 = device.create_descriptor_set(DescriptorSetInfo {
             layout: dset_layout.clone(),
@@ -343,11 +394,14 @@ impl Renderer {
 
         tracing::trace!("Descriptor sets created");
 
+        let blue_noise_buffer_64x64x64 = load_blue_noise_64x64x64(&device)?;
+        tracing::trace!("Blue noise loaded");
+
         device.update_descriptor_sets(
             &[
                 WriteDescriptorSet {
                     set: &set0,
-                    binding: TLAS_BINDING,
+                    binding: Bindings::Tlas as _,
                     element: 0,
                     descriptors: Descriptors::AccelerationStructure(
                         std::slice::from_ref(&tlas),
@@ -355,7 +409,7 @@ impl Renderer {
                 },
                 WriteDescriptorSet {
                     set: &set1,
-                    binding: TLAS_BINDING,
+                    binding: Bindings::Tlas as _,
                     element: 0,
                     descriptors: Descriptors::AccelerationStructure(
                         std::slice::from_ref(&tlas),
@@ -363,7 +417,7 @@ impl Renderer {
                 },
                 WriteDescriptorSet {
                     set: &set0,
-                    binding: GLOBAL_BINDING,
+                    binding: Bindings::Globals as _,
                     element: 0,
                     descriptors: Descriptors::UniformBuffer(&[(
                         buffer.clone(),
@@ -373,7 +427,7 @@ impl Renderer {
                 },
                 WriteDescriptorSet {
                     set: &set1,
-                    binding: GLOBAL_BINDING,
+                    binding: Bindings::Globals as _,
                     element: 0,
                     descriptors: Descriptors::UniformBuffer(&[(
                         buffer.clone(),
@@ -383,27 +437,65 @@ impl Renderer {
                 },
                 WriteDescriptorSet {
                     set: &set0,
-                    binding: SCENE_BINDING,
+                    binding: Bindings::BlueNoise as _,
                     element: 0,
                     descriptors: Descriptors::StorageBuffer(&[(
-                        buffer.clone(),
-                        scene_instances_offset(0),
-                        scene_instances_size(),
+                        blue_noise_buffer_64x64x64.clone(),
+                        0,
+                        BLUE_NOISE_SIZE,
                     )]),
                 },
                 WriteDescriptorSet {
                     set: &set1,
-                    binding: SCENE_BINDING,
+                    binding: Bindings::BlueNoise as _,
                     element: 0,
                     descriptors: Descriptors::StorageBuffer(&[(
-                        buffer.clone(),
-                        scene_instances_offset(1),
-                        scene_instances_size(),
+                        blue_noise_buffer_64x64x64.clone(),
+                        0,
+                        BLUE_NOISE_SIZE,
                     )]),
                 },
                 WriteDescriptorSet {
                     set: &set0,
-                    binding: NORMALS_BINDING,
+                    binding: Bindings::Instances as _,
+                    element: 0,
+                    descriptors: Descriptors::StorageBuffer(&[(
+                        buffer.clone(),
+                        instances_offset(0),
+                        instances_size(),
+                    )]),
+                },
+                WriteDescriptorSet {
+                    set: &set1,
+                    binding: Bindings::Instances as _,
+                    element: 0,
+                    descriptors: Descriptors::StorageBuffer(&[(
+                        buffer.clone(),
+                        instances_offset(1),
+                        instances_size(),
+                    )]),
+                },
+                WriteDescriptorSet {
+                    set: &set0,
+                    binding: Bindings::OutputAlbedo as _,
+                    element: 0,
+                    descriptors: Descriptors::StorageImage(&[(
+                        albedo_view.clone(),
+                        Layout::General,
+                    )]),
+                },
+                WriteDescriptorSet {
+                    set: &set1,
+                    binding: Bindings::OutputAlbedo as _,
+                    element: 0,
+                    descriptors: Descriptors::StorageImage(&[(
+                        albedo_view.clone(),
+                        Layout::General,
+                    )]),
+                },
+                WriteDescriptorSet {
+                    set: &set0,
+                    binding: Bindings::OutputMaterialsNormals as _,
                     element: 0,
                     descriptors: Descriptors::StorageImage(&[(
                         normals_view.clone(),
@@ -412,7 +504,7 @@ impl Renderer {
                 },
                 WriteDescriptorSet {
                     set: &set1,
-                    binding: NORMALS_BINDING,
+                    binding: Bindings::OutputMaterialsNormals as _,
                     element: 0,
                     descriptors: Descriptors::StorageImage(&[(
                         normals_view.clone(),
@@ -425,18 +517,20 @@ impl Renderer {
 
         tracing::trace!("Descriptor sets written");
 
-        let blue_noise_buffer_64x64x64 = load_blue_noise_64x64x64(&device)?;
-
         Ok(Renderer {
             rt_pipeline_layout,
             prepass_pipeline,
 
             meshes: HashMap::new(),
             blases: Vec::new(),
-            scene_instances: Vec::new(),
+            instances: Vec::new(),
+            albedo: HashMap::new(),
+            albedo_set: BitSet::new(),
+            normals: HashMap::new(),
+            normals_set: BitSet::new(),
 
             tlas,
-            instances: Vec::new(),
+            acc_instances: Vec::new(),
             tlas_scratch,
 
             buffer,
@@ -453,7 +547,8 @@ impl Renderer {
             shader_binding_table,
             blue_noise_buffer_64x64x64,
 
-            normals: (normals_image, normals_view),
+            output_albedo: (albedo_image, albedo_view),
+            output_normals: (normals_image, normals_view),
             frame: 0,
 
             device,
@@ -507,15 +602,15 @@ impl Renderer {
 
         // Create BLASes for new meshes.
         let mut new_entities = BVec::with_capacity_in(32, bump);
-        for (entity, mesh) in world
-            .query::<&Mesh>()
+        for (entity, (mesh, material)) in world
+            .query::<(&Mesh, &Material)>()
             .with::<Mat4>()
             .without::<Renderable>()
             .iter()
         {
-            let index = match self.meshes.entry(mesh.clone()) {
+            let mesh_index = match self.meshes.entry(mesh.clone()) {
                 Entry::Vacant(entry) => {
-                    let index = u16::try_from(self.blases.len())
+                    let index = u32::try_from(self.blases.len())
                         .wrap_err("Too many meshes")?;
                     self.blases.push((
                         mesh.clone(),
@@ -527,11 +622,18 @@ impl Renderer {
                     ));
 
                     let binding = &mesh.bindings()[0];
+
+                    assert_eq!(
+                        binding.layout,
+                        PositionNormalTangent3dUV::layout()
+                    );
+
                     let buffer = binding.buffer.clone();
-                    let offset = binding.offset
-                        + binding.layout.locations.as_ref()[0].offset as u64;
+                    let offset = binding.offset;
                     let size: u64 = binding.layout.stride as u64
                         * mesh.vertex_count() as u64;
+
+                    assert_eq!(offset & 15, 0);
 
                     let descriptors = Descriptors::StorageBuffer(
                         bump.alloc([(buffer, offset, size)]),
@@ -539,13 +641,13 @@ impl Renderer {
 
                     writes.push(WriteDescriptorSet {
                         set: &self.per_frame[0].set,
-                        binding: VERTICES_BINDING,
+                        binding: Bindings::Vertices as _,
                         element: index.into(),
                         descriptors,
                     });
                     writes.push(WriteDescriptorSet {
                         set: &self.per_frame[1].set,
-                        binding: VERTICES_BINDING,
+                        binding: Bindings::Vertices as _,
                         element: index.into(),
                         descriptors,
                     });
@@ -556,19 +658,21 @@ impl Renderer {
                     let size: u64 =
                         indices.index_type.size() as u64 * mesh.count() as u64;
 
+                    assert_eq!(offset & 15, 0);
+
                     let descriptors = Descriptors::StorageBuffer(
                         bump.alloc([(buffer, offset, size)]),
                     );
 
                     writes.push(WriteDescriptorSet {
                         set: &self.per_frame[0].set,
-                        binding: INDICES_BINDING,
+                        binding: Bindings::Indices as _,
                         element: index.into(),
                         descriptors,
                     });
                     writes.push(WriteDescriptorSet {
                         set: &self.per_frame[1].set,
-                        binding: INDICES_BINDING,
+                        binding: Bindings::Indices as _,
                         element: index.into(),
                         descriptors,
                     });
@@ -578,7 +682,78 @@ impl Renderer {
                 Entry::Occupied(entry) => *entry.get(),
             };
 
-            new_entities.push((entity, index));
+            let albedo_index = if let Some(albedo) = &material.albedo {
+                1 + match self.albedo.entry(albedo.clone()) {
+                    Entry::Vacant(entry) => {
+                        let index = self.albedo_set.add().unwrap();
+
+                        let descriptors =
+                            Descriptors::CombinedImageSampler(bump.alloc([(
+                                albedo.image.clone(),
+                                Layout::General,
+                                albedo.sampler.clone(),
+                            )]));
+                        writes.push(WriteDescriptorSet {
+                            set: &self.per_frame[0].set,
+                            binding: Bindings::MaterialsAlbedo as _,
+                            element: index.into(),
+                            descriptors,
+                        });
+                        writes.push(WriteDescriptorSet {
+                            set: &self.per_frame[1].set,
+                            binding: Bindings::MaterialsAlbedo as _,
+                            element: index.into(),
+                            descriptors,
+                        });
+
+                        *entry.insert(index)
+                    }
+                    Entry::Occupied(entry) => *entry.get(),
+                }
+            } else {
+                0
+            };
+
+            let normal_index = if let Some(normal) = &material.normal {
+                1 + match self.normals.entry(normal.clone()) {
+                    Entry::Vacant(entry) => {
+                        let index = self.normals_set.add().unwrap();
+
+                        let descriptors =
+                            Descriptors::CombinedImageSampler(bump.alloc([(
+                                normal.image.clone(),
+                                Layout::General,
+                                normal.sampler.clone(),
+                            )]));
+                        writes.push(WriteDescriptorSet {
+                            set: &self.per_frame[0].set,
+                            binding: Bindings::MaterialsNormals as _,
+                            element: index.into(),
+                            descriptors,
+                        });
+                        writes.push(WriteDescriptorSet {
+                            set: &self.per_frame[1].set,
+                            binding: Bindings::MaterialsNormals as _,
+                            element: index.into(),
+                            descriptors,
+                        });
+
+                        *entry.insert(index)
+                    }
+                    Entry::Occupied(entry) => *entry.get(),
+                }
+            } else {
+                0
+            };
+
+            new_entities.push((
+                entity,
+                Renderable {
+                    mesh_index,
+                    albedo_index,
+                    normal_index,
+                },
+            ));
         }
 
         self.device.update_descriptor_sets(&writes, &[]);
@@ -591,8 +766,8 @@ impl Renderer {
         );
 
         // Insert them to the entities.
-        for (entity, index) in new_entities {
-            world.insert_one(entity, Renderable { index }).unwrap();
+        for (entity, renderable) in new_entities {
+            world.insert_one(entity, renderable).unwrap();
         }
 
         // https://microsoft.github.io/DirectX-Specs/d3d/Raytracing.html#general-tips-for-building-acceleration-structures
@@ -603,22 +778,34 @@ impl Renderer {
         //   and having a good quality top-level acceleration structure can have
         // a significant payoff   (bad quality has a higher cost further
         // up in the tree).
+        self.acc_instances.clear();
         self.instances.clear();
-        self.scene_instances.clear();
-        for (_, (renderable, &transform)) in
-            world.query::<(&Renderable, &Mat4)>().iter()
+        for (_, (renderable, material, &transform)) in
+            world.query::<(&Renderable, &Material, &Mat4)>().iter()
         {
-            let blas = &self.blases[usize::from(renderable.index)].1;
+            let blas = &self.blases[renderable.mesh_index as usize].1;
             let blas_address =
                 self.device.get_acceleration_structure_device_address(blas);
 
-            self.instances.push(
+            self.acc_instances.push(
                 AccelerationStructureInstance::new(blas_address)
                     .with_transform(transform.into()),
             );
-            self.scene_instances.push(SceneInstance {
+            self.instances.push(ShaderInstance {
                 transform,
-                mesh: renderable.index.into(),
+                mesh: renderable.mesh_index,
+                albedo_sampler: renderable.albedo_index,
+                normal_sampler: renderable.normal_index,
+                albedo_factor: {
+                    let [r, g, b, a] = material.albedo_factor;
+                    [
+                        r.into_inner(),
+                        g.into_inner(),
+                        b.into_inner(),
+                        a.into_inner(),
+                    ]
+                },
+                normal_factor: material.normal_factor.into_inner(),
             });
         }
 
@@ -644,16 +831,15 @@ impl Renderer {
 
         self.device.write_memory(
             &self.buffer,
-            scene_instances_offset(fid),
-            &self.scene_instances,
+            acc_instances_offset(fid),
+            &self.acc_instances,
         );
 
         self.device.write_memory(
             &self.buffer,
-            acc_instances_offset(fid),
+            instances_offset(fid),
             &self.instances,
         );
-
         let infos = bump.alloc([AccelerationStructureBuildGeometryInfo {
             src: None,
             dst: self.tlas.clone(),
@@ -711,11 +897,18 @@ impl Renderer {
 
         // Sync storage image access from last frame blit operation to this
         // frame writes in raygen shaders.
-        let images = [ImageLayoutTransition::initialize_whole(
-            &self.normals.0,
-            Layout::General,
-        )
-        .into()];
+        let images = [
+            ImageLayoutTransition::initialize_whole(
+                &self.output_albedo.0,
+                Layout::General,
+            )
+            .into(),
+            ImageLayoutTransition::initialize_whole(
+                &self.output_normals.0,
+                Layout::General,
+            )
+            .into(),
+        ];
 
         encoder.image_barriers(
             PipelineStageFlags::TRANSFER,
@@ -732,7 +925,12 @@ impl Renderer {
         // operation. And swapchain image from presentation to transfer
         let images = [
             ImageLayoutTransition::transition_whole(
-                &self.normals.0,
+                &self.output_albedo.0,
+                Layout::General..Layout::TransferSrcOptimal,
+            )
+            .into(),
+            ImageLayoutTransition::transition_whole(
+                &self.output_normals.0,
                 Layout::General..Layout::TransferSrcOptimal,
             )
             .into(),
@@ -753,7 +951,7 @@ impl Renderer {
         // Blit ray-tracing result image to the frame.
         let blit = [ImageBlit {
             src_subresource: ImageSubresourceLayers::all_layers(
-                self.normals.0.info(),
+                self.output_albedo.0.info(),
                 0,
             ),
             src_offsets: [
@@ -771,7 +969,7 @@ impl Renderer {
         }];
 
         encoder.blit_image(
-            &self.normals.0,
+            &self.output_albedo.0,
             Layout::TransferSrcOptimal,
             &frame_image,
             Layout::TransferDstOptimal,
@@ -849,13 +1047,17 @@ unsafe impl Pod for Globals {}
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
-struct SceneInstance {
+struct ShaderInstance {
     transform: Mat4,
     mesh: u32,
+    albedo_sampler: u32,
+    albedo_factor: [f32; 4],
+    normal_sampler: u32,
+    normal_factor: f32,
 }
 
-unsafe impl Zeroable for SceneInstance {}
-unsafe impl Pod for SceneInstance {}
+unsafe impl Zeroable for ShaderInstance {}
+unsafe impl Pod for ShaderInstance {}
 
 const fn globals_size() -> u64 {
     size_of::<Globals>() as u64
@@ -869,17 +1071,17 @@ fn globals_end(frame: u32) -> u64 {
     globals_offset(frame) + globals_size()
 }
 
-const fn scene_instances_size() -> u64 {
-    size_of::<[SceneInstance; 1024]>() as u64
+const fn instances_size() -> u64 {
+    size_of::<[ShaderInstance; 1024]>() as u64
 }
 
-fn scene_instances_offset(frame: u32) -> u64 {
+fn instances_offset(frame: u32) -> u64 {
     align_up(255, globals_end(1)).unwrap()
-        + u64::from(frame) * align_up(255, scene_instances_size()).unwrap()
+        + u64::from(frame) * align_up(255, instances_size()).unwrap()
 }
 
-fn scene_instances_end(frame: u32) -> u64 {
-    scene_instances_offset(frame) + scene_instances_size()
+fn instances_end(frame: u32) -> u64 {
+    instances_offset(frame) + instances_size()
 }
 
 const fn acc_instances_size() -> u64 {
@@ -887,7 +1089,7 @@ const fn acc_instances_size() -> u64 {
 }
 
 fn acc_instances_offset(frame: u32) -> u64 {
-    align_up(255, scene_instances_end(1)).unwrap()
+    align_up(255, instances_end(1)).unwrap()
         + u64::from(frame) * align_up(255, acc_instances_size()).unwrap()
 }
 
@@ -903,12 +1105,21 @@ fn buffer_size() -> u64 {
     acc_instances_end(1)
 }
 
-const TLAS_BINDING: u32 = 0;
-const GLOBAL_BINDING: u32 = 1;
-const SCENE_BINDING: u32 = 2;
-const VERTICES_BINDING: u32 = 3;
-const INDICES_BINDING: u32 = 4;
-const NORMALS_BINDING: u32 = 5;
+enum Bindings {
+    Tlas = 0,
+    Globals = 1,
+    BlueNoise = 2,
+    Instances = 3,
+    Vertices = 4,
+    Indices = 5,
+    MaterialsAlbedo = 6,
+    MaterialsNormals = 7,
+    OutputAlbedo = 8,
+    OutputMaterialsNormals = 9,
+}
+
+const BLUE_NOISE_PIXEL_COUNT: usize = 64 * 64 * 64 * 4;
+const BLUE_NOISE_SIZE: u64 = 64 * 64 * 64 * 16;
 
 fn load_blue_noise_64x64x64(device: &Device) -> Result<Buffer, OutOfMemory> {
     use image::{load_from_memory_with_format, ImageFormat};
@@ -980,23 +1191,38 @@ fn load_blue_noise_64x64x64(device: &Device) -> Result<Buffer, OutOfMemory> {
         &include_bytes!("../blue_noise/HDR_RGBA_63.png")[..],
     ];
 
-    let mut bytes = Vec::new();
+    let mut pixels = Vec::new();
 
     for &image in &images[..] {
         let image = load_from_memory_with_format(image, ImageFormat::Png)
             .unwrap()
             .to_rgba();
-        bytes.append(&mut image.into_raw());
+
+        for p in image.pixels() {
+            let r = p[0] as f32 / 255.0;
+            let g = p[1] as f32 / 255.0;
+            let b = p[2] as f32 / 255.0;
+            let a = p[3] as f32 / 255.0;
+
+            pixels.push(r);
+            pixels.push(g);
+            pixels.push(b);
+            pixels.push(a);
+        }
+
+        // bytes.append(&mut image.into_raw());
     }
+
+    assert_eq!(pixels.len(), BLUE_NOISE_PIXEL_COUNT);
 
     device.create_buffer_static(
         BufferInfo {
             align: 255,
-            size: bytes.len() as _,
+            size: BLUE_NOISE_SIZE,
             usage: BufferUsage::STORAGE,
             memory: MemoryUsageFlags::UPLOAD,
         },
-        &bytes,
+        &pixels,
     )
 }
 
@@ -1021,4 +1247,28 @@ pub fn enumerate_graphis() -> impl Iterator<Item = Graphics> {
 
     fns.into_iter()
         .filter_map(|try_init: fn() -> Option<Graphics>| try_init())
+}
+
+// Naive small bit set.
+#[derive(Clone, Debug, Default)]
+struct BitSet {
+    bits: u128,
+}
+
+impl BitSet {
+    fn new() -> Self {
+        BitSet::default()
+    }
+
+    fn add(&mut self) -> Option<u32> {
+        let index = self.bits.trailing_zeros().checked_sub(1)?;
+        self.bits |= 1 << index;
+        Some(index)
+    }
+
+    fn unset(&mut self, index: u32) {
+        let bit = 1 << index;
+        debug_assert_ne!(self.bits & bit, 0);
+        self.bits &= !bit;
+    }
 }

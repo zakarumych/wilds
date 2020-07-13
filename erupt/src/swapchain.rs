@@ -13,8 +13,8 @@ use erupt::{
 };
 use illume::{
     out_of_host_memory, DeviceTrait, Extent2d, Format, Image, ImageInfo,
-    ImageUsage, OutOfMemory, PresentMode, Samples, Semaphore, Surface,
-    SurfaceError, SwapchainImage, SwapchainImageInfo, SwapchainTrait,
+    ImageUsage, MemoryUsageFlags, OutOfMemory, PresentMode, Samples, Semaphore,
+    Surface, SurfaceError, SwapchainImage, SwapchainImageInfo, SwapchainTrait,
 };
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
@@ -308,6 +308,7 @@ impl SwapchainTrait for EruptSwapchain {
                             layers: 1,
                             samples: Samples::Samples1,
                             usage,
+                            memory: MemoryUsageFlags::empty(),
                         },
                     ),
                     acquire: a,

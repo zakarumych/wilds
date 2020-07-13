@@ -449,8 +449,8 @@ fn topology_triangles() -> PrimitiveTopology {
 mod gm {
     use super::*;
     use crate::vertex::{
-        Color, Normal3d, Position3d, Position3dNormal3d,
-        Position3dNormal3dColor, VertexType,
+        Color, Normal3d, Position3d, PositionNormal3d, PositionNormal3dColor,
+        VertexType,
     };
     use genmesh::{
         generators::{IndexedPolygon, SharedVertex},
@@ -491,7 +491,7 @@ mod gm {
                 usage,
                 device,
                 index_type,
-                Position3dNormal3d::from,
+                PositionNormal3d::from,
             )
         }
 
@@ -506,7 +506,7 @@ mod gm {
             G: SharedVertex<Vertex> + IndexedPolygon<Quad<usize>>,
         {
             Self::from_generator(generator, usage, device, index_type, |v| {
-                Position3dNormal3dColor {
+                PositionNormal3dColor {
                     position: v.into(),
                     normal: v.into(),
                     color,

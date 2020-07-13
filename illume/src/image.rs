@@ -1,6 +1,7 @@
 pub use self::Samples::*;
 use crate::{
     format::{AspectFlags, Format},
+    memory::MemoryUsageFlags,
     resource::{Handle, ResourceTrait},
     Extent2d, Extent3d, ImageSize, Offset3d,
 };
@@ -235,6 +236,9 @@ pub struct ImageInfo {
 
     /// Usage types supported by image.
     pub usage: ImageUsage,
+
+    /// Memory usage pattern.
+    pub memory: MemoryUsageFlags,
 }
 
 /// Handle to image view.

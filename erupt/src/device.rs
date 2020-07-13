@@ -80,6 +80,7 @@ pub(super) struct EruptDevice {
     semaphores: Mutex<Slab<vk1_0::Semaphore>>,
     shaders: Mutex<Slab<vk1_0::ShaderModule>>,
     acceleration_strucutres: Mutex<Slab<vkrt::AccelerationStructureKHR>>,
+    samplers: Mutex<Slab<vk1_0::Sampler>>,
     pub(super) swapchains: Mutex<Slab<vksw::SwapchainKHR>>,
 }
 
@@ -124,6 +125,7 @@ impl EruptDevice {
             shaders: Mutex::new(Slab::with_capacity(512)),
             swapchains: Mutex::new(Slab::with_capacity(32)),
             acceleration_strucutres: Mutex::new(Slab::with_capacity(1024)),
+            samplers: Mutex::new(Slab::with_capacity(128)),
         }
     }
 
@@ -771,7 +773,7 @@ impl DeviceTrait for EruptDevice {
                     reqs.size,
                     reqs.alignment - 1,
                     reqs.memory_type_bits,
-                    tvma::UsageFlags::empty(),
+                    memory_usage_to_tvma(info.memory),
                     tvma::Dedicated::Indifferent,
                 )
                 .map_err(|_| {
@@ -817,10 +819,102 @@ impl DeviceTrait for EruptDevice {
 
     fn create_image_static(
         self: Arc<Self>,
-        _info: ImageInfo,
-        _data: &[u8],
+        info: ImageInfo,
+        data: &[u8],
     ) -> Result<Image, CreateImageError> {
-        unimplemented!()
+        assert!(info.memory.contains(MemoryUsageFlags::UPLOAD));
+
+        let image = unsafe {
+            self.logical.create_image(
+                &vk1_0::ImageCreateInfo::default()
+                    .builder()
+                    .image_type(info.extent.to_erupt())
+                    .format(info.format.to_erupt())
+                    .extent(info.extent.into_3d().to_erupt())
+                    .mip_levels(info.levels)
+                    .array_layers(info.layers)
+                    .samples(info.samples.to_erupt())
+                    .tiling(vk1_0::ImageTiling::LINEAR)
+                    .usage(info.usage.to_erupt())
+                    .sharing_mode(vk1_0::SharingMode::EXCLUSIVE)
+                    .initial_layout(vk1_0::ImageLayout::UNDEFINED),
+                None,
+                None,
+            )
+        }
+        .result()
+        .map_err(oom_error_from_erupt)?;
+
+        let reqs =
+            unsafe { self.logical.get_image_memory_requirements(image, None) };
+
+        debug_assert!(arith_eq(reqs.size, data.len()));
+        debug_assert!(reqs.alignment.is_power_of_two());
+
+        let block = unsafe {
+            self.allocator
+                .alloc(
+                    &self.logical,
+                    reqs.size,
+                    reqs.alignment - 1,
+                    reqs.memory_type_bits,
+                    memory_usage_to_tvma(info.memory),
+                    tvma::Dedicated::Indifferent,
+                )
+                .map_err(|_| {
+                    self.logical.destroy_image(image, None);
+
+                    OutOfMemory
+                })
+        }?;
+
+        let result = unsafe {
+            self.logical.bind_image_memory(
+                image,
+                block.memory(),
+                block.offset(),
+            )
+        }
+        .result();
+
+        if let Err(err) = result {
+            unsafe {
+                self.logical.destroy_image(image, None);
+                self.allocator.dealloc(&self.logical, block);
+            }
+            return Err(oom_error_from_erupt(err).into());
+        }
+
+        unsafe {
+            match block.map(&self.logical, 0, data.len()) {
+                Ok(ptr) => {
+                    std::ptr::copy_nonoverlapping(
+                        data.as_ptr(),
+                        ptr.as_ptr(),
+                        data.len(),
+                    );
+
+                    block.unmap(&self.logical);
+                }
+                Err(tvma::MappingError::OutOfMemory { .. }) => {
+                    return Err(OutOfMemory.into());
+                }
+                Err(tvma::MappingError::NonHostVisible)
+                | Err(tvma::MappingError::OutOfBounds) => unreachable!(),
+            }
+        }
+
+        let index = self.images.lock().insert(image);
+
+        Ok(Image::make(
+            EruptImage {
+                handle: image,
+                owner: Arc::downgrade(&self),
+                block: Some(block),
+                index,
+            },
+            info,
+        ))
     }
 
     fn create_image_view(
@@ -2050,9 +2144,48 @@ impl DeviceTrait for EruptDevice {
 
     fn create_sampler(
         self: Arc<Self>,
-        _info: SamplerInfo,
+        info: SamplerInfo,
     ) -> Result<Sampler, OutOfMemory> {
-        todo!()
+        let handle = unsafe {
+            self.logical.create_sampler(
+                &vk1_0::SamplerCreateInfo::default()
+                    .builder()
+                    .mag_filter(info.mag_filter.to_erupt())
+                    .min_filter(info.min_filter.to_erupt())
+                    .mipmap_mode(info.mipmap_mode.to_erupt())
+                    .address_mode_u(info.address_mode_u.to_erupt())
+                    .address_mode_v(info.address_mode_v.to_erupt())
+                    .address_mode_w(info.address_mode_w.to_erupt())
+                    .mip_lod_bias(info.mip_lod_bias.into_inner())
+                    .anisotropy_enable(info.max_anisotropy.is_some())
+                    .max_anisotropy(
+                        info.max_anisotropy.unwrap_or(0.0.into()).into_inner(),
+                    )
+                    .compare_enable(info.compare_op.is_some())
+                    .compare_op(match info.compare_op {
+                        Some(compare_op) => compare_op.to_erupt(),
+                        None => vk1_0::CompareOp::NEVER,
+                    })
+                    .min_lod(info.min_lod.into_inner())
+                    .max_lod(info.max_lod.into_inner())
+                    .border_color(info.border_color.to_erupt())
+                    .unnormalized_coordinates(info.unnormalized_coordinates),
+                None,
+                None,
+            )
+        }
+        .result()
+        .map_err(oom_error_from_erupt)?;
+
+        let index = self.samplers.lock().insert(handle);
+        Ok(Sampler::make(
+            EruptSampler {
+                handle,
+                owner: Arc::downgrade(&self),
+                index,
+            },
+            info,
+        ))
     }
 
     fn map_memory(

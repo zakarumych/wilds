@@ -1,35 +1,39 @@
 use {
     crate::renderer::{
-        Binding, FromBytes as _, Indices, Mesh, MeshBuilder, Normal3d,
-        Position3d, Position3dNormal3d, VertexLayout, VertexLocation,
-        VertexType,
+        Binding, FromBytes as _, Indices, Material, Mesh, MeshBuilder,
+        Normal3d, Position3d, PositionNormalTangent3dUV, Tangent3d, Texture,
+        VertexType, UV,
     },
     byteorder::LittleEndian,
     futures::future::{try_join_all, BoxFuture},
     illume::{
-        Buffer, BufferInfo, BufferUsage, Device, IndexType, MemoryUsageFlags,
-        OutOfMemory, PrimitiveTopology,
+        BorderColor, BufferInfo, BufferUsage, CreateImageError, Device, Filter,
+        Format, ImageExtent, ImageInfo, ImageUsage, ImageViewInfo, IndexType,
+        MaybeSendSyncError, MemoryUsageFlags, MipmapMode, OutOfMemory,
+        PrimitiveTopology, Sampler, SamplerAddressMode, SamplerInfo, Samples1,
     },
     std::{
         collections::HashMap,
         convert::{TryFrom as _, TryInto as _},
-        future::Future,
-        hash::Hash,
-        mem::{align_of, size_of, MaybeUninit},
+        mem::{align_of, size_of},
         ops::Range,
-        pin::Pin,
         str::FromStr,
         sync::Arc,
-        task::{Context, Poll},
     },
-    ultraviolet::{Bivec3, Mat4, Rotor3, Vec4},
+    ultraviolet::Mat4,
 };
+
+#[derive(Clone, Debug)]
+pub struct GltfMesh {
+    pub primitives: Range<usize>,
+    pub materials: Vec<Material>,
+}
 
 #[derive(Clone, Debug)]
 pub struct GltfNode {
     pub transform: Mat4,
     pub children: Box<[usize]>,
-    pub mesh: Option<usize>,
+    pub mesh: Option<GltfMesh>,
 }
 
 #[derive(Clone, Debug)]
@@ -40,9 +44,9 @@ pub struct GltfScene {
 #[derive(Clone, Debug)]
 pub struct Gltf {
     pub scenes: Arc<[GltfScene]>,
-    pub nodes: Arc<[GltfNode]>,
-    pub meshes: Arc<[Box<[Mesh]>]>,
     pub scene: Option<usize>,
+    pub nodes: Arc<[GltfNode]>,
+    pub meshes: Arc<[Mesh]>,
 }
 
 #[derive(Clone, Debug)]
@@ -74,11 +78,39 @@ pub enum GltfError {
 
     #[error("Failed to load external binary data source")]
     SourceLoadingFailed,
+
+    #[error("Failed to load texture: {source}")]
+    ImageDecode {
+        #[from]
+        source: image::ImageError,
+    },
+
+    #[error("Combination paramters `{info:?}` is unsupported")]
+    UnsupportedImage { info: ImageInfo },
+
+    /// Implementation specific error.
+    #[error("{source}")]
+    Other {
+        #[from]
+        source: Box<MaybeSendSyncError>,
+    },
 }
 
 impl From<OutOfMemory> for GltfError {
     fn from(_: OutOfMemory) -> Self {
         GltfError::OutOfMemory
+    }
+}
+
+impl From<CreateImageError> for GltfError {
+    fn from(err: CreateImageError) -> Self {
+        match err {
+            CreateImageError::OutOfMemory { .. } => GltfError::OutOfMemory,
+            CreateImageError::Unsupported { info } => {
+                GltfError::UnsupportedImage { info }
+            }
+            CreateImageError::Other { source } => GltfError::Other { source },
+        }
     }
 }
 
@@ -92,230 +124,63 @@ impl goods::SyncAsset for Gltf {
         let mut total_data = Vec::new();
 
         struct MeshAux {
-            // positions: Option<Range<usize>>,
-            // normals: Option<Range<usize>>,
-            posnorms: Range<usize>,
+            vertices: Range<usize>,
             indices: Option<IndicesAux>,
             count: u32,
             vertex_count: u32,
             topology: PrimitiveTopology,
         }
 
-        let meshes: Vec<Vec<MeshAux>> = repr
+        let mut primitive_ranges: Vec<Range<usize>> = Vec::new();
+        let meshes_aux: Vec<MeshAux> = repr
             .gltf
             .document
             .meshes()
-            .map(|mesh| {
+            .flat_map(|mesh| {
+                let offset =
+                    primitive_ranges.last().map(|range| range.end).unwrap_or(0);
+                let size = mesh.primitives().len();
+                primitive_ranges.push(offset..offset + size);
+
                 mesh.primitives()
                     .map(|primitive| -> Result<_, GltfError> {
-                        // let positions = primitive
-                        //     .get(&gltf::Semantic::Positions)
-                        //     .map(|positions| {
-                        //         align_vec(
-                        //             &mut total_data,
-                        //             align_of::<Position3d>() - 1,
-                        //         );
-                        //         Ok::<_, GltfError>((
-                        //             positions.count(),
-                        //             load_vertices::<Position3d>(
-                        //                 &positions,
-                        //                 repr.gltf
-                        //                     .blob
-                        //                     .as_ref()
-                        //                     .map(std::ops::Deref::deref),
-                        //                 &repr.sources,
-                        //                 &mut total_data,
-                        //             )?,
-                        //         ))
-                        //     })
-                        //     .transpose()?;
+                        align_vec(
+                            &mut total_data,
+                            15 | (align_of::<u32>() - 1),
+                        );
 
-                        // let normals = primitive
-                        //     .get(&gltf::Semantic::Normals)
-                        //     .map(|normals| {
-                        //         align_vec(
-                        //             &mut total_data,
-                        //             align_of::<Normal3d>() - 1,
-                        //         );
-                        //         Ok::<_, GltfError>((
-                        //             normals.count(),
-                        //             load_vertices::<Normal3d>(
-                        //                 &normals,
-                        //                 repr.gltf
-                        //                     .blob
-                        //                     .as_ref()
-                        //                     .map(std::ops::Deref::deref),
-                        //                 &repr.sources,
-                        //                 &mut total_data,
-                        //             )?,
-                        //         ))
-                        //     })
-                        //     .transpose()?;
+                        let (vertices, vertex_count) = load_vertices(
+                            primitive.clone(), // Could be copy.
+                            repr.gltf.blob.as_deref(),
+                            &repr.sources,
+                            &mut total_data,
+                        )?;
 
-                        let positions = primitive
-                            .get(&gltf::Semantic::Positions)
-                            .ok_or(GltfError::Unsupported)?;
+                        tracing::warn!("{} vertices loaded", vertex_count);
 
-                        let positions_view =
-                            positions.view().ok_or(GltfError::Unsupported)?;
-
-                        let positions_stride =
-                            positions_view.stride().unwrap_or(positions.size());
-
-                        let positions_length = if positions.count() == 0 {
-                            0
-                        } else {
-                            (positions.count() - 1) * positions_stride
-                                + positions.size()
-                        };
-
-                        if positions_view.length()
-                            < positions_length + positions.offset()
-                        {
-                            return Err(GltfError::InvalidAccessor);
-                        }
-
-                        let positions_bytes: &[u8] =
-                            match positions_view.buffer().source() {
-                                gltf::buffer::Source::Bin => repr
-                                    .gltf
-                                    .blob
-                                    .as_ref()
-                                    .ok_or(GltfError::InvalidView)?,
-                                gltf::buffer::Source::Uri(uri) => &repr
-                                    .sources
-                                    .get(uri)
-                                    .ok_or(GltfError::InvalidView)?,
-                            };
-
-                        if positions_bytes.len()
-                            < positions_view.offset() + positions_view.length()
-                        {
-                            return Err(GltfError::InvalidView);
-                        }
-
-                        let positions_bytes = &positions_bytes
-                            [positions_view.offset()..]
-                            [..positions_view.length()][positions.offset()..];
-
-                        let normals = primitive
-                            .get(&gltf::Semantic::Normals)
-                            .ok_or(GltfError::Unsupported)?;
-
-                        let normals_view =
-                            normals.view().ok_or(GltfError::Unsupported)?;
-
-                        let normals_stride =
-                            normals_view.stride().unwrap_or(normals.size());
-
-                        let normals_length = if normals.count() == 0 {
-                            0
-                        } else {
-                            (normals.count() - 1) * normals_stride
-                                + normals.size()
-                        };
-
-                        if normals_view.length()
-                            < normals_length + normals.offset()
-                        {
-                            return Err(GltfError::InvalidAccessor);
-                        }
-
-                        let normals_bytes: &[u8] =
-                            match normals_view.buffer().source() {
-                                gltf::buffer::Source::Bin => repr
-                                    .gltf
-                                    .blob
-                                    .as_ref()
-                                    .ok_or(GltfError::InvalidView)?,
-                                gltf::buffer::Source::Uri(uri) => &repr
-                                    .sources
-                                    .get(uri)
-                                    .ok_or(GltfError::InvalidView)?,
-                            };
-
-                        if normals_bytes.len()
-                            < normals_view.offset() + normals_view.length()
-                        {
-                            return Err(GltfError::InvalidView);
-                        }
-
-                        let normals_bytes = &normals_bytes
-                            [normals_view.offset()..][..normals_view.length()]
-                            [normals.offset()..];
-
-                        let mut vertex_count =
-                            positions.count().min(normals.count());
-
-                        let vertices = Position3d::from_bytes_iter::<
-                            LittleEndian,
-                        >(
-                            positions_bytes, positions_stride
-                        )
-                        .zip(Normal3d::from_bytes_iter::<LittleEndian>(
-                            normals_bytes,
-                            normals_stride,
-                        ))
-                        .take(vertex_count);
-
-                        align_vec(&mut total_data, 15);
-                        let start = total_data.len();
-                        for (pos, norm) in vertices {
-                            // endian
-                            total_data.extend_from_slice(bytemuck::bytes_of(
-                                &Position3dNormal3d {
-                                    position: pos,
-                                    normal: norm,
-                                },
-                            ));
-                        }
-
-                        let posnorms = start..total_data.len();
-
+                        let mut count = vertex_count;
                         let indices = primitive
                             .indices()
                             .map(|indices| {
                                 total_polygons += indices.count();
+                                count = indices.count();
 
                                 align_vec(
                                     &mut total_data,
                                     15 | (align_of::<u32>() - 1),
                                 );
-                                Ok::<_, GltfError>((
-                                    indices.count(),
-                                    load_indices(
-                                        &indices,
-                                        repr.gltf
-                                            .blob
-                                            .as_ref()
-                                            .map(std::ops::Deref::deref),
-                                        &repr.sources,
-                                        &mut total_data,
-                                    )?,
-                                ))
+
+                                load_indices(
+                                    &indices,
+                                    repr.gltf.blob.as_deref(),
+                                    &repr.sources,
+                                    &mut total_data,
+                                )
                             })
                             .transpose()?;
 
-                        // let positions = positions.map(|(count, positions)| {
-                        //     vertex_count = vertex_count.min(count);
-                        //     positions
-                        // });
-
-                        // let normals = normals.map(|(count, normals)| {
-                        //     vertex_count = vertex_count.min(count);
-                        //     normals
-                        // });
-
-                        let mut count = vertex_count;
-                        let indices = indices.map(|(index_count, indices)| {
-                            count = index_count;
-                            indices
-                        });
-
                         Ok(MeshAux {
-                            // positions,
-                            // normals,
-                            posnorms,
+                            vertices,
                             indices,
                             vertex_count: vertex_count
                                 .try_into()
@@ -348,12 +213,9 @@ impl goods::SyncAsset for Gltf {
                             },
                         })
                     })
-                    .collect()
+                    .collect::<Vec<_>>()
             })
             .collect::<Result<_, _>>()?;
-
-        let total_meshes: usize = meshes.iter().map(|p| p.len()).sum();
-        tracing::debug!("There are {} meshes total", total_meshes);
 
         let buffer = device.create_buffer_static(
             BufferInfo {
@@ -366,96 +228,232 @@ impl goods::SyncAsset for Gltf {
             &total_data,
         )?;
 
-        let mut meshes = meshes
+        let meshes = meshes_aux
             .into_iter()
-            .map(|meshes| {
-                meshes
-                    .into_iter()
-                    .map(|mesh| {
-                        let mut bindings = Vec::new();
+            .map(|mesh| {
+                let mut bindings = Vec::new();
 
-                        // if let Some(positions) = mesh.positions {
-                        //     bindings.push(Binding {
-                        //         buffer: buffer.clone(),
-                        //         offset: positions.start as u64,
-                        //         layout: Position3d::layout(),
-                        //     });
-                        // }
+                bindings.push(Binding {
+                    buffer: buffer.clone(),
+                    offset: mesh.vertices.start as u64,
+                    layout: PositionNormalTangent3dUV::layout(),
+                });
 
-                        // if let Some(normals) = mesh.normals {
-                        //     bindings.push(Binding {
-                        //         buffer: buffer.clone(),
-                        //         offset: normals.start as u64,
-                        //         layout: Normal3d::layout(),
-                        //     });
-                        // }
-
-                        bindings.push(Binding {
+                MeshBuilder {
+                    bindings,
+                    indices: match mesh.indices {
+                        None => None,
+                        Some(IndicesAux::U16(range)) => Some(Indices {
                             buffer: buffer.clone(),
-                            offset: mesh.posnorms.start as u64,
-                            layout: Position3dNormal3d::layout(),
-                        });
-
-                        MeshBuilder {
-                            bindings,
-                            indices: match mesh.indices {
-                                None => None,
-                                Some(IndicesAux::U16(range)) => Some(Indices {
-                                    buffer: buffer.clone(),
-                                    offset: range.start as u64,
-                                    index_type: IndexType::U16,
-                                }),
-                                Some(IndicesAux::U32(range)) => Some(Indices {
-                                    buffer: buffer.clone(),
-                                    offset: range.start as u64,
-                                    index_type: IndexType::U32,
-                                }),
-                            },
-                            topology: mesh.topology,
-                        }
-                        .build(mesh.count, mesh.vertex_count)
-                    })
-                    .collect()
+                            offset: range.start as u64,
+                            index_type: IndexType::U16,
+                        }),
+                        Some(IndicesAux::U32(range)) => Some(Indices {
+                            buffer: buffer.clone(),
+                            offset: range.start as u64,
+                            index_type: IndexType::U32,
+                        }),
+                    },
+                    topology: mesh.topology,
+                }
+                .build(mesh.count, mesh.vertex_count)
             })
             .collect();
+
+        let images: Vec<_> = repr
+            .gltf
+            .images()
+            .map(|image| -> Result<_, GltfError> {
+                let data = match image.source() {
+                    gltf::image::Source::View { view, .. } => {
+                        let range =
+                            view.offset()..view.offset() + view.length();
+                        match view.buffer().source() {
+                            gltf::buffer::Source::Bin => {
+                                &repr.gltf.blob.as_ref().unwrap()[range]
+                            }
+                            gltf::buffer::Source::Uri(uri) => {
+                                &repr.sources[uri][range]
+                            }
+                        }
+                    }
+                    gltf::image::Source::Uri { uri, .. } => {
+                        &repr.sources[uri][..]
+                    }
+                };
+                let image = image::load_from_memory(data)?.to_rgba();
+                let image = device.create_image_static(
+                    ImageInfo {
+                        extent: ImageExtent::D2 {
+                            width: image.dimensions().0,
+                            height: image.dimensions().1,
+                        },
+                        format: Format::RGBA8Unorm,
+                        levels: 1,
+                        layers: 1,
+                        samples: Samples1,
+                        usage: ImageUsage::SAMPLED,
+                        memory: MemoryUsageFlags::UPLOAD,
+                    },
+                    &image.into_raw(),
+                )?;
+
+                let image =
+                    device.create_image_view(ImageViewInfo::new(image))?;
+                Ok(image)
+            })
+            .collect::<Result<_, _>>()?;
+
+        let samplers: Vec<_> = repr
+            .gltf
+            .samplers()
+            .map(|sampler| {
+                device.create_sampler(SamplerInfo {
+                        mag_filter: match sampler.mag_filter() {
+                            None | Some(gltf::texture::MagFilter::Nearest) => {
+                                Filter::Nearest
+                            }
+                            Some(gltf::texture::MagFilter::Linear) => {
+                                Filter::Linear
+                            }
+                        },
+                        min_filter: match sampler.min_filter() {
+                            None
+                            | Some(gltf::texture::MinFilter::Nearest)
+                            | Some(
+                                gltf::texture::MinFilter::NearestMipmapNearest,
+                            )
+                            | Some(
+                                gltf::texture::MinFilter::NearestMipmapLinear,
+                            ) => Filter::Nearest,
+                            _ => Filter::Linear,
+                        },
+                        mipmap_mode: match sampler.min_filter() {
+                            None
+                            | Some(gltf::texture::MinFilter::Nearest)
+                            | Some(gltf::texture::MinFilter::Linear)
+                            | Some(
+                                gltf::texture::MinFilter::NearestMipmapNearest,
+                            )
+                            | Some(
+                                gltf::texture::MinFilter::LinearMipmapNearest,
+                            ) => MipmapMode::Nearest,
+                            _ => MipmapMode::Linear,
+                        },
+                        address_mode_u: match sampler.wrap_s() {
+                            gltf::texture::WrappingMode::ClampToEdge => {
+                                SamplerAddressMode::ClampToEdge
+                            }
+                            gltf::texture::WrappingMode::MirroredRepeat => {
+                                SamplerAddressMode::MirroredRepeat
+                            }
+                            gltf::texture::WrappingMode::Repeat => {
+                                SamplerAddressMode::Repeat
+                            }
+                        },
+                        address_mode_v: match sampler.wrap_t() {
+                            gltf::texture::WrappingMode::ClampToEdge => {
+                                SamplerAddressMode::ClampToEdge
+                            }
+                            gltf::texture::WrappingMode::MirroredRepeat => {
+                                SamplerAddressMode::MirroredRepeat
+                            }
+                            gltf::texture::WrappingMode::Repeat => {
+                                SamplerAddressMode::Repeat
+                            }
+                        },
+                        address_mode_w: SamplerAddressMode::Repeat,
+                        mip_lod_bias: 0.0.into(),
+                        max_anisotropy: None,
+                        compare_op: None,
+                        min_lod: 0.0.into(),
+                        max_lod: 100.0.into(),
+                        border_color: BorderColor::FloatTransparentBlack,
+                        unnormalized_coordinates: false,
+                    })
+            })
+            .collect::<Result<_, _>>()?;
+
+        let mut default_sampler: Option<Sampler> = None;
+
+        let materials: Vec<_> = repr
+            .gltf
+            .materials()
+            .map(|material| -> Result<_, OutOfMemory> {
+                let pbr = material.pbr_metallic_roughness();
+                Ok(Material {
+                    albedo: pbr
+                        .base_color_texture()
+                        .map(|info| -> Result<_, OutOfMemory> {
+                            let texture = info.texture();
+                            let image =
+                                images[texture.source().index()].clone();
+                            let sampler = match texture.sampler().index() {
+                                Some(index) => samplers[index].clone(),
+                                None => match &mut default_sampler {
+                                    Some(default_sampler) => {
+                                        default_sampler.clone()
+                                    }
+                                    None => {
+                                        let sampler = device.create_sampler(
+                                            SamplerInfo::default(),
+                                        )?;
+                                        default_sampler = Some(sampler.clone());
+                                        sampler
+                                    }
+                                },
+                            };
+                            Ok(Texture { image, sampler })
+                        })
+                        .transpose()?,
+                    albedo_factor: {
+                        let [r, g, b, a] = pbr.base_color_factor();
+                        [r.into(), g.into(), b.into(), a.into()]
+                    },
+                    normal: material
+                        .normal_texture()
+                        .map(|info| {
+                            let texture = info.texture();
+                            let image =
+                                images[texture.source().index()].clone();
+                            let sampler = match texture.sampler().index() {
+                                Some(index) => samplers[index].clone(),
+                                None => match &mut default_sampler {
+                                    Some(default_sampler) => {
+                                        default_sampler.clone()
+                                    }
+                                    None => {
+                                        let sampler = device.create_sampler(
+                                            SamplerInfo::default(),
+                                        )?;
+                                        default_sampler = Some(sampler.clone());
+                                        sampler
+                                    }
+                                },
+                            };
+                            Ok(Texture { image, sampler })
+                        })
+                        .transpose()?,
+                    normal_factor: material
+                        .normal_texture()
+                        .map(|info| info.scale())
+                        .unwrap_or(0.0)
+                        .into(),
+                })
+            })
+            .collect::<Result<_, _>>()?;
+
+        let default_material = Material {
+            albedo: None,
+            albedo_factor: [0.8.into(); 4],
+            normal: None,
+            normal_factor: 0.0.into(),
+        };
 
         let nodes = repr
             .gltf
             .nodes()
             .map(|node| {
-                // let transform = match node.transform() {
-                //     gltf::scene::Transform::Matrix { matrix: m } => {
-                //         Mat4::from([
-                //             m[0][0], m[1][0], m[2][0], m[3][0], m[0][1],
-                //             m[1][1], m[2][1], m[3][1], m[0][2], m[1][2],
-                //             m[2][2], m[3][2], m[0][3], m[1][3], m[2][3],
-                //             m[3][3],
-                //         ])
-                //     }
-                //     gltf::scene::Transform::Decomposed {
-                //         translation,
-                //         rotation,
-                //         scale,
-                //     } => {
-                //         let rotor = Rotor3::new(
-                //             rotation[3],
-                //             Bivec3 {
-                //                 xy: rotation[0],
-                //                 xz: rotation[2],
-                //                 yz: rotation[1],
-                //             },
-                //         )
-                //         .into_matrix()
-                //         .into_homogeneous();
-
-                //         Mat4::from_translation(translation.into())
-                //             * rotor
-                //             * Mat4::from_nonuniform_scale(Vec4::new(
-                //               scale[0], scale[1], scale[2], 1.0,
-                //             ))
-                //     }
-                // };
-
                 let m = node.transform().matrix();
 
                 let transform = Mat4::new(
@@ -471,7 +469,22 @@ impl goods::SyncAsset for Gltf {
                         .children()
                         .map(|child| child.index())
                         .collect(),
-                    mesh: node.mesh().map(|mesh| mesh.index()),
+
+                    mesh: node.mesh().map(|mesh| {
+                        let materials = mesh
+                            .primitives()
+                            .map(|primitive| {
+                                match primitive.material().index() {
+                                    Some(index) => materials[index].clone(),
+                                    None => default_material.clone(),
+                                }
+                            })
+                            .collect();
+                        GltfMesh {
+                            primitives: primitive_ranges[mesh.index()].clone(),
+                            materials,
+                        }
+                    }),
                 }
             })
             .collect();
@@ -596,25 +609,43 @@ impl GltfVertexType for Normal3d {
         gltf::accessor::Dimensions::Vec3;
 }
 
-fn load_vertices<V: GltfVertexType>(
-    accessor: &gltf::accessor::Accessor<'_>,
-    blob: Option<&[u8]>,
-    sources: &HashMap<String, Arc<[u8]>>,
-    output: &mut Vec<u8>,
-) -> Result<Range<usize>, GltfError> {
+impl GltfVertexType for Tangent3d {
+    const DATA_TYPE: gltf::accessor::DataType = gltf::accessor::DataType::F32;
+    const DIMENSIONS: gltf::accessor::Dimensions =
+        gltf::accessor::Dimensions::Vec4;
+}
+
+impl GltfVertexType for UV {
+    const DATA_TYPE: gltf::accessor::DataType = gltf::accessor::DataType::F32;
+    const DIMENSIONS: gltf::accessor::Dimensions =
+        gltf::accessor::Dimensions::Vec2;
+}
+
+#[tracing::instrument(skip(blob, sources))]
+fn load_vertex_attribute<'a, V: GltfVertexType>(
+    accessor: gltf::accessor::Accessor<'_>,
+    blob: Option<&'a [u8]>,
+    sources: &'a HashMap<String, Arc<[u8]>>,
+) -> Result<impl Iterator<Item = V> + 'a, GltfError> {
     if V::DIMENSIONS != accessor.dimensions() {
+        tracing::error!("Accessor to vertex attribute '{}' has wrong dimensions. Expected: {:?}, found: {:?}", V::NAME, V::DIMENSIONS, accessor.dimensions());
         return Err(GltfError::Unsupported);
     }
 
     if V::DATA_TYPE != accessor.data_type() {
+        tracing::error!("Accessor to vertex attribute '{}' has wrong data type. Expected: {:?}, found: {:?}", V::NAME, V::DATA_TYPE, accessor.data_type());
         return Err(GltfError::Unsupported);
     }
 
     if size_of::<V>() != accessor.size() {
+        tracing::error!("Accessor to vertex attribute '{}' has wrong size. Expected: {}, found: {}", V::NAME, size_of::<V>(), accessor.size());
         return Err(GltfError::Unsupported);
     }
 
-    let view = accessor.view().ok_or(GltfError::Unsupported)?;
+    let view = accessor.view().ok_or_else(|| {
+        tracing::error!("Accessor to vertex attribute '{}' is sparse. Sparse accessors are unsupported yet", V::NAME);
+        GltfError::Unsupported
+    })?;
 
     let stride = view.stride().unwrap_or(accessor.size());
 
@@ -625,52 +656,127 @@ fn load_vertices<V: GltfVertexType>(
     };
 
     if view.length() < accessor_length + accessor.offset() {
+        tracing::error!(
+            "Accessor to vertex attribute '{}' is out of its buffer view bounds",
+            V::NAME
+        );
         return Err(GltfError::InvalidAccessor);
     }
 
     let bytes: &[u8] = match view.buffer().source() {
         gltf::buffer::Source::Bin => blob.ok_or(GltfError::InvalidView)?,
         gltf::buffer::Source::Uri(uri) => {
-            &sources.get(uri).ok_or(GltfError::InvalidView)?
+            &sources.get(uri).ok_or_else(|| {
+                tracing::error!(
+                    "View of accessor to vertex attribute '{}' has non-existent source",
+                    V::NAME
+                );
+                GltfError::InvalidView
+            })?
         }
     };
 
     if bytes.len() < view.offset() + view.length() {
+        tracing::error!(
+            "View of accessor to vertex attribute '{}' is out of its buffer bounds",
+            V::NAME
+        );
         return Err(GltfError::InvalidView);
     }
 
     let bytes = &bytes[view.offset()..][..view.length()][accessor.offset()..];
-    let start = output.len();
 
-    // glTF explicitly defines the endianness of binary data as little
-    // #[cfg(target_endian = "little")]
-    // {
-    //     if stride == size_of::<V>() {
-    //         // Just copy bytes for packed vertices
-    //         // if endianess is the same.
-    //         output.extend_from_slice(unsafe {
-    //             std::slice::from_raw_parts(
-    //                 bytes.as_ptr() as *const _,
-    //                 bytes.len(),
-    //             )
-    //         });
-    //         return Ok(start..output.len());
-    //     }
-    // }
+    // glTF explicitly defines that binary data is in little-endian.
+    Ok(V::from_bytes_iter::<LittleEndian>(bytes, stride))
+}
 
-    let vertices = V::from_bytes_iter::<LittleEndian>(bytes, stride)
-        .take(accessor.count());
+enum IterOrDefaults<I, T> {
+    Iter(I),
+    Defaults(T),
+}
 
-    let mut count = 0;
-    for vertex in vertices {
-        // endian
-        output.extend_from_slice(bytemuck::bytes_of(&vertex));
-        count += 1;
+fn iter_or_defaults<I, T>(iter: Option<I>, default: T) -> IterOrDefaults<I, T> {
+    match iter {
+        Some(iter) => IterOrDefaults::Iter(iter),
+        None => IterOrDefaults::Defaults(default),
     }
+}
 
-    assert_eq!(accessor.count(), count);
+impl<I, T> Iterator for IterOrDefaults<I, T>
+where
+    I: Iterator<Item = T>,
+    T: Copy,
+{
+    type Item = T;
 
-    Ok(start..output.len())
+    fn next(&mut self) -> Option<T> {
+        match self {
+            Self::Iter(iter) => iter.next(),
+            Self::Defaults(value) => Some(*value),
+        }
+    }
+}
+
+#[tracing::instrument(skip(blob, sources, output))]
+fn load_vertices(
+    primitive: gltf::mesh::Primitive<'_>,
+    blob: Option<&[u8]>,
+    sources: &HashMap<String, Arc<[u8]>>,
+    output: &mut Vec<u8>,
+) -> Result<(Range<usize>, usize), GltfError> {
+    let position = primitive
+        .get(&gltf::Semantic::Positions)
+        .ok_or(GltfError::Unsupported)?;
+
+    let position_attribute_iter =
+        load_vertex_attribute::<Position3d>(position, blob, sources)?;
+
+    let normals_attribute_iter = primitive
+        .get(&gltf::Semantic::Normals)
+        .map(|accessor| {
+            load_vertex_attribute::<Normal3d>(accessor, blob, sources)
+        })
+        .transpose()?;
+
+    let normals_attribute_iter =
+        iter_or_defaults(normals_attribute_iter, Normal3d([0.0; 3]));
+
+    let tangents_attribute_iter = primitive
+        .get(&gltf::Semantic::Tangents)
+        .map(|accessor| {
+            load_vertex_attribute::<Tangent3d>(accessor, blob, sources)
+        })
+        .transpose()?;
+
+    let tangents_attribute_iter =
+        iter_or_defaults(tangents_attribute_iter, Tangent3d([0.0; 4]));
+
+    let uv_attribute_iter = primitive
+        .get(&gltf::Semantic::TexCoords(0))
+        .map(|accessor| load_vertex_attribute::<UV>(accessor, blob, sources))
+        .transpose()?;
+
+    let uv_attribute_iter = iter_or_defaults(uv_attribute_iter, UV([0.0; 2]));
+
+    let vertex_iter = position_attribute_iter
+        .zip(normals_attribute_iter)
+        .zip(tangents_attribute_iter)
+        .zip(uv_attribute_iter);
+
+    let start = output.len();
+    let count = vertex_iter
+        .map(|(((position, normal), tangent), uv)| {
+            let vertex = PositionNormalTangent3dUV {
+                position,
+                normal,
+                tangent,
+                uv,
+            };
+            output.extend_from_slice(bytemuck::bytes_of(&vertex));
+        })
+        .count();
+
+    Ok((start..output.len(), count))
 }
 
 enum IndicesAux {
@@ -724,20 +830,20 @@ fn load_indices(
 
             let start = output.len();
 
-            // #[cfg(target_endian = "little")]
-            // {
-            //     if stride == size_of::<u16>() {
-            //         // Just copy bytes for packed indices
-            //         // if endianess is the same.
-            //         output.extend_from_slice(unsafe {
-            //             std::slice::from_raw_parts(
-            //                 bytes.as_ptr() as *const _,
-            //                 bytes.len(),
-            //             )
-            //         });
-            //         return Ok(IndicesAux::U16(start..output.len()));
-            //     }
-            // }
+            #[cfg(target_endian = "little")]
+            {
+                if stride == size_of::<u16>() {
+                    // Just copy bytes for packed indices
+                    // if endianess is the same.
+                    output.extend_from_slice(unsafe {
+                        std::slice::from_raw_parts(
+                            bytes.as_ptr() as *const _,
+                            bytes.len(),
+                        )
+                    });
+                    return Ok(IndicesAux::U16(start..output.len()));
+                }
+            }
 
             let mut count = 0;
             for index in u16::from_bytes_iter::<LittleEndian>(bytes, stride)
