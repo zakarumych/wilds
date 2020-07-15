@@ -160,7 +160,7 @@ impl Engine {
 
         // Here goes magic
         event_loop.run(move |event, el, flow| {
-            tracing::trace!("Event {:#?}", event);
+            // tracing::trace!("Event {:#?}", event);
 
             if let Some(app) = &mut app_opt {
                 // Set event. Excluding an event bound to a lifetime.

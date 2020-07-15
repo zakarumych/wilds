@@ -1,7 +1,7 @@
 @echo off
 
 setlocal
-cd src/shaders
+cd src/renderer/pass/rt_prepass
 
 glslangValidator -V prepass.rchit -o prepass.rchit.spv
 glslangValidator -V prepass.rgen -o prepass.rgen.spv

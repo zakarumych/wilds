@@ -4,6 +4,7 @@ use {
         vk1_0::{self, Vk10DeviceLoaderExt as _},
         vk1_1, DeviceLoader,
     },
+    fastbitset::BitSet,
     std::{
         cmp::{max, min},
         collections::HashMap,
@@ -186,12 +187,12 @@ impl Chunk {
 impl Size {
     #[tracing::instrument(skip(self))]
     unsafe fn alloc(&mut self, block_size: u64) -> Option<RawBlockAlloc> {
-        let chunk_index = self.unexhausted.get()?;
+        let chunk_index = self.unexhausted.find_set()?;
         let (mut raw_block, exhausted) =
             self.chunks.get_mut(chunk_index).unwrap().alloc(block_size);
 
         if exhausted {
-            self.unexhausted.unset(chunk_index);
+            self.unexhausted.unset_unchecked(chunk_index);
         }
         self.counter += 1;
         raw_block.index = chunk_index;
@@ -232,10 +233,11 @@ impl Size {
         if index == self.chunks_upper_bound {
             // Add another bit.
             self.chunks_upper_bound += 1;
-            self.unexhausted.add(index);
+            self.unexhausted.add_unchecked(index);
         } else {
             // Set previously reset bit.
-            self.unexhausted.set(index);
+            debug_assert!(index < self.chunks_upper_bound);
+            self.unexhausted.set_unchecked(index);
         }
 
         RawBlockAlloc {
@@ -253,7 +255,7 @@ impl Size {
         debug_assert!(self.chunks.len() > index);
         let chunk = self.chunks.get_unchecked_mut(index);
         if chunk.dealloc(raw_block) {
-            self.unexhausted.unset(index);
+            self.unexhausted.unset_unchecked(index);
             let chunk = self.chunks.remove(index);
             Some(RawBlockDealloc {
                 memory: chunk.memory,
@@ -262,7 +264,7 @@ impl Size {
                 index: chunk.index,
             })
         } else {
-            self.unexhausted.set(index);
+            self.unexhausted.set_unchecked(index);
             None
         }
     }
@@ -588,108 +590,4 @@ pub struct ChunkedMemoryBlock {
     pub flags: vk1_0::MemoryPropertyFlags,
     pub memory_type: u32,
     pub index: usize,
-}
-
-use self::bitset::BitSet;
-mod bitset {
-    #[derive(Debug, Default)]
-    pub struct BitSet {
-        level0: u64,
-        level1: Vec<u64>,
-        level2: Vec<u64>,
-    }
-
-    impl BitSet {
-        pub const MAX_SIZE: usize = 64 * 64 * 64;
-
-        /// Returns first set bit index.
-        pub fn get(&self) -> Option<usize> {
-            match self.level0.trailing_zeros() as usize {
-                64 => None,
-                i0 => {
-                    debug_assert!(
-                        self.level1.len() > i0,
-                        "Set bit guarantees that next level has non-zero value at that index"
-                    );
-                    let i1 = unsafe {
-                        // Bit was set in upper level.
-                        // Thus there must be non zero u64.
-                        self.level1.get_unchecked(i0)
-                    }
-                    .trailing_zeros() as usize;
-                    debug_assert_ne!(
-                        i1, 64,
-                        "Set bit in higher level means this level must has at least one bit set"
-                    );
-                    let i1 = i0 * 64 + i1;
-                    debug_assert!(
-                        self.level2.len() > i1,
-                        "Set bit guarantees that next level has non-zero value at that index"
-                    );
-                    let i2 = unsafe {
-                        // Bit was set in upper level.
-                        // Thus there must be non zero u64.
-                        self.level2.get_unchecked(i1)
-                    }
-                    .trailing_zeros() as usize;
-                    debug_assert_ne!(
-                        i2, 64,
-                        "Set bit in higher level means this level must has at least one bit set"
-                    );
-                    Some(i1 * 64 + i2)
-                }
-            }
-        }
-
-        /// Adds new bit.
-        /// Bits must be added in natural order.
-        /// `index` must not exceed `64 ^ 3 - 1`
-        pub unsafe fn add(&mut self, index: usize) {
-            let i0 = index >> 12;
-            let i1 = (index >> 6) & 63;
-            let i2 = index & 63;
-            debug_assert_eq!(
-                i0 & 63,
-                i0,
-                "`index` must not exceed `64 ^ 3 - 1`"
-            );
-            if i2 == 0 {
-                self.level2.push(1);
-            } else {
-                self.level2[i1] |= 1 << i2;
-            }
-            if i2 == 0 && i1 == 0 {
-                self.level1.push(1);
-            } else {
-                self.level1[i0] |= 1 << i1;
-            }
-            self.level0 |= 1 << i0;
-        }
-
-        /// Sets previously added bit.
-        pub unsafe fn unset(&mut self, index: usize) {
-            let i0 = index >> 12;
-            let i1 = (index >> 6) & 63;
-            let i2 = index & 63;
-            debug_assert_eq!(i2 & 63, i2);
-            debug_assert!(self.level2.len() > i1);
-            *self.level2.get_unchecked_mut(i1) &= !(1 << i2);
-            debug_assert!(self.level1.len() > i0);
-            *self.level1.get_unchecked_mut(i0) &= !(1 << i1);
-            self.level0 &= !(1 << i0);
-        }
-
-        /// Sets previously added bit.
-        pub unsafe fn set(&mut self, index: usize) {
-            let i0 = index >> 12;
-            let i1 = (index >> 6) & 63;
-            let i2 = index & 63;
-            debug_assert_eq!(i2 & 63, i2);
-            debug_assert!(self.level2.len() > i1);
-            *self.level2.get_unchecked_mut(i1) |= 1 << i2;
-            debug_assert!(self.level1.len() > i0);
-            *self.level1.get_unchecked_mut(i0) |= 1 << i1;
-            self.level0 |= 1 << i0;
-        }
-    }
 }

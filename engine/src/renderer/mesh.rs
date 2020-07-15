@@ -1,4 +1,4 @@
-use super::vertex::VertexLayout;
+use super::{vertex::VertexLayout, Renderer};
 use bumpalo::{collections::Vec as BVec, Bump};
 use illume::*;
 use std::{
@@ -338,7 +338,7 @@ pub struct MeshData<'a> {
 impl MeshData<'_> {
     pub fn build(
         &self,
-        device: &Device,
+        renderer: &mut Renderer,
         vertices_usage: BufferUsage,
         indices_usage: BufferUsage,
     ) -> Result<Mesh, OutOfMemory> {
@@ -358,14 +358,13 @@ impl MeshData<'_> {
                 min_vertex_count = min_vertex_count.min(vertex_count);
 
                 Ok(Binding {
-                    buffer: device.create_buffer_static(
+                    buffer: renderer.create_buffer_static(
                         BufferInfo {
                             align: 255,
                             size: u64::try_from(binding.data.len())
                                 .map_err(|_| OutOfMemory)?,
                             usage: vertices_usage,
-                            memory: MemoryUsageFlags::UPLOAD
-                                | MemoryUsageFlags::FAST_DEVICE_ACCESS,
+                            memory: MemoryUsageFlags::empty(),
                         },
                         &binding.data,
                     )?,
@@ -388,14 +387,13 @@ impl MeshData<'_> {
                 count = u32::try_from(index_count).map_err(|_| OutOfMemory)?;
 
                 Ok(Indices {
-                    buffer: device.create_buffer_static(
+                    buffer: renderer.create_buffer_static(
                         BufferInfo {
                             align: 255,
                             size: u64::try_from(indices.data.len())
                                 .map_err(|_| OutOfMemory)?,
                             usage: indices_usage,
-                            memory: MemoryUsageFlags::UPLOAD
-                                | MemoryUsageFlags::FAST_DEVICE_ACCESS,
+                            memory: MemoryUsageFlags::empty(),
                         },
                         &indices.data,
                     )?,
@@ -416,21 +414,24 @@ impl MeshData<'_> {
 
     pub fn build_for_raster(
         &self,
-        device: &Device,
+        renderer: &mut Renderer,
     ) -> Result<Mesh, OutOfMemory> {
-        self.build(device, BufferUsage::VERTEX, BufferUsage::INDEX)
+        self.build(renderer, BufferUsage::VERTEX, BufferUsage::INDEX)
     }
 
-    pub fn build_for_blas(&self, device: &Device) -> Result<Mesh, OutOfMemory> {
-        self.build(device, BufferUsage::RAY_TRACING, BufferUsage::RAY_TRACING)
+    pub fn build_for_blas(
+        &self,
+        renderer: &mut Renderer,
+    ) -> Result<Mesh, OutOfMemory> {
+        self.build(renderer, BufferUsage::RAY_TRACING, BufferUsage::RAY_TRACING)
     }
 
     pub fn build_for_dynamic_blas(
         &self,
-        device: &Device,
+        renderer: &mut Renderer,
     ) -> Result<Mesh, OutOfMemory> {
         self.build(
-            device,
+            renderer,
             BufferUsage::RAY_TRACING | BufferUsage::STORAGE,
             BufferUsage::RAY_TRACING,
         )
@@ -517,7 +518,7 @@ mod gm {
         pub fn from_generator<G, V, P>(
             generator: &G,
             usage: BufferUsage,
-            device: &Device,
+            renderer: &mut Renderer,
             index_type: IndexType,
             vertex: impl Fn(Vertex) -> V,
         ) -> Result<Self, OutOfMemory>
@@ -639,13 +640,12 @@ mod gm {
                 }
             }
 
-            let buffer = device.create_buffer_static(
+            let buffer = renderer.create_buffer_static(
                 BufferInfo {
                     align: 63,
                     size: u64::try_from(data.len()).map_err(|_| OutOfMemory)?,
                     usage,
-                    memory: MemoryUsageFlags::UPLOAD
-                        | MemoryUsageFlags::FAST_DEVICE_ACCESS,
+                    memory: MemoryUsageFlags::empty(),
                 },
                 &data[..],
             )?;

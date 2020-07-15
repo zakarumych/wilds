@@ -19,6 +19,7 @@ pub enum Camera {
         near: f32,
         far: f32,
     },
+    Matrix(Mat4),
 }
 
 impl Camera {
@@ -39,6 +40,8 @@ impl Camera {
                 near,
                 far,
             } => orthographic_vk(left, right, bottom, top, near, far),
+
+            Self::Matrix(mat) => mat,
         }
     }
 }

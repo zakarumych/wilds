@@ -6,15 +6,16 @@ use illume::{
     out_of_host_memory, AccelerationStructureFlags,
     AccelerationStructureGeometryInfo, AccelerationStructureLevel, AspectFlags,
     AttachmentLoadOp, AttachmentStoreOp, BlendFactor, BlendOp, BorderColor,
-    BufferUsage, CompareOp, ComponentMask, Culling, DescriptorBindingFlags,
-    DescriptorSetLayoutFlags, DescriptorType, DeviceAddress, Extent2d,
-    Extent3d, Filter, Format, FrontFace, GeometryFlags, ImageBlit, ImageCopy,
-    ImageExtent, ImageSubresource, ImageSubresourceLayers,
-    ImageSubresourceRange, ImageUsage, ImageViewKind, IndexType, Layout,
-    LogicOp, MemoryUsageFlags, MipmapMode, Offset2d, Offset3d, OutOfMemory,
-    PipelineStageFlags, PolygonMode, PresentMode, PrimitiveTopology,
-    QueueCapabilityFlags, Rect2d, SamplerAddressMode, Samples, ShaderStage,
-    ShaderStageFlags, StencilOp, VertexInputRate, Viewport,
+    BufferCopy, BufferImageCopy, BufferUsage, CompareOp, ComponentMask,
+    Culling, DescriptorBindingFlags, DescriptorSetLayoutFlags, DescriptorType,
+    DeviceAddress, Extent2d, Extent3d, Filter, Format, FrontFace,
+    GeometryFlags, ImageBlit, ImageCopy, ImageExtent, ImageSubresource,
+    ImageSubresourceLayers, ImageSubresourceRange, ImageUsage, ImageViewKind,
+    IndexType, Layout, LogicOp, MemoryUsageFlags, MipmapMode, Offset2d,
+    Offset3d, OutOfMemory, PipelineStageFlags, PolygonMode, PresentMode,
+    PrimitiveTopology, QueueCapabilityFlags, Rect2d, SamplerAddressMode,
+    Samples, ShaderStage, ShaderStageFlags, StencilOp, VertexInputRate,
+    Viewport,
 };
 use std::num::NonZeroU64;
 
@@ -1324,6 +1325,29 @@ impl ToErupt<vk1_0::ImageCopy> for ImageCopy {
             dst_subresource: self.dst_subresource.to_erupt(),
             dst_offset: self.dst_offset.to_erupt(),
             extent: self.extent.to_erupt(),
+        }
+    }
+}
+
+impl ToErupt<vk1_0::BufferCopy> for BufferCopy {
+    fn to_erupt(self) -> vk1_0::BufferCopy {
+        vk1_0::BufferCopy {
+            src_offset: self.src_offset,
+            dst_offset: self.dst_offset,
+            size: self.size,
+        }
+    }
+}
+
+impl ToErupt<vk1_0::BufferImageCopy> for BufferImageCopy {
+    fn to_erupt(self) -> vk1_0::BufferImageCopy {
+        vk1_0::BufferImageCopy {
+            buffer_offset: self.buffer_offset,
+            buffer_row_length: self.buffer_row_length,
+            buffer_image_height: self.buffer_image_height,
+            image_subresource: self.image_subresource.to_erupt(),
+            image_offset: self.image_offset.to_erupt(),
+            image_extent: self.image_extent.to_erupt(),
         }
     }
 }

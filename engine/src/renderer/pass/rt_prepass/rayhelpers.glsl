@@ -1,42 +1,6 @@
 
 #extension GL_EXT_nonuniform_qualifier : enable
 
-uvec3 instance_triangle_indices(uint instance, uint primitive) {
-    uint mesh = instances[instance].mesh;
-    return uvec3(indices[mesh].i[3 * primitive + 0],
-                 indices[mesh].i[3 * primitive + 1],
-                 indices[mesh].i[3 * primitive + 2]);
-}
-
-Vertex instance_vertex(uint instance, uint index) {
-    uint mesh = instances[instance].mesh;
-    return vertices[mesh].v[index];
-}
-
-mat4 instance_transform(uint instance) {
-    return instances[instance].transform;
-}
-
-vec4 sample_albedo(uint instance, vec2 uv) {
-    uint sampler_index = instances[instance].albedo_sampler;
-    vec4 raw = vec4(1, 1, 1, 1);
-    if (sampler_index > 0)
-    {
-        raw = texture(albedo[sampler_index-1], uv);
-    }
-    return raw * instances[instance].albedo_factor;
-}
-
-vec3 sample_normal(uint instance, vec2 uv) {
-    uint sampler_index = instances[instance].normals_sampler;
-    vec3 raw = vec3(0, 0, 1);
-    if (sampler_index > 0)
-    {
-        raw = texture(normals[sampler_index-1], uv).xyz;
-    }
-    return vec3(raw.xy * instances[instance].normals_factor, raw.z);
-}
-
 float rand(uvec3 co) {
     return fract(sin(dot(co, vec3(12.9898, 78.233, 42.113))) * 43758.5453);
 }

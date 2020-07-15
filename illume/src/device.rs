@@ -202,13 +202,19 @@ impl Device {
     /// # Panics
     ///
     /// Function will panic if creating image size does not equal data size.
-    #[tracing::instrument]
-    pub fn create_image_static(
+    #[tracing::instrument(skip(data))]
+    pub fn create_image_static<T>(
         &self,
         info: ImageInfo,
-        data: &[u8],
-    ) -> Result<Image, CreateImageError> {
-        self.inner.clone().create_image_static(info, data)
+        data: &[T],
+    ) -> Result<Image, CreateImageError>
+    where
+        T: Pod,
+    {
+        // assert!(info.is_valid());
+        self.inner
+            .clone()
+            .create_image_static(info, cast_slice(data))
     }
 
     /// Creates view to an image.

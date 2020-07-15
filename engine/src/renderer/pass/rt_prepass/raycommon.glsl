@@ -11,9 +11,9 @@ struct RecursiveRay {
 };
 
 struct HitPayload {
-    vec3 hit_value;
-    uvec3 co;
-    int depth;
+    vec4 normal_depth;
+    vec4 albedo;
+    vec3 emissive;
 };
 
 struct LightHitPayload {
@@ -49,16 +49,17 @@ struct DirLight {
 };
 
 layout(binding = 0, set = 0) uniform accelerationStructureEXT tlas;
-layout(binding = 1, set = 0) uniform Globals {
+layout(binding = 1, set = 0) buffer BlueNoise { vec4 blue_noise[262144]; };
+layout(binding = 2, set = 0, scalar) buffer Indices { uint i[]; } indices[];
+layout(binding = 3, set = 0, scalar) buffer Vertices { Vertex v[]; } vertices[];
+layout(binding = 4, set = 0) uniform sampler2D albedo[];
+layout(binding = 5, set = 0) uniform sampler2D normal[];
+
+layout(binding = 0, set = 1) uniform Globals {
     Camera cam;
     DirLight dirlight;
     float seconds;
     uint frame;
 } globals;
 
-layout(binding = 2, set = 0) buffer BlueNoise { vec4 blue_noise[262144]; };
-layout(binding = 3, set = 0, scalar) buffer Scene { Instance instances[]; };
-layout(binding = 4, set = 0, scalar) buffer Vertices { Vertex v[]; } vertices[];
-layout(binding = 5, set = 0, scalar) buffer Indices { uint i[]; } indices[];
-layout(binding = 6, set = 0) uniform sampler2D albedo[];
-layout(binding = 7, set = 0) uniform sampler2D normals[];
+layout(binding = 1, set = 1, scalar) buffer Scene { Instance instances[]; };

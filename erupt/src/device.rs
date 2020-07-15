@@ -258,7 +258,11 @@ impl DeviceTrait for EruptDevice {
         data: &[u8],
     ) -> Result<Buffer, OutOfMemory> {
         debug_assert!(arith_eq(info.size, data.len()));
-        assert!(info.memory.contains(MemoryUsageFlags::UPLOAD));
+        assert!(info.memory.intersects(
+            MemoryUsageFlags::HOST_ACCESS
+                | MemoryUsageFlags::UPLOAD
+                | MemoryUsageFlags::DOWNLOAD
+        ));
 
         let buffer = self.clone().create_buffer(info)?;
 
@@ -822,7 +826,11 @@ impl DeviceTrait for EruptDevice {
         info: ImageInfo,
         data: &[u8],
     ) -> Result<Image, CreateImageError> {
-        assert!(info.memory.contains(MemoryUsageFlags::UPLOAD));
+        assert!(info.memory.intersects(
+            MemoryUsageFlags::HOST_ACCESS
+                | MemoryUsageFlags::UPLOAD
+                | MemoryUsageFlags::DOWNLOAD
+        ));
 
         let image = unsafe {
             self.logical.create_image(
