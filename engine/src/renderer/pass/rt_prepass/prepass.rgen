@@ -7,32 +7,28 @@
 
 layout(location = 0) rayPayloadEXT HitPayload prd;
 
-layout(binding = 8, set = 0, rgba32f) uniform image2D output_albedo;
-layout(binding = 9, set = 0, rgba32f) uniform image2D output_normals;
+layout(binding = 6, set = 0, rgba32f) uniform image2D output_albedo;
+layout(binding = 7, set = 0, rgba32f) uniform image2D output_normals_depth;
+// layout(binding = 8, set = 0, rgba32f) uniform image2D output_emissive;
 
-void main() 
+void main()
 {
     const uvec3 co = uvec3(gl_LaunchIDEXT.xy, globals.frame);
     const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + blue_rand_square(co);
     const vec2 inUV = pixelCenter/vec2(gl_LaunchSizeEXT.xy);
     vec2 d = inUV * 2.0 - 1.0;
-
     vec4 proj  = globals.cam.iproj * vec4(d.x, d.y, 1, 1);
     vec4 target = globals.cam.iview * vec4(normalize(proj.xyz) * 30.0, 1.0);
 
-    vec2 off = (blue_rand_circle(co + uvec3(1)) - 0.5);
-
+    vec2 off = vec2(0.0, 0.0);//(blue_rand_circle(co + uvec3(13)) - 0.5);
     vec4 origin = globals.cam.iview * vec4(off, 0, 1);
-    prd.hit_value = vec3(0, 0, 0);
-    prd.co = co;
-    prd.depth = 3;
+
+    prd.normal_depth = vec4(0, 0, 0, -1);
+    prd.albedo = vec4(0, 0, 0, 0);
+    prd.emissive = vec3(0, 0, 0);
     traceRayEXT(tlas, 0, 0xff, 0, 0, 0, origin.xyz, 0.0, normalize((target - origin).xyz), 1000.0, 0);
-    
-    vec3 color = prd.hit_value / (prd.hit_value + vec3(1, 1, 1));
-    vec4 old = imageLoad(output_albedo, ivec2(gl_LaunchIDEXT.xy));
-    vec3 old_color = (old.xyz * old.w);
-    vec3 new_color = old_color + color;
-    float neww = old.w + 1;
-    imageStore(output_albedo, ivec2(gl_LaunchIDEXT.xy), vec4(new_color / neww, neww));
-    // imageStore(output_albedo, ivec2(gl_LaunchIDEXT.xy), vec4(color, 1));
+
+    imageStore(output_albedo, ivec2(gl_LaunchIDEXT.xy), prd.albedo);
+    imageStore(output_normals_depth, ivec2(gl_LaunchIDEXT.xy), prd.normal_depth);
+    // imageStore(output_emissive, ivec2(gl_LaunchIDEXT.xy), prd.emissive);
 }

@@ -119,8 +119,9 @@ impl Allocator {
         let heaps = memory_heaps
             .iter()
             .map(|heap| Heap {
-                size: heap.size,
                 used: AtomicU64::new(0),
+                size: heap.size,
+                flags: heap.flags,
             })
             .collect::<ArrayVec<[_; 32]>>();
 
@@ -218,6 +219,7 @@ impl Allocator {
             // Check if pool has memory
             let pool =
                 &self.heaps[self.type_to_pool[memory_type as usize] as usize];
+
             if pool.can_allocate(size) {
                 let result = match strategy {
                     Strategy::Linear => {
@@ -312,6 +314,7 @@ enum Strategy {
 struct Heap {
     used: AtomicU64,
     size: u64,
+    flags: vk1_0::MemoryHeapFlags,
 }
 
 impl Heap {

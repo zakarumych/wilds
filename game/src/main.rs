@@ -2,6 +2,7 @@ use {
     bumpalo::Bump,
     color_eyre::Report,
     hecs::World,
+    std::{cmp::max, collections::VecDeque, time::Duration},
     ultraviolet::{Mat4, Vec3},
     wilds::{
         Camera, Clocks, DirectionalLight, Engine, Gltf, GltfFormat, GltfNode,
@@ -39,7 +40,7 @@ fn main() -> Result<(), Report> {
 
         engine.world.spawn((DirectionalLight {
             direction: -Vec3::unit_y(),
-            radiance: [8.5 / 2.0, 6.9 / 2.0, 2.4 / 2.0],
+            radiance: [8.5, 6.9, 2.4],
         },));
 
         let mut city_opt = Some(engine.assets.load_with_format(
@@ -51,6 +52,10 @@ fn main() -> Result<(), Report> {
         ));
         window.request_redraw();
 
+        let mut frame_times = VecDeque::new();
+        let mut frame_times_total = Duration::new(0, 0);
+        let mut ticker = Duration::new(0, 0);
+
         loop {
             if let Some(city) = &mut city_opt {
                 if let Some(city) = city.get() {
@@ -60,11 +65,10 @@ fn main() -> Result<(), Report> {
                         &mut engine.world,
                         Mat4::from_scale(0.01),
                     );
+
                     city_opt = None;
                 }
             }
-
-            let clock = clocks.step();
 
             // Main game loop
             match engine.next().await {
@@ -75,6 +79,28 @@ fn main() -> Result<(), Report> {
                     break;
                 }
                 Event::RedrawRequested(window_id) => {
+                    let clock = clocks.step();
+                    frame_times.push_back(clock.delta);
+                    frame_times_total += clock.delta;
+
+                    while frame_times_total.as_secs() > 5 {
+                        match frame_times.pop_front() {
+                            Some(delta) => frame_times_total -= delta,
+                            None => break,
+                        }
+                    }
+
+                    if ticker < clock.delta {
+                        ticker += max(Duration::from_secs(1), clock.delta);
+
+                        tracing::info!(
+                            "FPS: {}",
+                            (frame_times.len() as f32
+                                / frame_times_total.as_secs_f32())
+                        );
+                    }
+                    ticker -= clock.delta;
+
                     tracing::trace!("Request redraw");
                     renderer.draw(&mut engine.world, &clock, &bump)?;
                 }
@@ -85,7 +111,7 @@ fn main() -> Result<(), Report> {
             }
 
             bump.reset();
-            engine.assets.process(&mut renderer.device);
+            engine.assets.process(&mut renderer);
         }
 
         Ok(())

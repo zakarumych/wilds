@@ -1,8 +1,8 @@
 use {
     crate::renderer::{
         Binding, FromBytes as _, Indices, Material, Mesh, MeshBuilder,
-        Normal3d, Position3d, PositionNormalTangent3dUV, Tangent3d, Texture,
-        VertexType, UV,
+        Normal3d, Position3d, PositionNormalTangent3dUV, Renderer, Tangent3d,
+        Texture, VertexType, UV,
     },
     byteorder::LittleEndian,
     futures::future::{try_join_all, BoxFuture},
@@ -115,11 +115,14 @@ impl From<CreateImageError> for GltfError {
 }
 
 impl goods::SyncAsset for Gltf {
-    type Context = Device;
+    type Context = Renderer;
     type Error = GltfError;
     type Repr = GltfRepr;
 
-    fn build(repr: GltfRepr, device: &mut Device) -> Result<Self, GltfError> {
+    fn build(
+        repr: GltfRepr,
+        renderer: &mut Renderer,
+    ) -> Result<Self, GltfError> {
         let mut total_polygons = 0;
         let mut total_data = Vec::new();
 
@@ -217,13 +220,13 @@ impl goods::SyncAsset for Gltf {
             })
             .collect::<Result<_, _>>()?;
 
-        let buffer = device.create_buffer_static(
+        let buffer = renderer.create_buffer_static(
             BufferInfo {
                 align: 255,
                 size: u64::try_from(total_data.len())
                     .map_err(|_| GltfError::OutOfMemory)?,
                 usage: repr.usage,
-                memory: MemoryUsageFlags::UPLOAD,
+                memory: MemoryUsageFlags::empty(),
             },
             &total_data,
         )?;
@@ -282,7 +285,7 @@ impl goods::SyncAsset for Gltf {
                     }
                 };
                 let image = image::load_from_memory(data)?.to_rgba();
-                let image = device.create_image_static(
+                let image = renderer.create_image_static(
                     ImageInfo {
                         extent: ImageExtent::D2 {
                             width: image.dimensions().0,
@@ -293,13 +296,16 @@ impl goods::SyncAsset for Gltf {
                         layers: 1,
                         samples: Samples1,
                         usage: ImageUsage::SAMPLED,
-                        memory: MemoryUsageFlags::UPLOAD,
+                        memory: MemoryUsageFlags::empty(),
                     },
+                    0,
+                    0,
                     &image.into_raw(),
                 )?;
 
-                let image =
-                    device.create_image_view(ImageViewInfo::new(image))?;
+                let image = renderer
+                    .device
+                    .create_image_view(ImageViewInfo::new(image))?;
                 Ok(image)
             })
             .collect::<Result<_, _>>()?;
@@ -308,7 +314,7 @@ impl goods::SyncAsset for Gltf {
             .gltf
             .samplers()
             .map(|sampler| {
-                device.create_sampler(SamplerInfo {
+                renderer.device.create_sampler(SamplerInfo {
                         mag_filter: match sampler.mag_filter() {
                             None | Some(gltf::texture::MagFilter::Nearest) => {
                                 Filter::Nearest
@@ -395,9 +401,10 @@ impl goods::SyncAsset for Gltf {
                                         default_sampler.clone()
                                     }
                                     None => {
-                                        let sampler = device.create_sampler(
-                                            SamplerInfo::default(),
-                                        )?;
+                                        let sampler =
+                                            renderer.device.create_sampler(
+                                                SamplerInfo::default(),
+                                            )?;
                                         default_sampler = Some(sampler.clone());
                                         sampler
                                     }
@@ -423,9 +430,10 @@ impl goods::SyncAsset for Gltf {
                                         default_sampler.clone()
                                     }
                                     None => {
-                                        let sampler = device.create_sampler(
-                                            SamplerInfo::default(),
-                                        )?;
+                                        let sampler =
+                                            renderer.device.create_sampler(
+                                                SamplerInfo::default(),
+                                            )?;
                                         default_sampler = Some(sampler.clone());
                                         sampler
                                     }

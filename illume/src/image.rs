@@ -491,16 +491,6 @@ impl ImageViewInfo {
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
-pub struct ImageCopy {
-    pub src_subresource: ImageSubresourceLayers,
-    pub src_offset: Offset3d,
-    pub dst_subresource: ImageSubresourceLayers,
-    pub dst_offset: Offset3d,
-    pub extent: Extent3d,
-}
-
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
-#[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
 pub struct ImageBlit {
     pub src_subresource: ImageSubresourceLayers,
     pub src_offsets: [Offset3d; 2],

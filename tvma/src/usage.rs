@@ -107,20 +107,25 @@ impl MemoryForUsage {
         let device_local: bool = flags.contains(Flags::DEVICE_LOCAL)
             ^ (usage.is_empty()
                 || usage.contains(UsageFlags::FAST_DEVICE_ACCESS));
+
         let host_visible: bool = flags.contains(Flags::HOST_VISIBLE)
             && !usage.intersects(
                 UsageFlags::HOST_ACCESS
                     | UsageFlags::UPLOAD
                     | UsageFlags::DOWNLOAD,
             );
+
         let cached: bool = flags.contains(Flags::HOST_CACHED)
             ^ usage.contains(UsageFlags::DOWNLOAD);
+
         let coherent: bool = flags.contains(Flags::HOST_COHERENT)
             ^ (usage.intersects(UsageFlags::UPLOAD | UsageFlags::DOWNLOAD));
 
-        15 - device_local as u32 * 8
-            - host_visible as u32 * 4
-            - cached as u32 * 2
-            - coherent as u32
+        let priority = device_local as u32 * 8
+            + host_visible as u32 * 4
+            + cached as u32 * 2
+            + coherent as u32;
+
+        priority
     }
 }

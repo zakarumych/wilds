@@ -6,5 +6,6 @@
 layout(location = 0) rayPayloadInEXT HitPayload prd;
 
 void main() {
-    prd.hit_value += vec3(1.0, 4.0, 7.0) / 2.0;
+    prd.albedo = vec4(1.0, 4.0, 7.0, 1.0) / 10;
+    prd.emissive = vec3(1.0, 4.0, 7.0);
 }

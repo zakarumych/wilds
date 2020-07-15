@@ -525,6 +525,39 @@ unsafe impl CommandBufferTrait for EruptCommandBuffer {
                     );
                 },
 
+                &Command::CopyBuffer {
+                    src_buffer,
+                    dst_buffer,
+                    regions,
+                } => unsafe {
+                    logical.cmd_copy_buffer(
+                        self.handle,
+                        src_buffer.erupt_ref(&*device).handle,
+                        dst_buffer.erupt_ref(&*device).handle,
+                        &regions
+                            .iter()
+                            .map(|region| region.to_erupt().builder())
+                            .collect::<SmallVec<[_; 4]>>(),
+                    );
+                },
+                &Command::CopyBufferImage {
+                    src_buffer,
+                    dst_image,
+                    dst_layout,
+                    regions,
+                } => unsafe {
+                    logical.cmd_copy_buffer_to_image(
+                        self.handle,
+                        src_buffer.erupt_ref(&*device).handle,
+                        dst_image.erupt_ref(&*device).handle,
+                        dst_layout.to_erupt(),
+                        &regions
+                            .iter()
+                            .map(|region| region.to_erupt().builder())
+                            .collect::<SmallVec<[_; 4]>>(),
+                    );
+                },
+
                 &Command::BlitImage {
                     src_image,
                     src_layout,

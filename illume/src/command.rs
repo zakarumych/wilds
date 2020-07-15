@@ -2,8 +2,8 @@ use crate::{
     buffer::Buffer,
     descriptor::DescriptorSet,
     image::{
-        Image, ImageBlit, ImageCopy, ImageLayoutTransition, ImageMemoryBarrier,
-        Layout,
+        Image, ImageBlit, ImageLayoutTransition, ImageMemoryBarrier,
+        ImageSubresourceLayers, Layout,
     },
     pipeline::{
         AccelerationStructureBuildGeometryInfo, GraphicsPipeline,
@@ -13,11 +13,40 @@ use crate::{
     render_pass::{ClearValue, Framebuffer, RenderPass},
     sampler::Filter,
     stage::PipelineStageFlags,
-    Extent3d, IndexType, OutOfMemory, Rect2d,
+    Extent3d, IndexType, Offset3d, OutOfMemory, Rect2d,
 };
 use maybe_sync::{MaybeSend, MaybeSync};
 use smallvec::SmallVec;
 use std::{fmt::Debug, ops::Range};
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
+pub struct BufferCopy {
+    pub src_offset: u64,
+    pub dst_offset: u64,
+    pub size: u64,
+}
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
+pub struct ImageCopy {
+    pub src_subresource: ImageSubresourceLayers,
+    pub src_offset: Offset3d,
+    pub dst_subresource: ImageSubresourceLayers,
+    pub dst_offset: Offset3d,
+    pub extent: Extent3d,
+}
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
+pub struct BufferImageCopy {
+    pub buffer_offset: u64,
+    pub buffer_row_length: u32,
+    pub buffer_image_height: u32,
+    pub image_subresource: ImageSubresourceLayers,
+    pub image_offset: Offset3d,
+    pub image_extent: Extent3d,
+}
 
 #[derive(Debug)]
 pub enum Command<'a> {
@@ -102,12 +131,25 @@ pub enum Command<'a> {
         extent: Extent3d,
     },
 
+    CopyBuffer {
+        src_buffer: &'a Buffer,
+        dst_buffer: &'a Buffer,
+        regions: &'a [BufferCopy],
+    },
+
     CopyImage {
         src_image: &'a Image,
         src_layout: Layout,
         dst_image: &'a Image,
         dst_layout: Layout,
         regions: &'a [ImageCopy],
+    },
+
+    CopyBufferImage {
+        src_buffer: &'a Buffer,
+        dst_image: &'a Image,
+        dst_layout: Layout,
+        regions: &'a [BufferImageCopy],
     },
 
     BlitImage {
@@ -423,6 +465,19 @@ impl<'a> Encoder<'a> {
         })
     }
 
+    pub fn copy_buffer(
+        &mut self,
+        src_buffer: &'a Buffer,
+        dst_buffer: &'a Buffer,
+        regions: &'a [BufferCopy],
+    ) {
+        self.commands.push(Command::CopyBuffer {
+            src_buffer,
+            dst_buffer,
+            regions,
+        })
+    }
+
     pub fn copy_image(
         &mut self,
         src_image: &'a Image,
@@ -434,6 +489,21 @@ impl<'a> Encoder<'a> {
         self.commands.push(Command::CopyImage {
             src_image,
             src_layout,
+            dst_image,
+            dst_layout,
+            regions,
+        })
+    }
+
+    pub fn copy_buffer_to_image(
+        &mut self,
+        src_buffer: &'a Buffer,
+        dst_image: &'a Image,
+        dst_layout: Layout,
+        regions: &'a [BufferImageCopy],
+    ) {
+        self.commands.push(Command::CopyBufferImage {
+            src_buffer,
             dst_image,
             dst_layout,
             regions,

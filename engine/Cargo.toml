@@ -64,6 +64,7 @@ tracing = { version = "0.1", features = ["log"] }
 tracing-subscriber = { version = "0.2", features = ["fmt"] }
 
 # Support
+fastbitset = { path = "../fastbitset" }
 cfg-if = "0.1"
 futures = "0.3"
 lazy_static = "1.4"
