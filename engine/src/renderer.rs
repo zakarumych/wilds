@@ -1,10 +1,10 @@
 mod material;
 mod mesh;
-// mod terrain;
 mod pass;
+mod terrain;
 mod vertex;
 
-pub use self::{material::*, mesh::*, vertex::*};
+pub use self::{material::*, mesh::*, terrain::*, vertex::*};
 
 use {
     self::pass::*,

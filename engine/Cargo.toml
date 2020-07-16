@@ -42,7 +42,7 @@ hecs = "0.2"
 ultraviolet = "0.4"
 
 # Windowing
-winit = "0.22"
+winit = "0.22" # "0.22.2"
 
 # Low-Level
 maybe-sync = "0.1"
@@ -71,6 +71,7 @@ lazy_static = "1.4"
 flume = "0.7"
 ordered-float = "2.0"
 hibitset = "0.6"
+num-traits = "0.2"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "0.2", features = ["macros", "rt-threaded", "blocking"] }

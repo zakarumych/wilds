@@ -1,6 +1,6 @@
 use {
     crate::renderer::{
-        Binding, FromBytes as _, Indices, Material, Mesh, MeshBuilder,
+        Binding, Context, FromBytes as _, Indices, Material, Mesh, MeshBuilder,
         Normal3d, Position3d, PositionNormalTangent3dUV, Renderer, Tangent3d,
         Texture, VertexType, UV,
     },
@@ -115,14 +115,11 @@ impl From<CreateImageError> for GltfError {
 }
 
 impl goods::SyncAsset for Gltf {
-    type Context = Renderer;
+    type Context = Context;
     type Error = GltfError;
     type Repr = GltfRepr;
 
-    fn build(
-        repr: GltfRepr,
-        renderer: &mut Renderer,
-    ) -> Result<Self, GltfError> {
+    fn build(repr: GltfRepr, context: &mut Context) -> Result<Self, GltfError> {
         let mut total_polygons = 0;
         let mut total_data = Vec::new();
 
@@ -220,7 +217,7 @@ impl goods::SyncAsset for Gltf {
             })
             .collect::<Result<_, _>>()?;
 
-        let buffer = renderer.create_buffer_static(
+        let buffer = context.create_buffer_static(
             BufferInfo {
                 align: 255,
                 size: u64::try_from(total_data.len())
@@ -285,7 +282,7 @@ impl goods::SyncAsset for Gltf {
                     }
                 };
                 let image = image::load_from_memory(data)?.to_rgba();
-                let image = renderer.create_image_static(
+                let image = context.create_image_static(
                     ImageInfo {
                         extent: ImageExtent::D2 {
                             width: image.dimensions().0,
@@ -303,7 +300,7 @@ impl goods::SyncAsset for Gltf {
                     &image.into_raw(),
                 )?;
 
-                let image = renderer
+                let image = context
                     .device
                     .create_image_view(ImageViewInfo::new(image))?;
                 Ok(image)
@@ -314,7 +311,7 @@ impl goods::SyncAsset for Gltf {
             .gltf
             .samplers()
             .map(|sampler| {
-                renderer.device.create_sampler(SamplerInfo {
+                context.create_sampler(SamplerInfo {
                         mag_filter: match sampler.mag_filter() {
                             None | Some(gltf::texture::MagFilter::Nearest) => {
                                 Filter::Nearest
@@ -401,10 +398,9 @@ impl goods::SyncAsset for Gltf {
                                         default_sampler.clone()
                                     }
                                     None => {
-                                        let sampler =
-                                            renderer.device.create_sampler(
-                                                SamplerInfo::default(),
-                                            )?;
+                                        let sampler = context.create_sampler(
+                                            SamplerInfo::default(),
+                                        )?;
                                         default_sampler = Some(sampler.clone());
                                         sampler
                                     }
@@ -430,10 +426,9 @@ impl goods::SyncAsset for Gltf {
                                         default_sampler.clone()
                                     }
                                     None => {
-                                        let sampler =
-                                            renderer.device.create_sampler(
-                                                SamplerInfo::default(),
-                                            )?;
+                                        let sampler = context.create_sampler(
+                                            SamplerInfo::default(),
+                                        )?;
                                         default_sampler = Some(sampler.clone());
                                         sampler
                                     }
@@ -537,18 +532,14 @@ where
         pub use gltf::*;
 
         let mut usage = BufferUsage::empty();
-        usage |= if self.raster {
-            BufferUsage::INDEX | BufferUsage::VERTEX
-        } else {
-            BufferUsage::empty()
-        };
-        usage |= if self.blas {
-            BufferUsage::RAY_TRACING
+        if self.raster {
+            usage |= BufferUsage::INDEX | BufferUsage::VERTEX;
+        }
+        if self.blas {
+            usage |= BufferUsage::RAY_TRACING
                 | BufferUsage::SHADER_DEVICE_ADDRESS
-                | BufferUsage::STORAGE
-        } else {
-            BufferUsage::empty()
-        };
+                | BufferUsage::STORAGE;
+        }
 
         match Gltf::from_slice(&bytes) {
             Ok(gltf) => {

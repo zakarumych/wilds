@@ -1,9 +1,10 @@
 use {
+    super::Context,
+    goods::{ready, Cache, Format, Ready, SyncAsset},
     illume::{
         CreateImageError, Device, Image, ImageExtent, ImageInfo, ImageUsage,
         Samples1,
     },
-    goods::{ready, Cache, Format, Ready, SyncAsset},
     image::{
         load_from_memory, DynamicImage, GenericImageView as _, ImageError,
     },
@@ -14,13 +15,13 @@ use {
 pub struct Texture(pub Image);
 
 impl SyncAsset for Texture {
-    type Context = Device;
+    type Context = Context;
     type Error = CreateImageError;
     type Repr = DynamicImage;
 
     fn build(
         image: DynamicImage,
-        device: &mut Device,
+        ctx: &mut Context,
     ) -> Result<Self, CreateImageError> {
         use illume::Format;
 
@@ -84,28 +85,28 @@ impl SyncAsset for Texture {
                 bytemuck::cast_slice(&bytes16[..])
             }
         };
-        device
-            .create_image_static(
-                ImageInfo {
-                    extent: ImageExtent::D2 {
-                        width: w,
-                        height: h,
-                    },
-                    format,
-                    levels: 1,
-                    layers: 1,
-                    samples: Samples1,
-                    usage: ImageUsage::SAMPLED
-                        | ImageUsage::STORAGE
-                        | ImageUsage::TRANSFER_SRC,
+        ctx.create_image_static(
+            ImageInfo {
+                extent: ImageExtent::D2 {
+                    width: w,
+                    height: h,
                 },
-                &bytes,
-            )
-            .map(Texture)
+                format,
+                levels: 1,
+                layers: 1,
+                samples: Samples1,
+                usage: ImageUsage::SAMPLED
+                    | ImageUsage::STORAGE
+                    | ImageUsage::TRANSFER_SRC,
+            },
+            &bytes,
+        )
+        .map(Texture)
     }
 }
 
 /// Quasi-format that tries to guess image format.
+#[derive(Debug)]
 pub struct GuessImageFormat;
 
 impl<K> Format<Texture, K> for GuessImageFormat {

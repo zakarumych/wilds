@@ -2,11 +2,11 @@ use {
     bumpalo::Bump,
     color_eyre::Report,
     hecs::World,
-    std::{cmp::max, collections::VecDeque, time::Duration},
+    std::{cmp::max, collections::VecDeque, task::Poll, time::Duration},
     ultraviolet::{Mat4, Vec3},
     wilds::{
         Camera, Clocks, DirectionalLight, Engine, Gltf, GltfFormat, GltfNode,
-        Material, Mesh, Renderer,
+        Material, Mesh, Renderer, Terrain, TerrainFormat,
     },
     winit::{
         dpi::PhysicalSize,
@@ -35,7 +35,13 @@ fn main() -> Result<(), Report> {
                 z_near: 0.1,
                 z_far: 1000.0,
             },
-            Mat4::from_translation(Vec3::new(0.0, 10.0, 30.0)),
+            // Mat4::from_translation(Vec3::new(0.0, 10.0, 0.0)),
+            Mat4::look_at(
+                Vec3::new(0.0, 20.0, 0.0),
+                Vec3::new(32.0, 3.0, 32.0),
+                Vec3::new(0.0, 1.0, 0.0),
+            )
+            .inversed(),
         ));
 
         engine.world.spawn((DirectionalLight {
@@ -43,13 +49,23 @@ fn main() -> Result<(), Report> {
             radiance: [8.5, 6.9, 2.4],
         },));
 
-        let mut city_opt = Some(engine.assets.load_with_format(
-            "thor_and_the_midgard_serpent/scene.gltf".to_owned(),
-            GltfFormat {
+        // let mut city_opt = Some(engine.assets.load_with_format(
+        //     "thor_and_the_midgard_serpent/scene.gltf".to_owned(),
+        //     GltfFormat {
+        //         raster: false,
+        //         blas: true,
+        //     },
+        // ));
+
+        let mut terrain_opt = Some(engine.assets.load_with_format(
+            "terrain/0001.png".to_owned(),
+            TerrainFormat {
                 raster: false,
                 blas: true,
+                factor: 3.0,
             },
         ));
+
         window.request_redraw();
 
         let mut frame_times = VecDeque::new();
@@ -57,18 +73,38 @@ fn main() -> Result<(), Report> {
         let mut ticker = Duration::new(0, 0);
 
         loop {
-            if let Some(city) = &mut city_opt {
-                if let Some(city) = city.get() {
-                    tracing::info!("Scene loaded");
-                    load_gltf_scene(
-                        city,
-                        &mut engine.world,
-                        Mat4::from_scale(0.01),
-                    );
+            if let Some(terrain) = &mut terrain_opt {
+                match terrain.query() {
+                    Poll::Pending => {}
+                    Poll::Ready(Ok(Terrain(mesh))) => {
+                        tracing::info!("Terrain loaded");
 
-                    city_opt = None;
+                        engine.world.spawn((
+                            mesh.clone(),
+                            Material::color([0.3, 0.5, 0.7, 1.0]),
+                            Mat4::identity(),
+                        ));
+
+                        terrain_opt = None;
+                    }
+                    Poll::Ready(Err(err)) => {
+                        tracing::error!("Failed to load terrain: {}", err);
+                    }
                 }
             }
+
+            // if let Some(city) = &mut city_opt {
+            //     if let Some(city) = city.get() {
+            //         tracing::info!("Scene loaded");
+            //         load_gltf_scene(
+            //             city,
+            //             &mut engine.world,
+            //             Mat4::from_scale(0.01),
+            //         );
+
+            //         city_opt = None;
+            //     }
+            // }
 
             // Main game loop
             match engine.next().await {
@@ -111,7 +147,7 @@ fn main() -> Result<(), Report> {
             }
 
             bump.reset();
-            engine.assets.process(&mut renderer);
+            engine.assets.process(&mut *renderer);
         }
 
         Ok(())
