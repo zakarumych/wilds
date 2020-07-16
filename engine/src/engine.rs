@@ -160,7 +160,7 @@ impl Engine {
 
         // Here goes magic
         event_loop.run(move |event, el, flow| {
-            // tracing::trace!("Event {:#?}", event);
+            tracing::trace!("Event {:#?}", event);
 
             if let Some(app) = &mut app_opt {
                 // Set event. Excluding an event bound to a lifetime.
@@ -196,8 +196,8 @@ impl Engine {
                     *flow = ControlFlow::Exit;
                     app_opt = None;
                 } else {
-                    // *flow = ControlFlow::Wait;
-                    *flow = ControlFlow::Poll;
+                    *flow = ControlFlow::Wait;
+                    // *flow = ControlFlow::Poll;
                 }
 
                 // Unset event loop before it is invalidated.

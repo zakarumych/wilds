@@ -18,17 +18,19 @@ void main()
     const vec2 inUV = pixelCenter/vec2(gl_LaunchSizeEXT.xy);
     vec2 d = inUV * 2.0 - 1.0;
     vec4 proj  = globals.cam.iproj * vec4(d.x, d.y, 1, 1);
-    vec4 target = globals.cam.iview * vec4(normalize(proj.xyz) * 30.0, 1.0);
+    vec4 target = globals.cam.iview * vec4(normalize(proj.xyz), 1.0);
 
     vec2 off = vec2(0.0, 0.0);//(blue_rand_circle(co + uvec3(13)) - 0.5);
-    vec4 origin = globals.cam.iview * vec4(off, 0, 1);
+    vec4 origin = globals.cam.iview[3];
 
     prd.normal_depth = vec4(0, 0, 0, -1);
     prd.albedo = vec4(0, 0, 0, 0);
     prd.emissive = vec3(0, 0, 0);
     traceRayEXT(tlas, 0, 0xff, 0, 0, 0, origin.xyz, 0.0, normalize((target - origin).xyz), 1000.0, 0);
 
-    imageStore(output_albedo, ivec2(gl_LaunchIDEXT.xy), prd.albedo);
+    vec3 normal_vis = prd.normal_depth.xyz / 2 + vec3(0.5, 0.5, 0.5);
+
+    imageStore(output_albedo, ivec2(gl_LaunchIDEXT.xy), vec4(normal_vis, 1.0));
     imageStore(output_normals_depth, ivec2(gl_LaunchIDEXT.xy), prd.normal_depth);
     // imageStore(output_emissive, ivec2(gl_LaunchIDEXT.xy), prd.emissive);
 }

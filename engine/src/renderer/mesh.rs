@@ -1,4 +1,4 @@
-use super::{vertex::VertexLayout, Renderer};
+use super::{vertex::VertexLayout, Context};
 use bumpalo::{collections::Vec as BVec, Bump};
 use illume::*;
 use std::{
@@ -338,7 +338,7 @@ pub struct MeshData<'a> {
 impl MeshData<'_> {
     pub fn build(
         &self,
-        renderer: &mut Renderer,
+        ctx: &mut Context,
         vertices_usage: BufferUsage,
         indices_usage: BufferUsage,
     ) -> Result<Mesh, OutOfMemory> {
@@ -358,7 +358,7 @@ impl MeshData<'_> {
                 min_vertex_count = min_vertex_count.min(vertex_count);
 
                 Ok(Binding {
-                    buffer: renderer.create_buffer_static(
+                    buffer: ctx.create_buffer_static(
                         BufferInfo {
                             align: 255,
                             size: u64::try_from(binding.data.len())
@@ -387,7 +387,7 @@ impl MeshData<'_> {
                 count = u32::try_from(index_count).map_err(|_| OutOfMemory)?;
 
                 Ok(Indices {
-                    buffer: renderer.create_buffer_static(
+                    buffer: ctx.create_buffer_static(
                         BufferInfo {
                             align: 255,
                             size: u64::try_from(indices.data.len())
@@ -414,26 +414,30 @@ impl MeshData<'_> {
 
     pub fn build_for_raster(
         &self,
-        renderer: &mut Renderer,
+        ctx: &mut Context,
     ) -> Result<Mesh, OutOfMemory> {
-        self.build(renderer, BufferUsage::VERTEX, BufferUsage::INDEX)
+        self.build(ctx, BufferUsage::VERTEX, BufferUsage::INDEX)
     }
 
     pub fn build_for_blas(
         &self,
-        renderer: &mut Renderer,
+        ctx: &mut Context,
     ) -> Result<Mesh, OutOfMemory> {
-        self.build(renderer, BufferUsage::RAY_TRACING, BufferUsage::RAY_TRACING)
+        self.build(
+            ctx,
+            BufferUsage::RAY_TRACING | BufferUsage::STORAGE,
+            BufferUsage::RAY_TRACING | BufferUsage::STORAGE,
+        )
     }
 
     pub fn build_for_dynamic_blas(
         &self,
-        renderer: &mut Renderer,
+        ctx: &mut Context,
     ) -> Result<Mesh, OutOfMemory> {
         self.build(
-            renderer,
+            ctx,
             BufferUsage::RAY_TRACING | BufferUsage::STORAGE,
-            BufferUsage::RAY_TRACING,
+            BufferUsage::RAY_TRACING | BufferUsage::STORAGE,
         )
     }
 }
@@ -518,7 +522,7 @@ mod gm {
         pub fn from_generator<G, V, P>(
             generator: &G,
             usage: BufferUsage,
-            renderer: &mut Renderer,
+            ctx: &mut Context,
             index_type: IndexType,
             vertex: impl Fn(Vertex) -> V,
         ) -> Result<Self, OutOfMemory>
@@ -640,7 +644,7 @@ mod gm {
                 }
             }
 
-            let buffer = renderer.create_buffer_static(
+            let buffer = ctx.create_buffer_static(
                 BufferInfo {
                     align: 63,
                     size: u64::try_from(data.len()).map_err(|_| OutOfMemory)?,

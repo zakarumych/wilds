@@ -22,3 +22,15 @@ pub struct Material {
                                            * * normalScale,
                                            * sampledNormal.z) */
 }
+
+impl Material {
+    pub fn color(rgba: [f32; 4]) -> Self {
+        let [r, g, b, a] = rgba;
+        Material {
+            albedo: None,
+            albedo_factor: [r.into(), g.into(), b.into(), a.into()],
+            normal: None,
+            normal_factor: 0.0.into(),
+        }
+    }
+}
