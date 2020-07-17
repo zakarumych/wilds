@@ -40,8 +40,7 @@ fn main() -> Result<(), Report> {
                 Vec3::new(0.0, 20.0, 0.0),
                 Vec3::new(32.0, 3.0, 32.0),
                 Vec3::new(0.0, 1.0, 0.0),
-            )
-            .inversed(),
+            ),
         ));
 
         engine.world.spawn((DirectionalLight {
@@ -49,13 +48,13 @@ fn main() -> Result<(), Report> {
             radiance: [8.5, 6.9, 2.4],
         },));
 
-        // let mut city_opt = Some(engine.assets.load_with_format(
-        //     "thor_and_the_midgard_serpent/scene.gltf".to_owned(),
-        //     GltfFormat {
-        //         raster: false,
-        //         blas: true,
-        //     },
-        // ));
+        let mut city_opt = Some(engine.assets.load_with_format(
+            "thor_and_the_midgard_serpent/scene.gltf".to_owned(),
+            GltfFormat {
+                raster: false,
+                blas: true,
+            },
+        ));
 
         let mut terrain_opt = Some(engine.assets.load_with_format(
             "terrain/0001.png".to_owned(),
@@ -93,18 +92,18 @@ fn main() -> Result<(), Report> {
                 }
             }
 
-            // if let Some(city) = &mut city_opt {
-            //     if let Some(city) = city.get() {
-            //         tracing::info!("Scene loaded");
-            //         load_gltf_scene(
-            //             city,
-            //             &mut engine.world,
-            //             Mat4::from_scale(0.01),
-            //         );
+            if let Some(city) = &mut city_opt {
+                if let Some(city) = city.get() {
+                    tracing::info!("Scene loaded");
+                    load_gltf_scene(
+                        city,
+                        &mut engine.world,
+                        Mat4::from_scale(0.01),
+                    );
 
-            //         city_opt = None;
-            //     }
-            // }
+                    city_opt = None;
+                }
+            }
 
             // Main game loop
             match engine.next().await {
