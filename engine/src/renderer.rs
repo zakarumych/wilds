@@ -135,9 +135,8 @@ impl Context {
             self.device.create_buffer_static(info, data)
         } else {
             info.usage |= BufferUsage::TRANSFER_DST;
-            let buffer =
-                self.device.create_buffer(info).map_err(|_| panic!())?;
-            self.upload_buffer(&buffer, 0, data).map_err(|_| panic!())?;
+            let buffer = self.device.create_buffer(info)?;
+            self.upload_buffer(&buffer, 0, data)?;
             Ok(buffer)
         }
 
@@ -157,10 +156,7 @@ impl Context {
     {
         info.usage |= ImageUsage::TRANSFER_DST;
         let subresource = ImageSubresourceLayers::all_layers(&info, 0);
-        let image = self.device.create_image(info).map_err(|err| {
-            panic!();
-            err
-        })?;
+        let image = self.device.create_image(info)?;
         self.upload_image(
             &image,
             None,
@@ -170,11 +166,7 @@ impl Context {
             Offset3d::ZERO,
             info.extent.into_3d(),
             data,
-        )
-        .map_err(|err| {
-            panic!();
-            err
-        })?;
+        )?;
         Ok(image)
 
         // info.memory |= MemoryUsageFlags::UPLOAD;
@@ -531,7 +523,7 @@ impl Renderer {
         let fence = &self.fences[(self.frame % 2) as usize];
         self.swapchain_blit.draw(
             swapchain::BlitInput {
-                image: rt_prepass_output.output_albedo,
+                image: rt_prepass_output.diffuse,
                 frame,
             },
             self.frame,

@@ -10,14 +10,18 @@ struct RecursiveRay {
     vec3 direction;
 };
 
-struct HitPayload {
-    vec4 normal_depth;
+struct PrimaryHitPayload {
+    vec3 normal;
+    float depth;
     vec4 albedo;
     vec3 emissive;
+    uint direct;
+    vec3 diffuse;
+    uvec3 co;
 };
 
-struct LightHitPayload {
-    bool shadowed;
+struct DiffuseHitPayload {
+    vec3 radiation;
 };
 
 struct Vertex {
@@ -55,10 +59,9 @@ layout(binding = 3, set = 0, scalar) buffer Vertices { Vertex v[]; } vertices[];
 layout(binding = 4, set = 0) uniform sampler2D albedo[];
 layout(binding = 5, set = 0) uniform sampler2D normal[];
 
-layout(binding = 0, set = 1) uniform Globals {
+layout(binding = 0, set = 1, std140) uniform Globals {
     Camera cam;
     DirLight dirlight;
-    float seconds;
     uint frame;
 } globals;
 

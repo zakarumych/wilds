@@ -2,6 +2,7 @@ use {
     super::Pass,
     crate::{
         clocks::ClockIndex,
+        light::DirectionalLight,
         renderer::{
             Context, Material, Mesh, PositionNormalTangent3dUV, Renderable,
             Renderer, Texture, VertexType,
@@ -34,8 +35,10 @@ pub struct Input<'a> {
 
 pub struct Output {
     pub tlas: AccelerationStructure,
-    pub output_albedo: Image,
-    pub output_normal: Image,
+    pub albedo: Image,
+    pub normal_depth: Image,
+    pub emissive_direct: Image,
+    pub diffuse: Image,
 }
 
 struct SparseDescriptors<T> {
@@ -107,9 +110,13 @@ pub struct RtPrepass {
     blue_noise_buffer_64x64x64: Buffer,
 
     output_albedo_image: Image,
-    output_normal_image: Image,
     output_albedo_view: ImageView,
-    output_normal_view: ImageView,
+    output_normal_depth_image: Image,
+    output_normal_depth_view: ImageView,
+    output_emissive_direct_image: Image,
+    output_emissive_direct_view: ImageView,
+    output_diffuse_image: Image,
+    output_diffuse_view: ImageView,
 }
 
 #[repr(C)]
@@ -194,9 +201,25 @@ impl RtPrepass {
                         stages: ShaderStageFlags::RAYGEN,
                         flags: DescriptorBindingFlags::empty(),
                     },
-                    // normal
+                    // normal-depth
                     DescriptorSetLayoutBinding {
                         binding: 7,
+                        ty: DescriptorType::StorageImage,
+                        count: 1,
+                        stages: ShaderStageFlags::RAYGEN,
+                        flags: DescriptorBindingFlags::empty(),
+                    },
+                    // emissive-direct
+                    DescriptorSetLayoutBinding {
+                        binding: 8,
+                        ty: DescriptorType::StorageImage,
+                        count: 1,
+                        stages: ShaderStageFlags::RAYGEN,
+                        flags: DescriptorBindingFlags::empty(),
+                    },
+                    // diffuse
+                    DescriptorSetLayoutBinding {
+                        binding: 9,
                         ty: DescriptorType::StorageImage,
                         count: 1,
                         stages: ShaderStageFlags::RAYGEN,
@@ -235,28 +258,46 @@ impl RtPrepass {
                 sets: vec![dset_layout.clone(), per_frame_dset_layout.clone()],
             })?;
 
-        let prepass_rgen = RaygenShader::with_main(
+        let primary_rgen = RaygenShader::with_main(
             ctx.create_shader_module(
                 Spirv::new(
-                    include_bytes!("rt_prepass/prepass.rgen.spv").to_vec(),
+                    include_bytes!("rt_prepass/primary.rgen.spv").to_vec(),
                 )
                 .into(),
             )?,
         );
 
-        let prepass_rmiss = MissShader::with_main(
+        let primary_rmiss = MissShader::with_main(
             ctx.create_shader_module(
                 Spirv::new(
-                    include_bytes!("rt_prepass/prepass.rmiss.spv").to_vec(),
+                    include_bytes!("rt_prepass/primary.rmiss.spv").to_vec(),
                 )
                 .into(),
             )?,
         );
 
-        let prepass_rchit = ClosestHitShader::with_main(
+        let primary_rchit = ClosestHitShader::with_main(
             ctx.create_shader_module(
                 Spirv::new(
-                    include_bytes!("rt_prepass/prepass.rchit.spv").to_vec(),
+                    include_bytes!("rt_prepass/primary.rchit.spv").to_vec(),
+                )
+                .into(),
+            )?,
+        );
+
+        let diffuse_rmiss = MissShader::with_main(
+            ctx.create_shader_module(
+                Spirv::new(
+                    include_bytes!("rt_prepass/diffuse.rmiss.spv").to_vec(),
+                )
+                .into(),
+            )?,
+        );
+
+        let diffuse_rchit = ClosestHitShader::with_main(
+            ctx.create_shader_module(
+                Spirv::new(
+                    include_bytes!("rt_prepass/diffuse.rchit.spv").to_vec(),
                 )
                 .into(),
             )?,
@@ -274,21 +315,28 @@ impl RtPrepass {
         let pipeline =
             ctx.create_ray_tracing_pipeline(RayTracingPipelineInfo {
                 shaders: vec![
-                    prepass_rgen.into(),
-                    prepass_rmiss.into(),
-                    prepass_rchit.into(),
+                    primary_rgen.into(),
+                    primary_rmiss.into(),
+                    primary_rchit.into(),
+                    diffuse_rmiss.into(),
+                    diffuse_rchit.into(),
                     shadow_rmiss.into(),
                 ],
                 groups: vec![
                     RayTracingShaderGroupInfo::Raygen { raygen: 0 },
                     RayTracingShaderGroupInfo::Miss { miss: 1 },
                     RayTracingShaderGroupInfo::Miss { miss: 3 },
+                    RayTracingShaderGroupInfo::Miss { miss: 5 },
                     RayTracingShaderGroupInfo::Triangles {
                         any_hit: None,
                         closest_hit: Some(2),
                     },
+                    RayTracingShaderGroupInfo::Triangles {
+                        any_hit: None,
+                        closest_hit: Some(4),
+                    },
                 ],
-                max_recursion_depth: 2,
+                max_recursion_depth: 10,
                 layout: pipeline_layout.clone(),
             })?;
 
@@ -297,8 +345,8 @@ impl RtPrepass {
                 &pipeline,
                 ShaderBindingTableInfo {
                     raygen: Some(0),
-                    miss: &[1, 2],
-                    hit: &[3],
+                    miss: &[1, 2, 3],
+                    hit: &[4, 5],
                     callable: &[],
                 },
             )?;
@@ -340,7 +388,7 @@ impl RtPrepass {
         // Image matching surface extent.
         let output_albedo_image = ctx.create_image(ImageInfo {
             extent: extent.into(),
-            format: Format::RGBA32Sfloat,
+            format: Format::RGBA8Unorm,
             levels: 1,
             layers: 1,
             samples: Samples::Samples1,
@@ -353,7 +401,7 @@ impl RtPrepass {
             output_albedo_image.clone(),
         ))?;
 
-        let output_normal_image = ctx.create_image(ImageInfo {
+        let output_normal_depth_image = ctx.create_image(ImageInfo {
             extent: extent.into(),
             format: Format::RGBA32Sfloat,
             levels: 1,
@@ -364,11 +412,41 @@ impl RtPrepass {
         })?;
 
         // View for whole image
-        let output_normal_view = ctx.create_image_view(ImageViewInfo::new(
-            output_normal_image.clone(),
+        let output_normal_depth_view = ctx.create_image_view(
+            ImageViewInfo::new(output_normal_depth_image.clone()),
+        )?;
+
+        let output_emissive_direct_image = ctx.create_image(ImageInfo {
+            extent: extent.into(),
+            format: Format::RGBA32Sfloat,
+            levels: 1,
+            layers: 1,
+            samples: Samples::Samples1,
+            usage: ImageUsage::STORAGE | ImageUsage::TRANSFER_SRC,
+            memory: MemoryUsageFlags::empty(),
+        })?;
+
+        // View for whole image
+        let output_emissive_direct_view = ctx.create_image_view(
+            ImageViewInfo::new(output_emissive_direct_image.clone()),
+        )?;
+
+        let output_diffuse_image = ctx.create_image(ImageInfo {
+            extent: extent.into(),
+            format: Format::RGBA32Sfloat,
+            levels: 1,
+            layers: 1,
+            samples: Samples::Samples1,
+            usage: ImageUsage::STORAGE | ImageUsage::TRANSFER_SRC,
+            memory: MemoryUsageFlags::empty(),
+        })?;
+
+        // View for whole image
+        let output_diffuse_view = ctx.create_image_view(ImageViewInfo::new(
+            output_diffuse_image.clone(),
         ))?;
 
-        tracing::trace!("Materialsnormal image created");
+        tracing::trace!("Feature images created");
 
         let set = ctx.create_descriptor_set(DescriptorSetInfo {
             layout: dset_layout.clone(),
@@ -418,7 +496,25 @@ impl RtPrepass {
                     binding: 7,
                     element: 0,
                     descriptors: Descriptors::StorageImage(&[(
-                        output_normal_view.clone(),
+                        output_normal_depth_view.clone(),
+                        Layout::General,
+                    )]),
+                },
+                WriteDescriptorSet {
+                    set: &set,
+                    binding: 8,
+                    element: 0,
+                    descriptors: Descriptors::StorageImage(&[(
+                        output_emissive_direct_view.clone(),
+                        Layout::General,
+                    )]),
+                },
+                WriteDescriptorSet {
+                    set: &set,
+                    binding: 9,
+                    element: 0,
+                    descriptors: Descriptors::StorageImage(&[(
+                        output_diffuse_view.clone(),
                         Layout::General,
                     )]),
                 },
@@ -479,9 +575,13 @@ impl RtPrepass {
             per_frame_sets: [per_frame_set0, per_frame_set1],
             blue_noise_buffer_64x64x64,
             output_albedo_image,
-            output_normal_image,
             output_albedo_view,
-            output_normal_view,
+            output_normal_depth_image,
+            output_normal_depth_view,
+            output_emissive_direct_image,
+            output_emissive_direct_view,
+            output_diffuse_image,
+            output_diffuse_view,
             meshes: SparseDescriptors::new(),
             albedo: SparseDescriptors::new(),
             normal: SparseDescriptors::new(),
@@ -705,13 +805,31 @@ impl<'a> Pass<'a> for RtPrepass {
             PipelineStageFlags::RAY_TRACING_SHADER,
         );
 
+        let dirlight = world
+            .query::<&DirectionalLight>()
+            .iter()
+            .next()
+            .map(|(_, dl)| GlobalsDirLight {
+                rad: Vec3::from(dl.radiance),
+                dir: dl.direction,
+                _pad0: 0.0,
+                _pad1: 0.0,
+            })
+            .unwrap_or(GlobalsDirLight {
+                rad: Vec3::zero(),
+                dir: Vec3::zero(),
+                _pad0: 0.0,
+                _pad1: 0.0,
+            });
+
         let globals = Globals {
             camera: GlobalsCamera {
-                view: input.camera_transform.inversed(),
-                iview: input.camera_transform,
+                view: input.camera_transform,
+                iview: input.camera_transform.inversed(),
                 proj: input.camera_projection,
                 iproj: input.camera_projection.inversed(),
             },
+            dirlight,
             frame: frame as u32,
         };
 
@@ -742,7 +860,17 @@ impl<'a> Pass<'a> for RtPrepass {
             )
             .into(),
             ImageLayoutTransition::initialize_whole(
-                &self.output_normal_image,
+                &self.output_normal_depth_image,
+                Layout::General,
+            )
+            .into(),
+            ImageLayoutTransition::initialize_whole(
+                &self.output_emissive_direct_image,
+                Layout::General,
+            )
+            .into(),
+            ImageLayoutTransition::initialize_whole(
+                &self.output_diffuse_image,
                 Layout::General,
             )
             .into(),
@@ -760,8 +888,10 @@ impl<'a> Pass<'a> for RtPrepass {
         ctx.queue.submit_no_semaphores(encoder.finish(), fence);
 
         Ok(Output {
-            output_albedo: self.output_albedo_image.clone(),
-            output_normal: self.output_normal_image.clone(),
+            albedo: self.output_albedo_image.clone(),
+            normal_depth: self.output_normal_depth_image.clone(),
+            emissive_direct: self.output_emissive_direct_image.clone(),
+            diffuse: self.output_diffuse_image.clone(),
             tlas: self.tlas.clone(),
         })
     }
@@ -795,6 +925,7 @@ unsafe impl Pod for GlobalsDirLight {}
 #[derive(Copy, Clone, Debug)]
 struct Globals {
     camera: GlobalsCamera,
+    dirlight: GlobalsDirLight,
     frame: u32,
 }
 
