@@ -164,32 +164,11 @@ pub struct SurfaceCapabilities {
     pub formats: Vec<Format>,
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-#[repr(transparent)]
-pub struct Surface {
-    handle: Handle<Self>,
-}
-
-impl ResourceTrait for Surface {
-    type Info = SurfaceInfo;
-
-    fn from_handle(handle: Handle<Self>) -> Self {
-        Self { handle }
-    }
-
-    fn handle(&self) -> &Handle<Self> {
-        &self.handle
-    }
-}
-
-impl Surface {
-    pub fn info(&self) -> &SurfaceInfo {
-        self.handle.info()
-    }
+define_handle! {
+    pub struct Surface(SurfaceInfo);
 }
 
 #[derive(Clone, Copy, Debug)]
-
 pub struct SurfaceInfo {
     pub window: RawWindowHandle,
 }
@@ -225,28 +204,8 @@ impl Swapchain {
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-#[repr(transparent)]
-pub struct SwapchainImage {
-    handle: Handle<Self>,
-}
-
-impl SwapchainImage {
-    pub fn info(&self) -> &SwapchainImageInfo {
-        self.handle.info()
-    }
-}
-
-impl ResourceTrait for SwapchainImage {
-    type Info = SwapchainImageInfo;
-
-    fn from_handle(handle: Handle<Self>) -> Self {
-        Self { handle }
-    }
-
-    fn handle(&self) -> &Handle<Self> {
-        &self.handle
-    }
+define_handle! {
+    pub struct SwapchainImage(SwapchainImageInfo);
 }
 
 #[derive(Clone, Debug)]
@@ -280,7 +239,6 @@ pub trait SwapchainTrait: Debug + MaybeSend + MaybeSync + 'static {
 }
 
 #[allow(dead_code)]
-
 fn check() {
     assert_error::<CreateSurfaceError>();
 

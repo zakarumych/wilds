@@ -303,7 +303,8 @@ pub struct Renderer {
 
     swapchain: Swapchain,
     rt_prepass: RtPrepass,
-    swapchain_blit: SwapchainBlitPresentPass,
+    combine: CombinePass,
+    // swapchain_blit: SwapchainBlitPresentPass,
 }
 
 impl Deref for Renderer {
@@ -409,12 +410,13 @@ impl Renderer {
 
         let mut swapchain = context.create_swapchain(&mut surface)?;
         swapchain.configure(
-            ImageUsage::TRANSFER_DST,
+            ImageUsage::COLOR_ATTACHMENT,
             format,
             PresentMode::Mailbox,
         )?;
 
-        let swapchain_blit = SwapchainBlitPresentPass;
+        // let swapchain_blit = SwapchainBlitPresentPass;
+        let combine = CombinePass::new(&mut context)?;
 
         context.buffer_uploads.push(blue_noise_upload);
 
@@ -424,7 +426,8 @@ impl Renderer {
             blases: HashMap::new(),
             rt_prepass,
             swapchain,
-            swapchain_blit,
+            // swapchain_blit,
+            combine,
             context,
         })
     }
@@ -513,6 +516,8 @@ impl Renderer {
                 blases: &self.blases,
             },
             self.frame,
+            &[],
+            &[],
             None,
             &mut self.context,
             world,
@@ -521,18 +526,41 @@ impl Renderer {
         )?;
 
         let fence = &self.fences[(self.frame % 2) as usize];
-        self.swapchain_blit.draw(
-            swapchain::BlitInput {
-                image: rt_prepass_output.diffuse,
-                frame,
+        self.combine.draw(
+            combine::Input {
+                albedo: rt_prepass_output.albedo,
+                normal_depth: rt_prepass_output.normal_depth,
+                emissive_direct: rt_prepass_output.emissive_direct,
+                diffuse: rt_prepass_output.diffuse,
+                combined: frame.info().image.clone(),
             },
             self.frame,
+            &[(
+                PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                frame.info().wait.clone(),
+            )],
+            &[frame.info().signal.clone()],
             Some(fence),
             &mut self.context,
             world,
             clock,
             bump,
         )?;
+
+        self.queue.present(frame);
+
+        // self.swapchain_blit.draw(
+        //     swapchain::BlitInput {
+        //         image: rt_prepass_output.diffuse,
+        //         frame,
+        //     },
+        //     self.frame,
+        //     Some(fence),
+        //     &mut self.context,
+        //     world,
+        //     clock,
+        //     bump,
+        // )?;
 
         self.frame += 1;
 

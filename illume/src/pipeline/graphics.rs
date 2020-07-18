@@ -15,7 +15,6 @@ pub use self::State::{Dynamic, Static};
 /// Wrapper for pipeline states that can be either static or dynamic.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
-
 pub enum State<T> {
     /// Static state value.
     Static { value: T },
@@ -47,36 +46,19 @@ impl<T> From<T> for State<T> {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
-
 pub struct Bounds {
     pub offset: OrderedFloat<f32>,
     pub size: OrderedFloat<f32>,
 }
 
-/// Resource that describes whole graphics pipeline state.
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-#[repr(transparent)]
-
-pub struct GraphicsPipeline {
-    handle: Handle<Self>,
-}
-
-impl ResourceTrait for GraphicsPipeline {
-    type Info = GraphicsPipelineInfo;
-
-    fn from_handle(handle: Handle<Self>) -> Self {
-        Self { handle }
-    }
-
-    fn handle(&self) -> &Handle<Self> {
-        &self.handle
-    }
+define_handle! {
+    /// Resource that describes whole graphics pipeline state.
+    pub struct GraphicsPipeline(GraphicsPipelineInfo);
 }
 
 /// Graphics pipeline state definition.
 /// Fields are ordered to match pipeline stages, including fixed functions.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-
 pub struct GraphicsPipelineInfo {
     /// For each vertex buffer specifies how it is bound.
     pub vertex_bindings: Vec<VertexInputBinding>,
@@ -113,7 +95,6 @@ pub struct GraphicsPipelineInfo {
 /// Used in `graphics_pipeline_info` macro.
 #[doc(hidden)]
 #[allow(missing_debug_implementations)]
-
 pub struct GraphicsPipelineInfoBuilder {
     pub vertex_bindings: Vec<VertexInputBinding>,
     pub vertex_attributes: Vec<VertexInputAttribute>,
@@ -124,7 +105,6 @@ pub struct GraphicsPipelineInfoBuilder {
 }
 
 #[doc(hidden)]
-
 impl GraphicsPipelineInfoBuilder {
     pub fn new() -> Self {
         GraphicsPipelineInfoBuilder {
@@ -160,7 +140,6 @@ impl GraphicsPipelineInfoBuilder {
 /// }
 /// ```
 #[macro_export]
-
 macro_rules! graphics_pipeline_info {
     ($($field:ident : $value:expr),* $(,)?) => {
         graphics_pipeline_info!(@UNFOLD builder { let mut builder = GraphicsPipelineInfoBuilder::new(); } { $($field: $value),* } {})
@@ -222,7 +201,6 @@ macro_rules! graphics_pipeline_info {
 /// Controls what subrange corresponds for vertex X of instance Y.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
-
 pub struct VertexInputBinding {
     /// Controls iteration frequency.
     pub rate: VertexInputRate,
@@ -234,7 +212,6 @@ pub struct VertexInputBinding {
 /// Controls vertex input iteration frequency.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
-
 pub enum VertexInputRate {
     /// Iterate value once per vertex.
     /// Repeat for each instance.
@@ -248,7 +225,6 @@ pub enum VertexInputRate {
 /// Vertex sub-range to attribute mapping.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
-
 pub struct VertexInputAttribute {
     /// Attribute index.
     /// Each index must appear at most once in `VertexInput::attributes` array.
@@ -269,7 +245,6 @@ pub struct VertexInputAttribute {
 /// Topology of primitives.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
-
 pub enum PrimitiveTopology {
     /// Vertices are assembled into points.
     /// Each vertex form one point primitive.
@@ -334,7 +309,6 @@ impl Default for PrimitiveTopology {
 /// Viewport transformation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
-
 pub struct Viewport {
     /// Viewport bounds along X (horizontal) axis.
     pub x: Bounds,
@@ -347,7 +321,6 @@ pub struct Viewport {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-
 pub struct Rasterizer {
     /// Rendering viewport transformation.
     /// Determines how vertex coordinates are transformed to framebuffer
@@ -403,9 +376,7 @@ pub struct Rasterizer {
 // } else {
 //     None
 // }
-
 #[doc(hiddent)]
-
 impl Rasterizer {
     pub fn new() -> Self {
         Rasterizer {
@@ -448,7 +419,6 @@ impl Rasterizer {
 /// }
 /// ```
 #[macro_export]
-
 macro_rules! rasterizer {
     ($($field:ident : $value:expr),* $(,)?) => {
         rasterizer!(@UNFOLD builder { let mut builder = Rasterizer::new(); } { $($field: $value),* })
@@ -525,7 +495,6 @@ macro_rules! rasterizer {
 /// Polygon front face definition.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
-
 pub enum FrontFace {
     /// Polygon which has vertices ordered in clockwise
     /// from some point of view is front faced to that point.
@@ -545,7 +514,6 @@ impl Default for FrontFace {
 /// Polygione culling mode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
-
 pub enum Culling {
     /// Front facing polygons are culled.
     Front,
@@ -560,7 +528,6 @@ pub enum Culling {
 /// PolygonMode rasterization mode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
-
 pub enum PolygonMode {
     /// Whole polygon is rasterized.
     /// That is, fragments are generated to cover all points inside the
@@ -586,7 +553,6 @@ impl Default for PolygonMode {
 /// Defines how depth testing is performed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
-
 pub struct DepthTest {
     /// Comparison operation between value stored in depth buffer and
     /// fragment's depth.
@@ -598,7 +564,6 @@ pub struct DepthTest {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
-
 pub struct StencilTests {
     pub front: StencilTest,
     pub back: StencilTest,
@@ -606,7 +571,6 @@ pub struct StencilTests {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
-
 pub struct StencilTest {
     /// Comparison operation between value stored in stencil buffer and refence
     /// value.
@@ -637,7 +601,6 @@ pub struct StencilTest {
 /// Defines what operation should be peformed on value in stencil buffer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
-
 pub enum StencilOp {
     /// Keep the current value.
     Keep,
@@ -671,7 +634,6 @@ pub enum StencilOp {
 /// of fragment shader.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
-
 pub enum ColorBlend {
     /// Values should be treated as unsigned integers and logic operation
     /// perforned. Color format must support logic operations.
@@ -732,7 +694,6 @@ impl Default for ColorBlend {
 /// blended with value stored in attachment.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
-
 pub struct Blending {
     /// Blend factory to apply to color component values from fragment shader's
     /// color output.
@@ -763,7 +724,6 @@ pub struct Blending {
 /// and `d` is value stored in attachment.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
-
 pub enum LogicOp {
     /// `0`.
     Clear,
@@ -823,7 +783,6 @@ pub enum LogicOp {
 /// `constants`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
-
 pub enum BlendFactor {
     /// Color: `(0.0, 0.0, 0.0)`
     /// Alpha: `0.0`
@@ -895,7 +854,6 @@ pub enum BlendFactor {
 /// attachment and `Df` is factor calculated for value stored in attachment.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
-
 pub enum BlendOp {
     /// `S * Sf + D * Df`.
     Add,

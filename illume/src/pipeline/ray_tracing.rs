@@ -310,23 +310,9 @@ impl AccelerationStructureInstance {
     }
 }
 
-/// Resource that describes whole ray-tracing pipeline state.
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-#[repr(transparent)]
-pub struct RayTracingPipeline {
-    handle: Handle<Self>,
-}
-
-impl ResourceTrait for RayTracingPipeline {
-    type Info = RayTracingPipelineInfo;
-
-    fn from_handle(handle: Handle<Self>) -> Self {
-        Self { handle }
-    }
-
-    fn handle(&self) -> &Handle<Self> {
-        &self.handle
-    }
+define_handle! {
+    /// Resource that describes whole ray-tracing pipeline state.
+    pub struct RayTracingPipeline(RayTracingPipelineInfo);
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
