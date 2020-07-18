@@ -241,44 +241,19 @@ pub struct ImageInfo {
     pub memory: MemoryUsageFlags,
 }
 
-/// Handle to image view.
-/// Image stores data accessible by commands executed on device.
-///
-/// Image view handle is shareable via cloning, clones of handle represent same
-/// image view. Device access to image data via image view is not verified and
-/// can lead to races resuling in undefined content observed.
-#[derive(Clone, Hash, PartialEq, Eq)]
-#[repr(transparent)]
-pub struct ImageView {
-    handle: Handle<Self>,
-}
-
-debug_handle!(ImageView);
-
-impl ResourceTrait for ImageView {
-    type Info = ImageViewInfo;
-
-    fn from_handle(handle: Handle<Self>) -> Self {
-        Self { handle }
-    }
-
-    fn handle(&self) -> &Handle<Self> {
-        &self.handle
-    }
-}
-
-impl ImageView {
-    /// Returns `ImageViewInfo` that was used when resource was created.
-    /// This information cannot be modified during resource lifetime.
-    pub fn info(&self) -> &ImageViewInfo {
-        self.handle.info()
-    }
+define_handle! {
+    /// Handle to image view.
+    /// Image stores data accessible by commands executed on device.
+    ///
+    /// Image view handle is shareable via cloning, clones of handle represent same
+    /// image view. Device access to image data via image view is not verified and
+    /// can lead to races resuling in undefined content observed.
+    pub struct ImageView(ImageViewInfo);
 }
 
 /// Kind of image view.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
-
 pub enum ImageViewKind {
     /// One dimensional image view
     D1,

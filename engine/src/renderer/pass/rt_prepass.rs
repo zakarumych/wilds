@@ -89,8 +89,8 @@ where
 }
 
 pub struct RtPrepass {
-    dset_layout: DescriptorSetLayout,
-    per_frame_dset_layout: DescriptorSetLayout,
+    set_layout: DescriptorSetLayout,
+    per_frame_set_layout: DescriptorSetLayout,
 
     pipeline_layout: PipelineLayout,
     pipeline: RayTracingPipeline,
@@ -140,7 +140,7 @@ impl RtPrepass {
         blue_noise_buffer_64x64x64: Buffer,
     ) -> Result<Self, Report> {
         // Create pipeline.
-        let dset_layout = ctx.create_descriptor_set_layout(DescriptorSetLayoutInfo {
+        let set_layout = ctx.create_descriptor_set_layout(DescriptorSetLayoutInfo {
                 flags: DescriptorSetLayoutFlags::UPDATE_AFTER_BIND_POOL,
                 bindings: vec![
                     // TLAS.
@@ -228,7 +228,7 @@ impl RtPrepass {
                 ],
             })?;
 
-        let per_frame_dset_layout = ctx.device.create_descriptor_set_layout(
+        let per_frame_set_layout = ctx.device.create_descriptor_set_layout(
             DescriptorSetLayoutInfo {
                 flags: DescriptorSetLayoutFlags::empty(),
                 bindings: vec![
@@ -255,7 +255,7 @@ impl RtPrepass {
 
         let pipeline_layout =
             ctx.create_pipeline_layout(PipelineLayoutInfo {
-                sets: vec![dset_layout.clone(), per_frame_dset_layout.clone()],
+                sets: vec![set_layout.clone(), per_frame_set_layout.clone()],
             })?;
 
         let primary_rgen = RaygenShader::with_main(
@@ -392,7 +392,7 @@ impl RtPrepass {
             levels: 1,
             layers: 1,
             samples: Samples::Samples1,
-            usage: ImageUsage::STORAGE | ImageUsage::TRANSFER_SRC,
+            usage: ImageUsage::STORAGE | ImageUsage::SAMPLED,
             memory: MemoryUsageFlags::empty(),
         })?;
 
@@ -407,7 +407,7 @@ impl RtPrepass {
             levels: 1,
             layers: 1,
             samples: Samples::Samples1,
-            usage: ImageUsage::STORAGE | ImageUsage::TRANSFER_SRC,
+            usage: ImageUsage::STORAGE | ImageUsage::SAMPLED,
             memory: MemoryUsageFlags::empty(),
         })?;
 
@@ -422,7 +422,7 @@ impl RtPrepass {
             levels: 1,
             layers: 1,
             samples: Samples::Samples1,
-            usage: ImageUsage::STORAGE | ImageUsage::TRANSFER_SRC,
+            usage: ImageUsage::STORAGE | ImageUsage::SAMPLED,
             memory: MemoryUsageFlags::empty(),
         })?;
 
@@ -437,7 +437,7 @@ impl RtPrepass {
             levels: 1,
             layers: 1,
             samples: Samples::Samples1,
-            usage: ImageUsage::STORAGE | ImageUsage::TRANSFER_SRC,
+            usage: ImageUsage::STORAGE | ImageUsage::SAMPLED,
             memory: MemoryUsageFlags::empty(),
         })?;
 
@@ -449,15 +449,15 @@ impl RtPrepass {
         tracing::trace!("Feature images created");
 
         let set = ctx.create_descriptor_set(DescriptorSetInfo {
-            layout: dset_layout.clone(),
+            layout: set_layout.clone(),
         })?;
 
         let per_frame_set0 = ctx.create_descriptor_set(DescriptorSetInfo {
-            layout: per_frame_dset_layout.clone(),
+            layout: per_frame_set_layout.clone(),
         })?;
 
         let per_frame_set1 = ctx.create_descriptor_set(DescriptorSetInfo {
-            layout: per_frame_dset_layout.clone(),
+            layout: per_frame_set_layout.clone(),
         })?;
 
         tracing::trace!("Descriptor sets created");
@@ -563,8 +563,8 @@ impl RtPrepass {
         );
 
         Ok(RtPrepass {
-            dset_layout,
-            per_frame_dset_layout,
+            set_layout,
+            per_frame_set_layout,
             pipeline_layout,
             pipeline,
             shader_binding_table,
@@ -597,6 +597,8 @@ impl<'a> Pass<'a> for RtPrepass {
         &mut self,
         input: Input<'a>,
         frame: u64,
+        wait: &[(PipelineStageFlags, Semaphore)],
+        signal: &[Semaphore],
         fence: Option<&Fence>,
         ctx: &mut Context,
         world: &mut World,
@@ -799,12 +801,6 @@ impl<'a> Pass<'a> for RtPrepass {
 
         encoder.build_acceleration_structure(infos);
 
-        // Sync TLAS build with ray-tracing shader where it will be used.
-        encoder.pipeline_barrier(
-            PipelineStageFlags::ACCELERATION_STRUCTURE_BUILD,
-            PipelineStageFlags::RAY_TRACING_SHADER,
-        );
-
         let dirlight = world
             .query::<&DirectionalLight>()
             .iter()
@@ -851,8 +847,7 @@ impl<'a> Pass<'a> for RtPrepass {
             &[],
         );
 
-        // Sync storage image access from last frame blit operation to this
-        // frame writes in raygen shaders.
+        // Sync storage image access from last frame.
         let images = [
             ImageLayoutTransition::initialize_whole(
                 &self.output_albedo_image,
@@ -877,15 +872,51 @@ impl<'a> Pass<'a> for RtPrepass {
         ];
 
         encoder.image_barriers(
-            PipelineStageFlags::TRANSFER, // FIXME: Compure barrier.
+            PipelineStageFlags::FRAGMENT_SHADER, // FIXME: Compure barrier.
             PipelineStageFlags::RAY_TRACING_SHADER,
             &images,
+        );
+
+        // Sync TLAS build with ray-tracing shader where it will be used.
+        encoder.pipeline_barrier(
+            PipelineStageFlags::ACCELERATION_STRUCTURE_BUILD,
+            PipelineStageFlags::RAY_TRACING_SHADER,
         );
 
         // Perform ray-trace operation.
         encoder.trace_rays(&self.shader_binding_table, input.extent.into_3d());
 
-        ctx.queue.submit_no_semaphores(encoder.finish(), fence);
+        // Sync storage image access from last frame.
+        let images = [
+            ImageLayoutTransition::transition_whole(
+                &self.output_albedo_image,
+                Layout::General..Layout::ShaderReadOnlyOptimal,
+            )
+            .into(),
+            ImageLayoutTransition::transition_whole(
+                &self.output_normal_depth_image,
+                Layout::General..Layout::ShaderReadOnlyOptimal,
+            )
+            .into(),
+            ImageLayoutTransition::transition_whole(
+                &self.output_emissive_direct_image,
+                Layout::General..Layout::ShaderReadOnlyOptimal,
+            )
+            .into(),
+            ImageLayoutTransition::transition_whole(
+                &self.output_diffuse_image,
+                Layout::General..Layout::ShaderReadOnlyOptimal,
+            )
+            .into(),
+        ];
+
+        encoder.image_barriers(
+            PipelineStageFlags::RAY_TRACING_SHADER,
+            PipelineStageFlags::FRAGMENT_SHADER,
+            &images,
+        );
+
+        ctx.queue.submit(wait, encoder.finish(), signal, fence);
 
         Ok(Output {
             albedo: self.output_albedo_image.clone(),

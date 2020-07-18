@@ -13,35 +13,13 @@ pub const SMALLVEC_ATTACHMENTS: usize = 8;
 /// Upper limit for smallvec array size for subpasses.
 pub const SMALLVEC_SUBPASSES: usize = 4;
 
-/// Render pass represents collection of attachments,
-/// subpasses, and dependencies between subpasses,
-/// and describes how they are used over the course of the subpasses.
-///
-/// This value is handle to a render pass resource.
-#[derive(Clone, Hash, PartialEq, Eq)]
-#[repr(transparent)]
-pub struct RenderPass {
-    handle: Handle<Self>,
-}
-
-debug_handle!(RenderPass);
-
-impl ResourceTrait for RenderPass {
-    type Info = RenderPassInfo;
-
-    fn from_handle(handle: Handle<Self>) -> Self {
-        Self { handle }
-    }
-
-    fn handle(&self) -> &Handle<Self> {
-        &self.handle
-    }
-}
-
-impl RenderPass {
-    pub fn info(&self) -> &RenderPassInfo {
-        self.handle.info()
-    }
+define_handle! {
+    /// Render pass represents collection of attachments,
+    /// subpasses, and dependencies between subpasses,
+    /// and describes how they are used over the course of the subpasses.
+    ///
+    /// This value is handle to a render pass resource.
+    pub struct RenderPass(RenderPassInfo);
 }
 
 /// Defines render pass, its attachments and one implicit subpass.

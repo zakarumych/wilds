@@ -1,13 +1,15 @@
 @echo off
 
 setlocal
-cd src/renderer/pass/rt_prepass
+cd src/renderer/pass
 
-glslangValidator -V primary.rchit -o primary.rchit.spv
-glslangValidator -V primary.rgen -o primary.rgen.spv
-glslangValidator -V primary.rmiss -o primary.rmiss.spv
+glslangValidator -V rt_prepass/primary.rchit -o rt_prepass/primary.rchit.spv
+glslangValidator -V rt_prepass/primary.rgen -o rt_prepass/primary.rgen.spv
+glslangValidator -V rt_prepass/primary.rmiss -o rt_prepass/primary.rmiss.spv
+glslangValidator -V rt_prepass/diffuse.rchit -o rt_prepass/diffuse.rchit.spv
+glslangValidator -V rt_prepass/diffuse.rmiss -o rt_prepass/diffuse.rmiss.spv
+glslangValidator -V rt_prepass/shadow.rmiss -o rt_prepass/shadow.rmiss.spv
 
-glslangValidator -V diffuse.rchit -o diffuse.rchit.spv
-glslangValidator -V diffuse.rmiss -o diffuse.rmiss.spv
+glslangValidator -V combine/combine.vert -o combine/combine.vert.spv
+glslangValidator -V combine/combine.frag -o combine/combine.frag.spv
 
-glslangValidator -V shadow.rmiss -o shadow.rmiss.spv

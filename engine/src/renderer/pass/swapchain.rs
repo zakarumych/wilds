@@ -23,6 +23,8 @@ impl Pass<'_> for SwapchainBlitPresentPass {
         &mut self,
         input: BlitInput,
         _frame: u64,
+        wait: &[(PipelineStageFlags, Semaphore)],
+        signal: &[Semaphore],
         fence: Option<&Fence>,
         ctx: &mut Context,
         _world: &mut World,
@@ -93,6 +95,8 @@ impl Pass<'_> for SwapchainBlitPresentPass {
             PipelineStageFlags::BOTTOM_OF_PIPE,
             &images,
         );
+
+        // wait.iter().cloned().collect()
 
         // Submit execution.
         ctx.queue.submit(

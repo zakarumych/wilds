@@ -452,7 +452,8 @@ impl DeviceTrait for EruptDevice {
                         builder.viewports(std::slice::from_ref(&viewport));
                 }
                 State::Dynamic => {
-                    dynamic_states.push(vk1_0::DynamicState::VIEWPORT)
+                    dynamic_states.push(vk1_0::DynamicState::VIEWPORT);
+                    builder = builder.viewport_count(1);
                 }
             }
 
@@ -463,7 +464,8 @@ impl DeviceTrait for EruptDevice {
                     builder = builder.scissors(std::slice::from_ref(&scissor));
                 }
                 State::Dynamic => {
-                    dynamic_states.push(vk1_0::DynamicState::SCISSOR)
+                    dynamic_states.push(vk1_0::DynamicState::SCISSOR);
+                    builder = builder.scissor_count(1);
                 }
             }
 
