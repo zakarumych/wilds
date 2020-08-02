@@ -7,15 +7,12 @@
 // #![deny(unused_variables)]
 #![allow(unused_imports)]
 
-use {
-    maybe_sync::{dyn_maybe_send_sync, MaybeSend, MaybeSync},
-    std::{
-        cmp::{Ord, Ordering, PartialOrd},
-        convert::{TryFrom as _, TryInto as _},
-        error::Error,
-        fmt::Debug,
-        num::TryFromIntError,
-    },
+use std::{
+    cmp::{Ord, Ordering, PartialOrd},
+    convert::{TryFrom as _, TryInto as _},
+    error::Error,
+    fmt::Debug,
+    num::TryFromIntError,
 };
 
 macro_rules! debug_handle {
@@ -410,10 +407,8 @@ pub fn host_memory_space_overlow() -> ! {
     panic!("Memory address space overlow")
 }
 
-fn assert_object<T: Debug + MaybeSend + MaybeSync + 'static>() {}
-fn assert_error<T: Error + MaybeSend + MaybeSync + 'static>() {}
-
-pub type MaybeSendSyncError = dyn_maybe_send_sync!(Error + 'static);
+fn assert_object<T: Debug + Send + Sync + 'static>() {}
+fn assert_error<T: Error + Send + Sync + 'static>() {}
 
 pub fn align_up(align_mask: u64, value: u64) -> Option<u64> {
     Some(value.checked_add(align_mask)? & !align_mask)

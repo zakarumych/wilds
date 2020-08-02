@@ -6,6 +6,6 @@
 layout(location = 0) rayPayloadInEXT DiffuseHitPayload prd;
 
 void main() {
-    const vec3 emissive = vec3(1.0, 4.0, 7.0);
+    const vec3 emissive = vec3(1.0, 3.0, 5.0) / 3;
     prd.radiation = emissive;
 }

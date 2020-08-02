@@ -1,13 +1,11 @@
 use {
-    super::{
-        mesh::{Mesh, MeshBuilder},
-        vertex::{
-            Normal3d, Position3d, PositionNormalTangent3dUV, Tangent3d,
-            VertexType as _, UV,
-        },
-        Context,
+    super::{Assets, Prefab},
+    crate::renderer::{
+        Context, Material, Mesh, MeshBuilder, Normal3d, Position3d,
+        PositionNormalTangent3dUV, Renderable, Tangent3d, VertexType as _, UV,
     },
-    goods::{ready, Cache, Format, Ready, SyncAsset},
+    goods::{ready, Format, Ready, SyncAsset},
+    hecs::{Entity, World},
     illume::{
         BufferInfo, BufferUsage, IndexType, MemoryUsageFlags, OutOfMemory,
         PrimitiveTopology,
@@ -15,15 +13,36 @@ use {
     image::{
         load_from_memory, DynamicImage, GenericImageView, ImageError, Pixel,
     },
+    nalgebra::{DMatrix, Dynamic, Vector3},
+    ncollide3d::shape::{HeightField, ShapeHandle},
     num_traits::{bounds::Bounded, cast::ToPrimitive},
-    std::{borrow::Cow, convert::TryFrom as _, sync::Arc},
-    ultraviolet::Vec3,
+    std::{convert::TryFrom as _, sync::Arc},
+    ultraviolet::{Isometry3, Vec3},
 };
+
+pub fn create_terrain_shape(
+    width: u32,
+    height: u32,
+    heightmap: impl Fn(u32, u32) -> f32,
+) -> HeightField<f32> {
+    let mut matrix: DMatrix<f32> = DMatrix::zeros_generic(
+        Dynamic::new(width as usize),
+        Dynamic::new(height as usize),
+    );
+
+    for x in 0..width {
+        for y in 0..height {
+            matrix[(x as usize, y as usize)] = heightmap(x, y);
+        }
+    }
+
+    HeightField::new(matrix, Vector3::new(width as f32, 1.0, height as f32))
+}
 
 pub fn create_terrain_mesh(
     width: u32,
     height: u32,
-    hightmap: impl Fn(u32, u32) -> f32,
+    heightmap: impl Fn(u32, u32) -> f32,
     buffer_usage: BufferUsage,
     ctx: &mut Context,
 ) -> Result<Mesh, OutOfMemory> {
@@ -33,14 +52,14 @@ pub fn create_terrain_mesh(
     if width > 1 && height > 1 {
         for y in 0..height - 1 {
             for x in 0..width - 1 {
-                let pos = Vec3::from([x as f32, hightmap(x, y), y as f32]);
+                let pos = Vec3::from([x as f32, heightmap(x, y), y as f32]);
                 let posx =
-                    Vec3::from([x as f32 + 1.0, hightmap(x + 1, y), y as f32]);
+                    Vec3::from([x as f32 + 1.0, heightmap(x + 1, y), y as f32]);
                 let posy =
-                    Vec3::from([x as f32, hightmap(x, y + 1), y as f32 + 1.0]);
+                    Vec3::from([x as f32, heightmap(x, y + 1), y as f32 + 1.0]);
                 let posxy = Vec3::from([
                     x as f32 + 1.0,
-                    hightmap(x + 1, y + 1),
+                    heightmap(x + 1, y + 1),
                     y as f32 + 1.0,
                 ]);
 
@@ -160,17 +179,13 @@ pub fn image_heightmap_alpha<P: Pixel>(
     })
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-#[repr(transparent)]
-pub struct Terrain(pub Mesh);
-
 pub struct TerrainRepr {
     image: DynamicImage,
     buffer_usage: BufferUsage,
     factor: f32,
 }
 
-impl SyncAsset for Terrain {
+impl SyncAsset for TerrainAsset {
     type Context = Context;
     type Error = OutOfMemory;
     type Repr = TerrainRepr;
@@ -180,8 +195,9 @@ impl SyncAsset for Terrain {
         ctx: &mut Context,
     ) -> Result<Self, OutOfMemory> {
         let (w, h, f) = image_heightmap(&repr.image, repr.factor);
-        let mesh = create_terrain_mesh(w, h, f, repr.buffer_usage, ctx)?;
-        Ok(Terrain(mesh))
+        let mesh = create_terrain_mesh(w, h, &f, repr.buffer_usage, ctx)?;
+        let shape = Arc::new(create_terrain_shape(w, h, &f));
+        Ok(TerrainAsset { mesh, shape })
     }
 }
 
@@ -192,11 +208,11 @@ pub struct TerrainFormat {
     pub factor: f32,
 }
 
-impl<K> Format<Terrain, K> for TerrainFormat {
+impl Format<TerrainAsset, String> for TerrainFormat {
     type DecodeFuture = Ready<Result<TerrainRepr, ImageError>>;
     type Error = ImageError;
 
-    fn decode(self, bytes: Vec<u8>, _: &Cache<K>) -> Self::DecodeFuture {
+    fn decode(self, bytes: Vec<u8>, _: &Assets) -> Self::DecodeFuture {
         let mut buffer_usage = BufferUsage::empty();
         if self.raster {
             buffer_usage |= BufferUsage::VERTEX | BufferUsage::INDEX;
@@ -212,5 +228,38 @@ impl<K> Format<Terrain, K> for TerrainFormat {
             buffer_usage,
             factor: self.factor,
         }))
+    }
+}
+
+#[derive(Clone)]
+pub struct TerrainAsset {
+    pub mesh: Mesh,
+    pub shape: Arc<HeightField<f32>>,
+}
+
+/// Terrain entity consists of terrain marker and optionally
+/// mesh, material and collider components.
+///
+/// Both mesh and collider can be created from same heightmap image.
+#[derive(Clone, Copy, Debug)]
+pub struct Terrain;
+
+impl Prefab for TerrainAsset {
+    type Info = Isometry3;
+
+    fn spawn(self, iso: Isometry3, world: &mut World, entity: Entity) {
+        let _ = world.insert(
+            entity,
+            (
+                Renderable {
+                    mesh: self.mesh,
+                    material: Material::color([0.3, 0.5, 0.7, 1.0]),
+                    transform: None,
+                },
+                ShapeHandle::from_arc(self.shape),
+                iso,
+                Terrain,
+            ),
+        );
     }
 }

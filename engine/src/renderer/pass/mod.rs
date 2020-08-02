@@ -1,11 +1,9 @@
 pub mod combine;
+pub mod diffuse_filter;
 pub mod rt_prepass;
-// pub mod swapchain;
 
 pub use self::{
-    combine::CombinePass,
-    rt_prepass::RtPrepass,
-    // swapchain::SwapchainBlitPresentPass,
+    combine::CombinePass, diffuse_filter::DiffuseFilter, rt_prepass::RtPrepass,
 };
 
 use {

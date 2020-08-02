@@ -14,7 +14,7 @@ void main() {
     vec3 diffuse = texture(diffuse, gl_FragCoord.xy).xyz;
     vec3 emissive = emissive_direct.rgb;
     float direct = emissive_direct.a;
-    direct *= dot(normals_depth.xyz, vec3(0, 3, 0));
-    vec3 combined = albedo * (vec3(direct) + diffuse) + emissive;
-    output_color = vec4(combined / (vec3(2, 2, 2) + combined), 1.0);
+    direct *= dot(normals_depth.xyz, vec3(0, 1, 0));
+    vec3 combined = albedo * (direct * vec3(5.0, 3.0, 1.0) / 3 + diffuse) + emissive;
+    output_color = vec4(combined / (vec3(1, 1, 1) + combined), 1);
 }

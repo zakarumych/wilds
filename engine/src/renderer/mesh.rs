@@ -1,8 +1,15 @@
-use super::{vertex::VertexLayout, Context};
-use bumpalo::{collections::Vec as BVec, Bump};
-use illume::*;
-use std::{
-    borrow::Cow, convert::TryFrom as _, mem::size_of_val, ops::Range, sync::Arc,
+use {
+    super::{
+        vertex::{VertexLayout, VertexType},
+        Context,
+    },
+    bumpalo::{collections::Vec as BVec, Bump},
+    bytemuck::cast_slice,
+    illume::*,
+    std::{
+        borrow::Cow, convert::TryFrom as _, mem::size_of_val, ops::Range,
+        sync::Arc,
+    },
 };
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -260,8 +267,7 @@ impl Mesh {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BindingData<'a> {
     #[cfg_attr(
         feature = "serde-1",
@@ -271,8 +277,7 @@ pub struct BindingData<'a> {
     pub layout: VertexLayout,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct IndicesData<'a> {
     #[cfg_attr(
         feature = "serde-1",
@@ -312,8 +317,7 @@ impl<'a> From<&'a [u32]> for IndicesData<'a> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MeshData<'a> {
     #[cfg_attr(
         feature = "serde-1",
@@ -333,6 +337,53 @@ pub struct MeshData<'a> {
         )
     )]
     pub topology: PrimitiveTopology,
+}
+
+impl MeshData<'_> {
+    pub fn new(topology: PrimitiveTopology) -> Self {
+        MeshData {
+            bindings: Vec::new(),
+            indices: None,
+            topology,
+        }
+    }
+}
+
+impl<'a> MeshData<'a> {
+    pub fn add_binding<V>(&mut self, vertices: &'a [V]) -> &mut Self
+    where
+        V: VertexType,
+    {
+        self.bindings.push(BindingData {
+            data: Cow::Borrowed(cast_slice(vertices)),
+            layout: V::layout(),
+        });
+        self
+    }
+
+    pub fn with_binding<V>(mut self, vertices: &'a [V]) -> Self
+    where
+        V: VertexType,
+    {
+        self.add_binding(vertices);
+        self
+    }
+
+    pub fn set_indices<I>(&mut self, indices: I) -> &mut Self
+    where
+        I: Into<IndicesData<'a>>,
+    {
+        self.indices = Some(indices.into());
+        self
+    }
+
+    pub fn with_indices<I>(mut self, indices: I) -> Self
+    where
+        I: Into<IndicesData<'a>>,
+    {
+        self.set_indices(indices);
+        self
+    }
 }
 
 impl MeshData<'_> {

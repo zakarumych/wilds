@@ -1,28 +1,11 @@
 use {
     super::Pass,
-    crate::{
-        clocks::ClockIndex,
-        light::DirectionalLight,
-        renderer::{
-            Context, Material, Mesh, PositionNormalTangent3dUV, Renderable,
-            Renderer, Texture, VertexType,
-        },
-    },
+    crate::{clocks::ClockIndex, renderer::Context},
     bumpalo::{collections::Vec as BVec, Bump},
-    bytemuck::{Pod, Zeroable},
     color_eyre::Report,
-    eyre::{bail, ensure, eyre, WrapErr as _},
-    fastbitset::BitSet,
     hecs::World,
     illume::*,
     smallvec::smallvec,
-    std::{
-        collections::hash_map::{Entry, HashMap},
-        convert::TryFrom as _,
-        hash::Hash,
-        mem::size_of,
-    },
-    ultraviolet::{Mat4, Vec3},
 };
 
 pub struct Input {
@@ -166,7 +149,7 @@ impl<'a> Pass<'a> for CombinePass {
         signal: &[Semaphore],
         fence: Option<&Fence>,
         ctx: &mut Context,
-        world: &mut World,
+        _world: &mut World,
         _clock: &ClockIndex,
         bump: &Bump,
     ) -> Result<Output, Report> {

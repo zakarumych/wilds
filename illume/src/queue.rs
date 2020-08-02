@@ -5,9 +5,8 @@ use crate::{
     semaphore::Semaphore,
     stage::PipelineStageFlags,
     surface::SwapchainImage,
-    MaybeSendSyncError, OutOfMemory as OOM,
+    OutOfMemory as OOM,
 };
-use maybe_sync::{MaybeSend, MaybeSync};
 use smallvec::SmallVec;
 use std::{
     borrow::Borrow,
@@ -239,7 +238,7 @@ pub enum CreateEncoderError {
     #[error("{source}")]
     Other {
         #[from]
-        source: Box<MaybeSendSyncError>,
+        source: Box<dyn Error + Send + Sync>,
     },
 }
 
@@ -289,7 +288,7 @@ impl Queue {
     }
 }
 
-pub trait QueueTrait: Debug + MaybeSend + MaybeSync + 'static {
+pub trait QueueTrait: Debug + Send + Sync + 'static {
     fn create_command_buffer(
         &mut self,
     ) -> Result<Box<dyn CommandBufferTrait>, CreateEncoderError>;

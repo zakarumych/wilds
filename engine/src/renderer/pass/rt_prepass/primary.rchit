@@ -86,15 +86,19 @@ void main()
         vec3 tolight = -globals.dirlight.dir;
         for (int i = 0; i < shadow_rays; ++i)
         {
-            vec3 r = tang_space * vec3(blue_rand_circle(prd.co + uvec3(i * 137)), 0.0);
+            vec3 r = tang_space * blue_rand_cone(prd.co + uvec3(i * 137), 10 / length(globals.dirlight.dir));
             unshadows = 0;
             traceRayEXT(tlas, shadow_ray_flags, 0xff, 0, 0, 2, worls_space_pos, 0.001, normalize(tolight), 100.0, 1);
             prd.direct = unshadows;
         }
     }
 
-    vec3 dir = normalize(world_space_normal + blue_rand_unit_vector(prd.co));
-    dprd.radiation = vec3(0, 0, 0);
-    traceRayEXT(tlas, 00, 0xff, 1, 0, 1, worls_space_pos, 0.001, dir, 100.0, 2);
-    prd.diffuse = dprd.radiation;
+    for (int i = 0; i < 1; ++i)
+    {
+        vec3 dir = normalize(tang_space * blue_rand_hemisphere_cosine(prd.co + uvec3(i, i * 131, i * 65537)));
+        dprd.radiation = vec3(0, 0, 0);
+        traceRayEXT(tlas, 00, 0xff, 1, 0, 1, worls_space_pos, 0.001, dir, 10.0, 2);
+        prd.diffuse += dprd.radiation;
+    }
+    prd.diffuse /= 4;
 }

@@ -6,7 +6,6 @@ use crate::{
     semaphore::Semaphore,
     Extent2d, OutOfMemory,
 };
-use maybe_sync::{dyn_maybe_send_sync, MaybeSend, MaybeSync};
 use raw_window_handle::RawWindowHandle;
 use std::{error::Error, fmt::Debug, ops::RangeInclusive};
 
@@ -132,14 +131,14 @@ pub enum CreateSurfaceError {
     UnsupportedWindow {
         window: RawWindowHandleKind,
         #[source]
-        source: Option<Box<dyn_maybe_send_sync!(Error)>>,
+        source: Option<Box<dyn Error + Send + Sync>>,
     },
 
     #[error("{source}")]
     Other {
         window: RawWindowHandleKind,
         #[source]
-        source: Box<dyn_maybe_send_sync!(Error)>,
+        source: Box<dyn Error + Send + Sync>,
     },
 }
 
@@ -226,7 +225,7 @@ pub struct SwapchainImageInfo {
     pub signal: Semaphore,
 }
 
-pub trait SwapchainTrait: Debug + MaybeSend + MaybeSync + 'static {
+pub trait SwapchainTrait: Debug + Send + Sync + 'static {
     fn configure(
         &mut self,
         image_usage: ImageUsage,

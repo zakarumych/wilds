@@ -5,13 +5,13 @@ use {
         light::DirectionalLight,
         renderer::{
             Context, Material, Mesh, PositionNormalTangent3dUV, Renderable,
-            Renderer, Texture, VertexType,
+            Texture, VertexType,
         },
     },
     bumpalo::{collections::Vec as BVec, Bump},
     bytemuck::{Pod, Zeroable},
     color_eyre::Report,
-    eyre::{bail, ensure, eyre, WrapErr as _},
+    eyre::ensure,
     fastbitset::BitSet,
     hecs::World,
     illume::*,
@@ -21,7 +21,7 @@ use {
         hash::Hash,
         mem::size_of,
     },
-    ultraviolet::{Mat4, Vec3},
+    ultraviolet::{Isometry3, Mat4, Vec3},
 };
 
 const MAX_INSTANCE_COUNT: u16 = 1024;
@@ -622,38 +622,42 @@ impl<'a> Pass<'a> for RtPrepass {
 
         let mut writes = BVec::with_capacity_in(3, bump);
 
-        let mut query = world
-            .query::<(&Mesh, &Material, &Mat4)>()
-            .with::<Renderable>();
-        for (entity, (mesh, material, &transform)) in query.iter() {
-            if let Some(blas) = input.blases.get(mesh) {
+        let mut query = world.query::<(&Renderable, &Isometry3)>();
+        for (entity, (renderable, iso)) in query.iter() {
+            if let Some(blas) = input.blases.get(&renderable.mesh) {
                 let blas_address =
                     ctx.get_acceleration_structure_device_address(blas);
 
+                let m = match renderable.transform {
+                    Some(t) => iso.into_homogeneous_matrix() * t,
+                    None => iso.into_homogeneous_matrix(),
+                };
+
                 acc_instances.push(
                     AccelerationStructureInstance::new(blas_address)
-                        .with_transform(transform.into()),
+                        .with_transform(m.into()),
                 );
 
-                let (mesh_index, new) = self.meshes.index(mesh.clone());
+                let (mesh_index, new) =
+                    self.meshes.index(renderable.mesh.clone());
                 if new {
-                    let binding = &mesh.bindings()[0];
+                    let binding = &renderable.mesh.bindings()[0];
 
                     assert_eq!(
                         binding.layout,
                         PositionNormalTangent3dUV::layout()
                     );
 
-                    let indices = mesh.indices().unwrap();
+                    let indices = renderable.mesh.indices().unwrap();
                     let indices_buffer = indices.buffer.clone();
                     let indices_offset = indices.offset;
-                    let indices_size: u64 =
-                        indices.index_type.size() as u64 * mesh.count() as u64;
+                    let indices_size: u64 = indices.index_type.size() as u64
+                        * renderable.mesh.count() as u64;
 
                     let vertices_buffer = binding.buffer.clone();
                     let vertices_offset = binding.offset;
                     let vertices_size: u64 = binding.layout.stride as u64
-                        * mesh.vertex_count() as u64;
+                        * renderable.mesh.vertex_count() as u64;
 
                     assert_eq!(indices_offset & 15, 0);
                     assert_eq!(vertices_offset & 15, 0);
@@ -687,7 +691,9 @@ impl<'a> Pass<'a> for RtPrepass {
                     });
                 }
 
-                let albedo_index = if let Some(albedo) = &material.albedo {
+                let albedo_index = if let Some(albedo) =
+                    &renderable.material.albedo
+                {
                     let (albedo_index, new) = self.albedo.index(albedo.clone());
 
                     if new {
@@ -710,7 +716,9 @@ impl<'a> Pass<'a> for RtPrepass {
                     0
                 };
 
-                let normal_index = if let Some(normal) = &material.normal {
+                let normal_index = if let Some(normal) =
+                    &renderable.material.normal
+                {
                     let (normal_index, new) = self.normal.index(normal.clone());
 
                     if new {
@@ -734,12 +742,12 @@ impl<'a> Pass<'a> for RtPrepass {
                 };
 
                 instances.push(ShaderInstance {
-                    transform,
+                    transform: iso.into_homogeneous_matrix(),
                     mesh: mesh_index,
                     albedo_sampler: albedo_index,
                     normal_sampler: normal_index,
                     albedo_factor: {
-                        let [r, g, b, a] = material.albedo_factor;
+                        let [r, g, b, a] = renderable.material.albedo_factor;
                         [
                             r.into_inner(),
                             g.into_inner(),
@@ -747,7 +755,10 @@ impl<'a> Pass<'a> for RtPrepass {
                             a.into_inner(),
                         ]
                     },
-                    normal_factor: material.normal_factor.into_inner(),
+                    normal_factor: renderable
+                        .material
+                        .normal_factor
+                        .into_inner(),
                 });
             } else {
                 tracing::error!("Missing BLAS for mesh @ {:?}", entity);

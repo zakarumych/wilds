@@ -3,7 +3,6 @@ use crate::{
     physical::{EnumerateDeviceError, PhysicalDevice},
     surface::{CreateSurfaceError, Surface},
 };
-use maybe_sync::{MaybeSend, MaybeSync};
 use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
 use std::{fmt::Debug, sync::Arc};
 
@@ -56,7 +55,7 @@ impl Graphics {
     }
 }
 
-pub trait GraphicsTrait: Debug + MaybeSend + MaybeSync + 'static {
+pub trait GraphicsTrait: Debug + Send + Sync + 'static {
     fn name(&self) -> &str;
 
     fn devices(

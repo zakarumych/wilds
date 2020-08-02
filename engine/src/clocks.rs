@@ -11,6 +11,7 @@ pub struct Clocks {
     last: Instant,
 }
 
+#[derive(Clone, Copy, Debug)]
 pub struct ClockIndex {
     /// Delta since previous step.
     pub delta: Duration,

@@ -6,7 +6,7 @@ edition = "2018"
 publish = false
 
 [dependencies]
-goods = { version = "0.5", path = "../../goods" }
+goods = { version = "0.5", path = "../../goods", features = ["fs", "ron-format"] }
 hecs = "0.2"
 wilds = { path = "../engine", features = ["vulkan"] }
 
@@ -18,6 +18,8 @@ ron = "0.6"
 tracing = "0.1"
 winit = "0.22"
 ultraviolet = "0.4"
+bytemuck = "1.3"
+ncollide3d = "0.23"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "0.2", features = ["time"] }

@@ -1,6 +1,3 @@
-@echo off
-
-setlocal
 cd src/renderer/pass
 
 glslangValidator -V rt_prepass/primary.rchit -o rt_prepass/primary.rchit.spv

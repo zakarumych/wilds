@@ -1,12 +1,17 @@
+mod pawn;
+
 use {
+    self::pawn::*,
     bumpalo::Bump,
     color_eyre::Report,
+    goods::RonFormat,
     hecs::World,
     std::{cmp::max, collections::VecDeque, task::Poll, time::Duration},
-    ultraviolet::{Mat4, Vec3},
+    ultraviolet::{Isometry3, Mat3, Mat4, Rotor3, Vec3},
     wilds::{
-        Camera, Clocks, DirectionalLight, Engine, Gltf, GltfFormat, GltfNode,
-        Material, Mesh, Renderer, Terrain, TerrainFormat,
+        Camera, Clocks, DirectionalLight, Engine, FpsCounter, FreeCamera,
+        FreeCameraSystem, Gltf, GltfFormat, GltfNode, Material, Mesh, Prefab,
+        Renderable, Renderer, Terrain, TerrainAsset, TerrainFormat,
     },
     winit::{
         dpi::PhysicalSize,
@@ -17,6 +22,12 @@ use {
 
 fn main() -> Result<(), Report> {
     Engine::run(|mut engine| async move {
+        engine.add_system(
+            FreeCameraSystem::new()
+                .with_factor(0.3, 0.3)
+                .with_speed(5.0),
+        );
+
         let window = engine.build_window(
             WindowBuilder::new().with_inner_size(PhysicalSize {
                 width: 1920,
@@ -35,12 +46,8 @@ fn main() -> Result<(), Report> {
                 z_near: 0.1,
                 z_far: 1000.0,
             },
-            // Mat4::from_translation(Vec3::new(0.0, 10.0, 0.0)),
-            Mat4::look_at(
-                Vec3::new(0.0, 20.0, 0.0),
-                Vec3::new(32.0, 3.0, 32.0),
-                Vec3::new(0.0, 1.0, 0.0),
-            ),
+            Isometry3::identity(),
+            FreeCamera,
         ));
 
         engine.world.spawn((DirectionalLight {
@@ -48,62 +55,51 @@ fn main() -> Result<(), Report> {
             radiance: [8.5, 6.9, 2.4],
         },));
 
-        let mut city_opt = Some(engine.assets.load_with_format(
-            "thor_and_the_midgard_serpent/scene.gltf".to_owned(),
-            GltfFormat {
-                raster: false,
-                blas: true,
-            },
-        ));
+        // let mut city_opt = Some(engine.assets.load_with_format(
+        //     "thor_and_the_midgard_serpent/scene.gltf".to_owned(),
+        //     GltfFormat {
+        //         raster: false,
+        //         blas: true,
+        //     },
+        // ));
 
-        let mut terrain_opt = Some(engine.assets.load_with_format(
+        let terrain = TerrainAsset::load(
+            &engine,
             "terrain/0001.png".to_owned(),
             TerrainFormat {
                 raster: false,
                 blas: true,
                 factor: 3.0,
             },
-        ));
+            Isometry3::identity(),
+        );
+
+        let pawn = PawnAsset::load(
+            &engine,
+            "pawn.ron".to_owned(),
+            RonFormat,
+            Isometry3::new(Vec3::new(32.0, 5.0, 32.0), Rotor3::identity()),
+        );
 
         window.request_redraw();
 
-        let mut frame_times = VecDeque::new();
-        let mut frame_times_total = Duration::new(0, 0);
-        let mut ticker = Duration::new(0, 0);
+        let mut fps_counter = FpsCounter::new(Duration::from_secs(5));
+        let mut ticker = Duration::from_secs(0);
 
         loop {
-            if let Some(terrain) = &mut terrain_opt {
-                match terrain.query() {
-                    Poll::Pending => {}
-                    Poll::Ready(Ok(Terrain(mesh))) => {
-                        tracing::info!("Terrain loaded");
+            // if let Some(city) = &mut city_opt {
+            //     if let Some(city) = city.get() {
+            //         tracing::info!("Scene loaded");
+            //         load_gltf_scene(
+            //             city,
+            //             &mut engine.world,
+            //             Isometry3::identity(),
+            //             0.01,
+            //         );
 
-                        engine.world.spawn((
-                            mesh.clone(),
-                            Material::color([0.3, 0.5, 0.7, 1.0]),
-                            Mat4::identity(),
-                        ));
-
-                        terrain_opt = None;
-                    }
-                    Poll::Ready(Err(err)) => {
-                        tracing::error!("Failed to load terrain: {}", err);
-                    }
-                }
-            }
-
-            if let Some(city) = &mut city_opt {
-                if let Some(city) = city.get() {
-                    tracing::info!("Scene loaded");
-                    load_gltf_scene(
-                        city,
-                        &mut engine.world,
-                        Mat4::from_scale(0.01),
-                    );
-
-                    city_opt = None;
-                }
-            }
+            //         city_opt = None;
+            //     }
+            // }
 
             // Main game loop
             match engine.next().await {
@@ -115,23 +111,16 @@ fn main() -> Result<(), Report> {
                 }
                 Event::RedrawRequested(window_id) => {
                     let clock = clocks.step();
-                    frame_times.push_back(clock.delta);
-                    frame_times_total += clock.delta;
+                    engine.advance(clock);
 
-                    while frame_times_total.as_secs() > 5 {
-                        match frame_times.pop_front() {
-                            Some(delta) => frame_times_total -= delta,
-                            None => break,
-                        }
-                    }
+                    fps_counter.add_sample(clock.delta);
 
                     if ticker < clock.delta {
                         ticker += max(Duration::from_secs(1), clock.delta);
 
-                        tracing::info!(
+                        eprintln!(
                             "FPS: {}",
-                            (frame_times.len() as f32
-                                / frame_times_total.as_secs_f32())
+                            1.0 / fps_counter.average().as_secs_f32()
                         );
                     }
                     ticker -= clock.delta;
@@ -153,18 +142,24 @@ fn main() -> Result<(), Report> {
     })
 }
 
-pub fn load_gltf_scene(gltf: &Gltf, world: &mut World, transform: Mat4) {
+pub fn load_gltf_scene(
+    gltf: &Gltf,
+    world: &mut World,
+    iso: Isometry3,
+    scale: f32,
+) {
     let scene = gltf.scene.unwrap();
 
     for &node in &*gltf.scenes[scene].nodes {
         let node = &gltf.nodes[node];
-        load_gltf_node(gltf, node, transform, world);
+        load_gltf_node(gltf, node, iso, Mat4::from_scale(scale), world);
     }
 }
 
 fn load_gltf_node(
     gltf: &Gltf,
     node: &GltfNode,
+    iso: Isometry3,
     transform: Mat4,
     world: &mut World,
 ) {
@@ -175,11 +170,18 @@ fn load_gltf_node(
             gltf.meshes[mesh.primitives.clone()].iter(),
             mesh.materials.iter(),
         ) {
-            world.spawn((mesh.clone(), material.clone(), transform));
+            world.spawn((
+                Renderable {
+                    mesh: mesh.clone(),
+                    material: material.clone(),
+                    transform: Some(transform),
+                },
+                iso,
+            ));
         }
     }
 
     for &child in &*node.children {
-        load_gltf_node(gltf, &gltf.nodes[child], transform, world);
+        load_gltf_node(gltf, &gltf.nodes[child], iso, transform, world);
     }
 }
