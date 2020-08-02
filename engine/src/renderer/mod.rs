@@ -1,27 +1,25 @@
 mod material;
 mod mesh;
 mod pass;
-mod terrain;
 mod vertex;
 
-pub use self::{material::*, mesh::*, terrain::*, vertex::*};
+pub use self::{material::*, mesh::*, vertex::*};
 
 use {
     self::pass::*,
-    crate::{camera::Camera, clocks::ClockIndex, light::DirectionalLight},
+    crate::{camera::Camera, clocks::ClockIndex},
     bumpalo::{collections::Vec as BVec, Bump},
-    bytemuck::{Pod, Zeroable},
+    bytemuck::{cast_slice, Pod},
     color_eyre::Report,
-    eyre::{bail, ensure, eyre, WrapErr as _},
+    eyre::{bail, eyre},
     hecs::World,
     illume::*,
     std::{
         collections::hash_map::{Entry, HashMap},
         convert::TryFrom as _,
-        mem::size_of,
         ops::{Deref, DerefMut},
     },
-    ultraviolet::{Mat4, Vec3},
+    ultraviolet::{Isometry3, Mat4},
     winit::window::Window,
 };
 
@@ -34,7 +32,11 @@ pub enum Error {
     },
 }
 
-pub struct Renderable;
+pub struct Renderable {
+    pub mesh: Mesh,
+    pub material: Material,
+    pub transform: Option<Mat4>,
+}
 
 pub struct Context {
     pub device: Device,
@@ -280,6 +282,9 @@ impl Context {
         }
 
         self.queue.submit_no_semaphores(encoder.finish(), None);
+
+        self.buffer_uploads.clear();
+        self.image_uploads.clear();
         Ok(())
     }
 }
@@ -303,8 +308,8 @@ pub struct Renderer {
 
     swapchain: Swapchain,
     rt_prepass: RtPrepass,
+    diffuse_filter: DiffuseFilter,
     combine: CombinePass,
-    // swapchain_blit: SwapchainBlitPresentPass,
 }
 
 impl Deref for Renderer {
@@ -412,11 +417,12 @@ impl Renderer {
         swapchain.configure(
             ImageUsage::COLOR_ATTACHMENT,
             format,
-            PresentMode::Mailbox,
+            PresentMode::Fifo,
         )?;
 
         // let swapchain_blit = SwapchainBlitPresentPass;
         let combine = CombinePass::new(&mut context)?;
+        let diffuse_filter = DiffuseFilter::new(&mut context)?;
 
         context.buffer_uploads.push(blue_noise_upload);
 
@@ -424,9 +430,9 @@ impl Renderer {
             fences: [context.create_fence()?, context.create_fence()?],
             frame: 0,
             blases: HashMap::new(),
-            rt_prepass,
             swapchain,
-            // swapchain_blit,
+            rt_prepass,
+            diffuse_filter,
             combine,
             context,
         })
@@ -442,30 +448,26 @@ impl Renderer {
 
         tracing::debug!("Rendering next frame");
 
-        let mut cameras = world.query::<(&Camera, &Mat4)>();
+        let mut cameras = world.query::<(&Camera, &Isometry3)>();
         let camera = if let Some((_, camera)) = cameras.iter().next() {
             camera
         } else {
             tracing::warn!("No camera found");
             return Ok(());
         };
-        let camera_transform = *camera.1;
+        let camera_isometry = *camera.1;
         let camera_projection = camera.0.projection();
         drop(cameras);
 
         let mut encoder = None;
 
         // Create BLASes for new meshes.
-        let mut new_entities = BVec::with_capacity_in(32, bump);
-        for (entity, mesh) in world
-            .query::<&Mesh>()
-            .with::<Mat4>()
-            .without::<Renderable>()
-            .iter()
+        for (_, renderable) in
+            world.query::<&Renderable>().with::<Isometry3>().iter()
         {
-            match self.blases.entry(mesh.clone()) {
+            match self.blases.entry(renderable.mesh.clone()) {
                 Entry::Vacant(entry) => {
-                    let blas = mesh.build_triangles_blas(
+                    let blas = renderable.mesh.build_triangles_blas(
                         match &mut encoder {
                             Some(encoder) => encoder,
                             slot => {
@@ -482,19 +484,12 @@ impl Renderer {
                 }
                 Entry::Occupied(_entry) => {}
             };
-
-            new_entities.push((entity, Renderable));
         }
 
         if let Some(encoder) = encoder {
             self.context
                 .queue
                 .submit_no_semaphores(encoder.finish(), None);
-        }
-
-        // Insert them to the entities.
-        for (entity, renderable) in new_entities {
-            world.insert_one(entity, renderable).unwrap();
         }
 
         if self.frame > 1 {
@@ -511,9 +506,23 @@ impl Renderer {
         let rt_prepass_output = self.rt_prepass.draw(
             rt_prepass::Input {
                 extent: frame.info().image.info().extent.into_2d(),
-                camera_transform,
+                camera_transform: camera_isometry.into_homogeneous_matrix(),
                 camera_projection,
                 blases: &self.blases,
+            },
+            self.frame,
+            &[],
+            &[],
+            None,
+            &mut self.context,
+            world,
+            clock,
+            bump,
+        )?;
+
+        let diffuse_filter_output = self.diffuse_filter.draw(
+            diffuse_filter::Input {
+                diffuse: rt_prepass_output.diffuse,
             },
             self.frame,
             &[],
@@ -531,7 +540,8 @@ impl Renderer {
                 albedo: rt_prepass_output.albedo,
                 normal_depth: rt_prepass_output.normal_depth,
                 emissive_direct: rt_prepass_output.emissive_direct,
-                diffuse: rt_prepass_output.diffuse,
+                diffuse: diffuse_filter_output.filtered,
+                // diffuse: rt_prepass_output.diffuse,
                 combined: frame.info().image.clone(),
             },
             self.frame,
@@ -549,19 +559,6 @@ impl Renderer {
 
         self.queue.present(frame);
 
-        // self.swapchain_blit.draw(
-        //     swapchain::BlitInput {
-        //         image: rt_prepass_output.diffuse,
-        //         frame,
-        //     },
-        //     self.frame,
-        //     Some(fence),
-        //     &mut self.context,
-        //     world,
-        //     clock,
-        //     bump,
-        // )?;
-
         self.frame += 1;
 
         Ok(())
@@ -574,92 +571,104 @@ const BLUE_NOISE_SIZE: u64 = 64 * 64 * 64 * 16;
 fn load_blue_noise_64x64x64(
     device: &Device,
 ) -> Result<BufferUpload, OutOfMemory> {
-    use image::{load_from_memory_with_format, ImageFormat};
-
     let images = [
-        &include_bytes!("../blue_noise/HDR_RGBA_0.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_1.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_2.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_3.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_4.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_5.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_6.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_7.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_8.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_9.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_10.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_11.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_12.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_13.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_14.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_15.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_16.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_17.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_18.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_19.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_20.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_21.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_22.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_23.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_24.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_25.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_26.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_27.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_28.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_29.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_30.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_31.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_32.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_33.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_34.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_35.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_36.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_37.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_38.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_39.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_40.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_41.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_42.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_43.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_44.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_45.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_46.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_47.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_48.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_49.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_50.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_51.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_52.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_53.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_54.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_55.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_56.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_57.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_58.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_59.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_60.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_61.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_62.png")[..],
-        &include_bytes!("../blue_noise/HDR_RGBA_63.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_0.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_1.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_2.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_3.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_4.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_5.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_6.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_7.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_8.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_9.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_10.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_11.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_12.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_13.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_14.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_15.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_16.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_17.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_18.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_19.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_20.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_21.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_22.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_23.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_24.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_25.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_26.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_27.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_28.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_29.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_30.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_31.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_32.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_33.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_34.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_35.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_36.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_37.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_38.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_39.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_40.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_41.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_42.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_43.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_44.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_45.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_46.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_47.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_48.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_49.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_50.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_51.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_52.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_53.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_54.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_55.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_56.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_57.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_58.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_59.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_60.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_61.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_62.png")[..],
+        &include_bytes!("../../blue_noise/64_64/HDR_RGBA_63.png")[..],
     ];
 
     let mut pixels = Vec::new();
+    let mut raw: Vec<u8> = Vec::new();
 
     for &image in &images[..] {
-        let image = load_from_memory_with_format(image, ImageFormat::Png)
-            .unwrap()
-            .to_rgba();
+        let mut decoder = png::Decoder::new(image);
+        decoder.set_transformations(png::Transformations::IDENTITY);
+        let (info, mut reader) = decoder
+            .read_info()
+            .expect("Inlined png files expected to be valid");
+        assert_eq!(info.color_type, png::ColorType::RGBA);
+        assert_eq!(info.bit_depth, png::BitDepth::Sixteen);
+        const PIXEL_SIZE: usize = 8;
+        let size = usize::try_from(info.width).unwrap()
+            * usize::try_from(info.height).unwrap()
+            * PIXEL_SIZE;
+        assert_eq!(size, reader.output_buffer_size());
+        raw.resize(size, 0);
+        reader
+            .next_frame(&mut raw)
+            .expect("Inlined png files expected to be valid");
 
-        for p in image.pixels() {
-            let r = p[0] as f32 / 255.0;
-            let g = p[1] as f32 / 255.0;
-            let b = p[2] as f32 / 255.0;
-            let a = p[3] as f32 / 255.0;
-
-            pixels.push(r);
-            pixels.push(g);
-            pixels.push(b);
-            pixels.push(a);
+        for pixel in raw.chunks(PIXEL_SIZE) {
+            match *cast_slice::<_, u16>(pixel) {
+                [r, g, b, a] => {
+                    pixels.push(r as f32 / u16::max_value() as f32);
+                    pixels.push(g as f32 / u16::max_value() as f32);
+                    pixels.push(b as f32 / u16::max_value() as f32);
+                    pixels.push(a as f32 / u16::max_value() as f32);
+                }
+                _ => unreachable!(),
+            }
         }
     }
 

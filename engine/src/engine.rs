@@ -1,24 +1,30 @@
 use {
-    crate::config::{AssetSource, Config},
+    crate::{
+        assets::{Assets, Prefab},
+        broker::EventBroker,
+        clocks::ClockIndex,
+        config::{AssetSource, Config},
+    },
     cfg_if::cfg_if,
-    color_eyre::Report,
-    eyre::WrapErr as _,
+    eyre::Report,
+    flume::{bounded, Receiver, Sender},
     goods::Cache,
-    hecs::World,
+    hecs::{Entity, World},
     std::{
         cell::Cell,
         future::Future,
         pin::Pin,
         rc::Rc,
         task::{Context, Poll},
-        time::Instant,
     },
-    tokio::{runtime::Runtime, task::yield_now},
+    tokio::{
+        runtime::{Handle as TokioHandle, Runtime},
+        task::yield_now,
+    },
     winit::{
-        dpi::{PhysicalPosition, PhysicalSize},
-        event::{Event, WindowEvent},
+        event::Event,
         event_loop::{ControlFlow, EventLoop, EventLoopWindowTarget},
-        window::{Theme, Window, WindowBuilder, WindowId},
+        window::{Window, WindowBuilder},
     },
 };
 
@@ -27,21 +33,75 @@ pub use winit::event::{
     MouseButton, MouseScrollDelta, Touch, TouchPhase,
 };
 
-struct Shared {
-    event_loop_ptr: Cell<*const EventLoopWindowTarget<()>>,
-    next_event: Cell<Option<Event<'static, ()>>>,
-    waiting_for_event: Cell<bool>,
+pub type Events = EventBroker<Event<'static, ()>>;
+
+pub trait System {
+    fn run(
+        &mut self,
+        world: &mut World,
+        events: &mut Events,
+        clocks: ClockIndex,
+    );
+}
+
+impl<F> System for F
+where
+    F: FnMut(&mut World, &mut Events, ClockIndex),
+{
+    fn run(
+        &mut self,
+        world: &mut World,
+        events: &mut Events,
+        clocks: ClockIndex,
+    ) {
+        self(world, events, clocks)
+    }
 }
 
 /// Root data structure for the game engine.
 pub struct Engine {
     pub world: World,
-    pub assets: Cache<String>,
-    schedule: Vec<Box<dyn FnMut(&mut World)>>,
+    pub assets: Assets,
+    pub events: Events,
+    schedule: Vec<Box<dyn System>>,
     shared: Rc<Shared>,
+    runtime: TokioHandle,
+    recv_loaded_prefabs: Receiver<LoadedPrefab>,
+    send_loaded_prefabs: Sender<LoadedPrefab>,
 }
 
 impl Engine {
+    pub fn load_prefab<P: ?Sized, F>(&self, prefab: F, info: P::Info) -> Entity
+    where
+        P: Prefab,
+        F: Future<Output = Result<P, Report>> + Send + 'static,
+    {
+        let entity = self.world.reserve_entity();
+        let send_loaded_prefabs = self.send_loaded_prefabs.clone();
+
+        self.runtime.spawn(async move {
+            let loaded = match prefab.await {
+                Ok(prefab) => LoadedPrefab::spawn(prefab, info, entity),
+                Err(err) => LoadedPrefab::Error(err, entity),
+            };
+            let _ = send_loaded_prefabs.send(loaded);
+        });
+
+        entity
+    }
+
+    fn build_prefabs(&mut self) {
+        for loaded in self.recv_loaded_prefabs.try_iter() {
+            match loaded {
+                LoadedPrefab::Spawn(build) => build(&mut self.world),
+                LoadedPrefab::Error(err, entity) => {
+                    tracing::error!("Failed to load prefab: {}", err);
+                    let _ = self.world.despawn(entity);
+                }
+            }
+        }
+    }
+
     pub fn build_window(
         &mut self,
         builder: WindowBuilder,
@@ -66,10 +126,18 @@ impl Engine {
         Ok(window)
     }
 
+    pub fn advance(&mut self, clock: ClockIndex) {
+        self.build_prefabs();
+
+        for system in &mut self.schedule {
+            system.run(&mut self.world, &mut self.events, clock);
+        }
+    }
+
     /// Adds a system to this engine.
-    pub fn add_system<A, S>(&mut self, system: S) -> &mut Self
+    pub fn add_system<S>(&mut self, system: S) -> &mut Self
     where
-        S: FnMut(&mut World) + 'static,
+        S: System + 'static,
     {
         self.schedule.push(Box::new(system));
         self
@@ -87,6 +155,7 @@ impl Engine {
             yield_now().await;
         };
 
+        self.events.add(event.clone());
         self.shared.waiting_for_event.set(false);
         event
     }
@@ -143,13 +212,17 @@ impl Engine {
             waiting_for_event: Cell::new(false),
         });
 
-        let now = Instant::now();
+        let (send_loaded_prefabs, recv_loaded_prefabs) = bounded(512);
 
         let engine = Engine {
             assets,
             schedule: Vec::new(),
             world: World::new(),
+            events: EventBroker::new(),
             shared: shared.clone(),
+            recv_loaded_prefabs,
+            send_loaded_prefabs,
+            runtime: runtime.handle().clone(),
         };
 
         let event_loop = EventLoop::new();
@@ -248,5 +321,27 @@ where
             Poll::Pending if this.ready.get() => Poll::Ready(Poll::Pending),
             Poll::Pending => Poll::Pending,
         }
+    }
+}
+
+struct Shared {
+    event_loop_ptr: Cell<*const EventLoopWindowTarget<()>>,
+    next_event: Cell<Option<Event<'static, ()>>>,
+    waiting_for_event: Cell<bool>,
+}
+
+enum LoadedPrefab {
+    Spawn(Box<dyn FnOnce(&mut World) + Send>),
+    Error(Report, Entity),
+}
+
+impl LoadedPrefab {
+    fn spawn<P>(prefab: P, info: P::Info, entity: Entity) -> Self
+    where
+        P: Prefab,
+    {
+        LoadedPrefab::Spawn(Box::new(move |world| {
+            prefab.spawn(info, world, entity)
+        }))
     }
 }

@@ -15,7 +15,6 @@ use crate::{
     stage::PipelineStageFlags,
     Extent3d, IndexType, Offset3d, OutOfMemory, Rect2d,
 };
-use maybe_sync::{MaybeSend, MaybeSync};
 use smallvec::SmallVec;
 use std::{fmt::Debug, ops::Range};
 
@@ -613,7 +612,7 @@ impl CommandBuffer {
 }
 
 pub unsafe trait CommandBufferTrait:
-    Debug + MaybeSend + MaybeSync + 'static
+    Debug + Send + Sync + 'static
 {
     fn type_id(&self) -> std::any::TypeId;
 

@@ -10,8 +10,16 @@ use std::{
 };
 
 /// Describes single vertex location.
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
-#[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Hash,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub struct VertexLocation {
     /// Specifies how data is interpreted for attibutes.
     /// Attribute component types in vertex shader must match base type of the
@@ -23,8 +31,9 @@ pub struct VertexLocation {
 }
 
 /// Describes layout of vertex buffer element.
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-#[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
+#[derive(
+    Clone, Debug, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize,
+)]
 pub struct VertexLayout {
     pub locations: Cow<'static, [VertexLocation]>,
     pub stride: u32,
@@ -102,9 +111,8 @@ pub trait VertexType: FromBytes + Pod {
 }
 
 /// Attribute for vertex position in 3d world.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 #[repr(transparent)]
-#[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
 pub struct Position3d(pub [f32; 3]);
 
 unsafe impl Zeroable for Position3d {}
@@ -128,9 +136,8 @@ impl VertexType for Position3d {
 }
 
 /// Attribute for vertex normal in 3d world.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 #[repr(transparent)]
-#[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
 pub struct Normal3d(pub [f32; 3]);
 
 unsafe impl Zeroable for Normal3d {}
@@ -154,9 +161,8 @@ impl VertexType for Normal3d {
 }
 
 /// Attribute for vertex position in 3d world.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 #[repr(transparent)]
-#[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
 pub struct Tangent3d(pub [f32; 4]);
 
 unsafe impl Zeroable for Tangent3d {}
@@ -180,8 +186,7 @@ impl VertexType for Tangent3d {
 }
 
 /// Attribute for vertex color.
-#[derive(Clone, Copy, Debug)]
-#[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 #[repr(transparent)]
 pub struct Color(pub [f32; 4]);
 
@@ -206,8 +211,7 @@ impl VertexType for Color {
 }
 
 /// Attribute for texture coordinates.
-#[derive(Clone, Copy, Debug)]
-#[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 #[repr(transparent)]
 pub struct UV(pub [f32; 2]);
 
@@ -231,8 +235,7 @@ impl VertexType for UV {
     const RATE: VertexInputRate = VertexInputRate::Vertex;
 }
 
-#[derive(Clone, Copy, Debug)]
-#[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub struct Position3dUV {
     pub position: Position3d,
@@ -272,8 +275,7 @@ impl VertexType for Position3dUV {
     const RATE: VertexInputRate = VertexInputRate::Vertex;
 }
 
-#[derive(Clone, Copy, Debug)]
-#[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub struct Position3dColor {
     pub position: Position3d,
@@ -313,8 +315,7 @@ impl VertexType for Position3dColor {
     const RATE: VertexInputRate = VertexInputRate::Vertex;
 }
 
-#[derive(Clone, Copy, Debug)]
-#[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub struct PositionNormal3d {
     pub position: Position3d,
@@ -354,8 +355,7 @@ impl VertexType for PositionNormal3d {
     const RATE: VertexInputRate = VertexInputRate::Vertex;
 }
 
-#[derive(Clone, Copy, Debug)]
-#[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub struct PositionNormalTangent3d {
     pub position: Position3d,
@@ -408,8 +408,7 @@ impl VertexType for PositionNormalTangent3d {
     const RATE: VertexInputRate = VertexInputRate::Vertex;
 }
 
-#[derive(Clone, Copy, Debug)]
-#[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub struct PositionNormal3dUV {
     pub position: Position3d,
@@ -462,8 +461,7 @@ impl VertexType for PositionNormal3dUV {
     const RATE: VertexInputRate = VertexInputRate::Vertex;
 }
 
-#[derive(Clone, Copy, Debug)]
-#[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub struct PositionNormalTangent3dUV {
     pub position: Position3d,
@@ -527,8 +525,7 @@ impl VertexType for PositionNormalTangent3dUV {
     const RATE: VertexInputRate = VertexInputRate::Vertex;
 }
 
-#[derive(Clone, Copy, Debug)]
-#[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub struct PositionNormal3dColor {
     pub position: Position3d,
@@ -582,8 +579,7 @@ impl VertexType for PositionNormal3dColor {
 }
 
 /// Attribute for instance 3d transformation.
-#[derive(Clone, Copy, Debug)]
-#[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 #[repr(transparent)]
 pub struct Transformation3d([[f32; 4]; 4]);
 

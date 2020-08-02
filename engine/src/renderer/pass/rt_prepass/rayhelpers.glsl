@@ -1,29 +1,27 @@
 
 #extension GL_EXT_nonuniform_qualifier : enable
 
-float rand(uvec3 co) {
-    return fract(sin(dot(co, vec3(12.9898, 78.233, 42.113))) * 43758.5453);
+vec4 rand(uvec3 co) {
+    float x = fract(sin(dot(co, vec3(12.9898, 78.233, 42.113))) * 4758.5453);
+    float y = fract(sin(dot(co, vec3(17.9898, 78.233, 42.113))) * 4358.5453);
+    float z = fract(sin(dot(co, vec3(23.9898, 78.233, 42.113))) * 4378.5453);
+    float w = fract(sin(dot(co, vec3(27.9898, 78.233, 42.113))) * 4375.5453);
+    return vec4(x, y, z, w);
 }
 
-vec2 rand_circle(uvec3 co) {
-    float t = 2 * M_PI * rand(co);
-    float u = rand(co * 2) + rand(co + uvec3(1, 2, 3));
-    float r = u > 1 ? 2 - u : u;
-    return vec2(r * cos(t), r * sin(t));
-}
-
-vec3 rand_unit_vector(uvec3 co) {
-    float a = rand(co) * 2 * M_PI;
-    float z = rand(co + uvec3(1, 2, 3)) * 2 - 1;
-    float r = sqrt(1 - z*z);
-    return vec3(r*cos(a), r*sin(a), z);
+vec3 golden_rand(uvec3 co) {
+    vec4 rand = rand(co);
+    float x = fract(dot(co, vec3(M_FI, 0, M_PI)));
+    float y = fract(dot(co, vec3(0, M_PI, M_FI)));
+    float z = fract(dot(co, vec3(M_PI, 0, M_FI)));
+    return vec3(x, y, z);
 }
 
 uint diff(uint a, uint b) {
     return max(a,b) - min(a,b);
 }
 
-vec4 blue_rand_sample(uvec3 co) {
+vec3 blue_rand(uvec3 co) {
     uint x = (co.z % 2 == 0 ? co.x : co.y) % 64;
     uint y = (co.z % 2 == 0 ? co.y : co.x) % 64;
 
@@ -31,37 +29,47 @@ vec4 blue_rand_sample(uvec3 co) {
     uint index = x + y * 64 + z * 64 * 64;
     vec4 raw = blue_noise[index];
 
-    if (co.z % 3 == 0)
+    if (co.z % 2 == 0)
         raw = raw.yxzw;
 
-    if (co.z % 5 == 0)
+    if (co.z % 3 == 0)
         raw = raw.xzyw;
 
+    if (co.z % 5 == 0)
+        raw = raw.wyxz;
+
     if (co.z % 7 == 0)
-        raw = raw.xywz;
+        raw = raw.zwyx;
 
-    if (co.z % 11 == 0)
-        raw = raw.zywx;
-
-    return raw + vec4(rand(co), rand(co + uvec3(1, 2, 3)), rand(co + uvec3(2, 3, 4)), rand(co + uvec3(3, 4, 5))) / 5;
+    return raw.xyz;
+    // return rand(co);
+    // return golden_rand(co);
 }
 
 vec2 blue_rand_circle(uvec3 co) {
-    vec4 rand = blue_rand_sample(co);
+    vec3 rand = golden_rand(co);
     float t = rand.x * 2 * M_PI;
     float u = rand.y * rand.z;
     float r = u > 1 ? 2 - u : u;
     return vec2(r * cos(t), r * sin(t));
 }
 
-vec2 blue_rand_square(uvec3 co) {
-    return blue_rand_sample(co).xy;
+vec3 blue_rand_cone(uvec3 co, float cos_theta) {
+    vec3 rand = golden_rand(co);
+    float cos_a = (1 - rand.x) + rand.x * cos_theta;
+    float sin_a = sqrt(1 - cos_a * cos_a);
+    float phi = rand.y * 2 * M_PI;
+    return vec3(cos(phi) * sin_a, sin(phi) * sin_a, cos_a);
 }
 
-vec3 blue_rand_unit_vector(uvec3 co) {
-    vec4 rand = blue_rand_sample(co);
+vec2 blue_rand_square(uvec3 co) {
+    return golden_rand(co).xy;
+}
+
+vec3 blue_rand_hemisphere_cosine(uvec3 co) {
+    vec3 rand = golden_rand(co);
     float a = rand.x * 2 * M_PI;
-    float z = rand.y;
-    float r = sqrt(1 - z*z);
+    float r = sqrt(rand.y);
+    float z = sqrt(1 - rand.y);
     return vec3(r*cos(a), r*sin(a), z);
 }

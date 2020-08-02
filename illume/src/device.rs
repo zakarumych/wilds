@@ -23,10 +23,9 @@ use crate::{
     semaphore::Semaphore,
     shader::{CreateShaderModuleError, ShaderModule, ShaderModuleInfo},
     surface::{PresentMode, Surface, SurfaceError, Swapchain, SwapchainImage},
-    DeviceAddress, Extent2d, MaybeSendSyncError, OutOfMemory,
+    DeviceAddress, Extent2d, OutOfMemory,
 };
 use bytemuck::{cast_slice, Pod};
-use maybe_sync::{MaybeSend, MaybeSync};
 use smallvec::SmallVec;
 use std::{
     borrow::Borrow,
@@ -57,7 +56,7 @@ pub enum CreateDeviceError<E: Error + 'static> {
     #[error("{source}")]
     Other {
         #[from]
-        source: Box<MaybeSendSyncError>,
+        source: Box<dyn Error + Send + Sync>,
     },
 }
 
@@ -77,7 +76,7 @@ pub enum CreateBufferError {
     #[error("{source}")]
     Other {
         #[from]
-        source: Box<MaybeSendSyncError>,
+        source: Box<dyn Error + Send + Sync>,
     },
 }
 
@@ -97,7 +96,7 @@ pub enum CreateImageError {
     #[error("{source}")]
     Other {
         #[from]
-        source: Box<MaybeSendSyncError>,
+        source: Box<dyn Error + Send + Sync>,
     },
 }
 
@@ -497,7 +496,7 @@ pub enum CreateRenderPassError {
     },
 }
 
-pub trait DeviceTrait: Debug + MaybeSend + MaybeSync + 'static {
+pub trait DeviceTrait: Debug + Send + Sync + 'static {
     fn create_buffer(
         self: Arc<Self>,
         info: BufferInfo,

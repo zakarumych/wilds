@@ -3,9 +3,8 @@ use crate::{
     device::{CreateDeviceError, CreateDeviceImplError, Device},
     queue::{Family, FamilyInfo, QueuesQuery},
     surface::{Surface, SurfaceCapabilities, SurfaceError},
-    MaybeSendSyncError, OutOfMemory as OOM,
+    OutOfMemory as OOM,
 };
-use maybe_sync::{MaybeSend, MaybeSync};
 use std::{error::Error, fmt::Debug};
 
 /// Error occured during device enumeration.
@@ -21,7 +20,7 @@ pub enum EnumerateDeviceError {
     #[error("{source}")]
     Other {
         #[from]
-        source: Box<MaybeSendSyncError>,
+        source: Box<dyn Error + Send + Sync>,
     },
 }
 
@@ -85,9 +84,7 @@ pub struct PhysicalDevice {
 }
 
 impl PhysicalDevice {
-    pub fn new(
-        inner: Box<impl PhysicalDeviceTrait + MaybeSend + MaybeSync>,
-    ) -> Self {
+    pub fn new(inner: Box<impl PhysicalDeviceTrait>) -> Self {
         PhysicalDevice { inner }
     }
 }
@@ -142,7 +139,7 @@ impl PhysicalDevice {
     }
 }
 
-pub trait PhysicalDeviceTrait: Debug + MaybeSend + MaybeSync + 'static {
+pub trait PhysicalDeviceTrait: Debug + Send + Sync + 'static {
     fn info(&self) -> DeviceInfo;
 
     fn surface_capabilities(

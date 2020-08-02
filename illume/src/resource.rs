@@ -1,16 +1,15 @@
-use maybe_sync::{MaybeSend, MaybeSync};
 use std::{any::Any, fmt::Debug, marker::PhantomData, sync::Arc};
 
 pub trait ResourceTrait: Sized {
     /// Resource info.
-    type Info: Clone + Debug + MaybeSend + MaybeSync + 'static;
+    type Info: Clone + Debug + Send + Sync + 'static;
 
     fn from_handle(handle: Handle<Self>) -> Self;
 
     fn handle(&self) -> &Handle<Self>;
 }
 
-pub trait Specific<R>: Debug + MaybeSend + MaybeSync + 'static {}
+pub trait Specific<R>: Debug + Send + Sync + 'static {}
 
 /// Type erased safe-ish resource type.
 #[derive(Debug)]
@@ -20,7 +19,7 @@ struct ResourceData<R: ResourceTrait, S: ?Sized> {
     specific: S,
 }
 
-trait AnyResource: Any + MaybeSend + MaybeSync {}
+trait AnyResource: Any + Send + Sync {}
 
 impl dyn AnyResource + 'static {
     pub fn is<T>(&self) -> bool
@@ -49,7 +48,7 @@ impl dyn AnyResource + 'static {
     }
 }
 
-impl<T> AnyResource for T where T: 'static + MaybeSend + MaybeSync {}
+impl<T> AnyResource for T where T: 'static + Send + Sync {}
 
 #[repr(transparent)]
 pub struct Handle<R: ResourceTrait>(Arc<ResourceData<R, dyn AnyResource>>);

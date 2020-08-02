@@ -1,20 +1,21 @@
 use {
     crate::renderer::{
         Binding, Context, FromBytes as _, Indices, Material, Mesh, MeshBuilder,
-        Normal3d, Position3d, PositionNormalTangent3dUV, Renderer, Tangent3d,
-        Texture, VertexType, UV,
+        Normal3d, Position3d, PositionNormalTangent3dUV, Tangent3d, Texture,
+        VertexType, UV,
     },
     byteorder::LittleEndian,
     futures::future::{try_join_all, BoxFuture},
     illume::{
-        BorderColor, BufferInfo, BufferUsage, CreateImageError, Device, Filter,
-        Format, ImageExtent, ImageInfo, ImageUsage, ImageViewInfo, IndexType,
-        MaybeSendSyncError, MemoryUsageFlags, MipmapMode, OutOfMemory,
-        PrimitiveTopology, Sampler, SamplerAddressMode, SamplerInfo, Samples1,
+        BorderColor, BufferInfo, BufferUsage, CreateImageError, Filter, Format,
+        ImageExtent, ImageInfo, ImageUsage, ImageViewInfo, IndexType,
+        MemoryUsageFlags, MipmapMode, OutOfMemory, PrimitiveTopology, Sampler,
+        SamplerAddressMode, SamplerInfo, Samples1,
     },
     std::{
         collections::HashMap,
         convert::{TryFrom as _, TryInto as _},
+        error::Error,
         mem::{align_of, size_of},
         ops::Range,
         str::FromStr,
@@ -92,7 +93,7 @@ pub enum GltfError {
     #[error("{source}")]
     Other {
         #[from]
-        source: Box<MaybeSendSyncError>,
+        source: Box<dyn Error + Send + Sync>,
     },
 }
 
@@ -458,7 +459,6 @@ impl goods::SyncAsset for Gltf {
             .nodes()
             .map(|node| {
                 let m = node.transform().matrix();
-
                 let transform = Mat4::new(
                     m[0].into(),
                     m[1].into(),

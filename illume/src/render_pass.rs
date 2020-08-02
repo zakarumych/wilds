@@ -182,3 +182,7 @@ pub enum ClearValue {
     Color(f32, f32, f32, f32),
     DepthStencil(f32, u32),
 }
+
+fn is_default<T: Default + Eq>(value: &T) -> bool {
+    *value == T::default()
+}

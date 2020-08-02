@@ -1,7 +1,7 @@
 use crate::{
     assert_error,
     resource::{Handle, ResourceTrait},
-    MaybeSendSyncError, OutOfMemory,
+    OutOfMemory,
 };
 use std::{
     convert::TryFrom,
@@ -271,7 +271,7 @@ pub enum CreateShaderModuleError {
     #[error("{source}")]
     Other {
         #[from]
-        source: Box<MaybeSendSyncError>,
+        source: Box<dyn Error + Send + Sync>,
     },
 }
 

@@ -9,43 +9,34 @@ edition = "2018"
 vulkan = ["illume-erupt"]
 
 # Image formats support
-gif = ["image/gif"]
-jpeg = ["image/jpeg"]
-ico = ["image/ico"]
-png = ["image/png"]
-pnm = ["image/pnm"]
-tga = ["image/tga"]
-tiff = ["image/tiff"]
-webp = ["image/webp"]
-bmp = ["image/bmp"]
-hdr = ["image/hdr"]
-dxt = ["image/dxt"]
-dds = ["image/dds"]
-farbfeld = ["image/farbfeld"]
 
 [dependencies]
 # Assets
 goods = { version = "0.5", features = ["fs", "tokio-spawn"], path = "../../goods" }
 gltf = "0.15"
 
+# Physics
+ncollide3d = "0.23"
+
 # Graphics
-illume = { path = "../illume", features = ["ultraviolet"] }
+illume = { path = "../illume", features = ["ultraviolet", "serde-1"] }
 illume-erupt = { path = "../erupt", optional = true, features = ["shader-compiler"] }
 genmesh = { version = "0.6", optional = true }
-image = { version = "0.23", default-features = false, features = ["png"] }
 palette = { version = "0.5", default-features = false, features = ["std"] }
+image = { version = "0.23", features = ["png"] }
+png = "0.16"
 
 # ECS
 hecs = "0.2"
 
 # Linear algebra
+nalgebra = "0.21"
 ultraviolet = "0.4"
 
 # Windowing
 winit = "0.22" # "0.22.2"
 
 # Low-Level
-maybe-sync = "0.1"
 bytemuck = "1.2"
 byteorder = "1.3"
 bumpalo = { version = "3.4", features = ["collections"] }
@@ -68,11 +59,12 @@ fastbitset = { path = "../fastbitset" }
 cfg-if = "0.1"
 futures = "0.3"
 lazy_static = "1.4"
-flume = "0.7"
+flume = { version = "0.7", features = ["async"] }
 ordered-float = "2.0"
 hibitset = "0.6"
 num-traits = "0.2"
-smallvec = "1.0"
+smallvec = "1.4"
+bitflags = "1.2"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "0.2", features = ["macros", "rt-threaded", "blocking"] }

@@ -16,14 +16,14 @@ void main()
 {
     const uint shadow_ray_flags = gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsSkipClosestHitShaderEXT;
     const uvec3 co = uvec3(gl_LaunchIDEXT.xy, globals.frame);
-    const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + blue_rand_square(co);
+    const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy);
     const vec2 inUV = pixelCenter/vec2(gl_LaunchSizeEXT.xy);
     vec2 d = inUV * 2.0 - 1.0;
     vec4 proj  = globals.cam.iproj * vec4(d.x, d.y, 1, 1);
-    vec4 target = globals.cam.iview * vec4(normalize(proj.xyz), 1.0);
+    vec4 target = globals.cam.view * vec4(normalize(proj.xyz), 1.0);
 
-    vec2 off = vec2(0.0, 0.0);//(blue_rand_circle(co + uvec3(13)) - 0.5);
-    vec4 origin = globals.cam.iview[3];
+    vec2 off = (blue_rand_circle(co + uvec3(13)) - 0.5);
+    vec4 origin = globals.cam.view[3];
 
     prd.co = co;
     prd.normal = vec3(0, 0, 0);
