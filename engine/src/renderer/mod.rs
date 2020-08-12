@@ -3,7 +3,10 @@ mod mesh;
 mod pass;
 mod vertex;
 
-pub use self::{material::*, mesh::*, vertex::*};
+pub use {
+    self::{material::*, mesh::*, vertex::*},
+    illume::*,
+};
 
 use {
     self::pass::*,
@@ -308,7 +311,8 @@ pub struct Renderer {
 
     swapchain: Swapchain,
     rt_prepass: RtPrepass,
-    diffuse_filter: DiffuseFilter,
+    diffuse_filter: GaussFilter,
+    direct_filter: GaussFilter,
     combine: CombinePass,
 }
 
@@ -422,7 +426,8 @@ impl Renderer {
 
         // let swapchain_blit = SwapchainBlitPresentPass;
         let combine = CombinePass::new(&mut context)?;
-        let diffuse_filter = DiffuseFilter::new(&mut context)?;
+        let diffuse_filter = GaussFilter::new(&mut context)?;
+        let direct_filter = GaussFilter::new(&mut context)?;
 
         context.buffer_uploads.push(blue_noise_upload);
 
@@ -433,6 +438,7 @@ impl Renderer {
             swapchain,
             rt_prepass,
             diffuse_filter,
+            direct_filter,
             combine,
             context,
         })
@@ -521,8 +527,24 @@ impl Renderer {
         )?;
 
         let diffuse_filter_output = self.diffuse_filter.draw(
-            diffuse_filter::Input {
-                diffuse: rt_prepass_output.diffuse,
+            gauss_filter::Input {
+                normal_depth: rt_prepass_output.normal_depth.clone(),
+                unfiltered: rt_prepass_output.diffuse,
+            },
+            self.frame,
+            &[],
+            &[],
+            None,
+            &mut self.context,
+            world,
+            clock,
+            bump,
+        )?;
+
+        let direct_filter_output = self.direct_filter.draw(
+            gauss_filter::Input {
+                normal_depth: rt_prepass_output.normal_depth.clone(),
+                unfiltered: rt_prepass_output.direct,
             },
             self.frame,
             &[],
@@ -539,9 +561,11 @@ impl Renderer {
             combine::Input {
                 albedo: rt_prepass_output.albedo,
                 normal_depth: rt_prepass_output.normal_depth,
-                emissive_direct: rt_prepass_output.emissive_direct,
-                diffuse: diffuse_filter_output.filtered,
+                emissive: rt_prepass_output.emissive,
+                // direct: rt_prepass_output.direct,
                 // diffuse: rt_prepass_output.diffuse,
+                direct: direct_filter_output.filtered,
+                diffuse: diffuse_filter_output.filtered,
                 combined: frame.info().image.clone(),
             },
             self.frame,
@@ -736,32 +760,4 @@ struct ImageUpload {
     subresource: ImageSubresourceLayers,
     offset: Offset3d,
     extent: Extent3d,
-}
-
-// Naive small bit set.
-#[derive(Clone, Debug)]
-struct BitSet {
-    bits: u128,
-}
-
-impl BitSet {
-    fn new() -> Self {
-        BitSet { bits: !0 }
-    }
-
-    fn add(&mut self) -> Option<u32> {
-        let index = self.bits.trailing_zeros();
-        if index == 128 {
-            None
-        } else {
-            self.bits &= !(1 << index);
-            Some(index)
-        }
-    }
-
-    fn unset(&mut self, index: u32) {
-        let bit = 1 << index;
-        debug_assert_eq!(self.bits & bit, 0);
-        self.bits |= !bit;
-    }
 }

@@ -6,7 +6,6 @@
 layout(location = 0) rayPayloadInEXT PrimaryHitPayload prd;
 
 void main() {
-    const vec3 emissive = vec3(1.0, 3.0, 5.0) / 3;
+    const vec3 emissive = globals.skylight;
     prd.emissive = emissive;
-    prd.direct = 0;
 }

@@ -13,5 +13,5 @@ glslangValidator -V rt_prepass/shadow.rmiss -o rt_prepass/shadow.rmiss.spv
 glslangValidator -V combine/combine.vert -o combine/combine.vert.spv
 glslangValidator -V combine/combine.frag -o combine/combine.frag.spv
 
-glslangValidator -V diffuse_filter/diffuse_filter.vert -o diffuse_filter/diffuse_filter.vert.spv
-glslangValidator -V diffuse_filter/diffuse_filter.frag -o diffuse_filter/diffuse_filter.frag.spv
+glslangValidator -V gauss_filter/gauss_filter.vert -o gauss_filter/gauss_filter.vert.spv
+glslangValidator -V gauss_filter/gauss_filter.frag -o gauss_filter/gauss_filter.frag.spv

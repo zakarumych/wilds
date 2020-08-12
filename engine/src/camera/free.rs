@@ -1,64 +1,12 @@
 use {
-    crate::{
-        broker::EventReader,
-        clocks::ClockIndex,
-        engine::{Events, System},
-    },
-    hecs::World,
+    super::Camera,
+    crate::engine::{Resources, System},
     std::f32::consts::{FRAC_PI_2, PI},
-    ultraviolet::{
-        projection::{orthographic_vk, perspective_vk},
-        Isometry3, Mat4, Rotor3, Vec3,
-    },
-    winit::event::{
-        DeviceEvent, ElementState, Event, KeyboardInput, VirtualKeyCode,
-    },
+    ultraviolet::{Isometry3, Rotor3, Vec3},
+    winit::event::{DeviceEvent, ElementState, Event, VirtualKeyCode},
 };
 
 const TAU: f32 = 6.28318530717958647692528676655900577f32;
-
-#[derive(Clone, Copy, Debug)]
-pub enum Camera {
-    Perspective {
-        vertical_fov: f32,
-        aspect_ratio: f32,
-        z_near: f32,
-        z_far: f32,
-    },
-    Orthographic {
-        left: f32,
-        right: f32,
-        bottom: f32,
-        top: f32,
-        near: f32,
-        far: f32,
-    },
-    Matrix(Mat4),
-}
-
-impl Camera {
-    pub fn projection(&self) -> Mat4 {
-        match *self {
-            Self::Perspective {
-                vertical_fov,
-                aspect_ratio,
-                z_near,
-                z_far,
-            } => perspective_vk(vertical_fov, aspect_ratio, z_near, z_far),
-
-            Self::Orthographic {
-                left,
-                right,
-                bottom,
-                top,
-                near,
-                far,
-            } => orthographic_vk(left, right, bottom, top, near, far),
-
-            Self::Matrix(mat) => mat,
-        }
-    }
-}
 
 /// Free camera marker component.
 pub struct FreeCamera;
@@ -76,7 +24,6 @@ bitflags::bitflags! {
 
 /// System to fly camera freely.
 pub struct FreeCameraSystem {
-    reader: Option<EventReader>,
     pitch: f32,
     yaw: f32,
     direction: Direction,
@@ -88,7 +35,6 @@ pub struct FreeCameraSystem {
 impl FreeCameraSystem {
     pub fn new() -> Self {
         FreeCameraSystem {
-            reader: None,
             pitch: 0.0,
             yaw: 0.0,
             direction: Direction::empty(),
@@ -111,38 +57,29 @@ impl FreeCameraSystem {
 }
 
 impl System for FreeCameraSystem {
-    fn run(
-        &mut self,
-        world: &mut World,
-        events: &mut Events,
-        clocks: ClockIndex,
-    ) {
-        let mut query = world
+    fn run(&mut self, resources: Resources<'_>) {
+        let delta = resources.clocks.delta.as_secs_f32();
+        let mut query = resources
+            .world
             .query::<&mut Isometry3>()
             .with::<Camera>()
             .with::<FreeCamera>();
 
         if let Some((_, iso)) = query.iter().next() {
-            let reader = self.reader.get_or_insert_with(|| events.subscribe());
-
-            for event in events.read(reader) {
+            for event in resources.input.read() {
                 match event {
                     Event::DeviceEvent { event, .. } => match event {
-                        DeviceEvent::MouseMotion { delta: (x, y) } => {
+                        &DeviceEvent::MouseMotion { delta: (x, y) } => {
                             // let x = Rotor3::from_rotation_xz(
-                            //     x as f32 * clocks.delta.as_secs_f32(),
+                            //     x as f32 * delta,
                             // );
                             // let y = Rotor3::from_rotation_yz(
-                            //     -y as f32 * clocks.delta.as_secs_f32(),
+                            //     -y as f32 * delta,
                             // );
                             // iso.rotation = x * iso.rotation * y;
 
-                            self.pitch -= y as f32
-                                * clocks.delta.as_secs_f32()
-                                * self.pitch_factor;
-                            self.yaw += x as f32
-                                * clocks.delta.as_secs_f32()
-                                * self.yaw_factor;
+                            self.pitch -= y as f32 * delta * self.pitch_factor;
+                            self.yaw += x as f32 * delta * self.yaw_factor;
 
                             self.pitch =
                                 self.pitch.min(FRAC_PI_2).max(-FRAC_PI_2);
@@ -207,11 +144,9 @@ impl System for FreeCameraSystem {
                 moving[1] -= 1.0;
             }
 
-            moving *= self.speed * clocks.delta.as_secs_f32();
+            moving *= self.speed * delta;
 
             iso.prepend_translation(moving);
-        } else if let Some(reader) = self.reader.take() {
-            events.unsubscribe(reader);
         }
     }
 }

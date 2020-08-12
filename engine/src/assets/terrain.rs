@@ -1,8 +1,15 @@
 use {
     super::{Assets, Prefab},
-    crate::renderer::{
-        Context, Material, Mesh, MeshBuilder, Normal3d, Position3d,
-        PositionNormalTangent3dUV, Renderable, Tangent3d, VertexType as _, UV,
+    crate::{
+        physics::{
+            BodyPartHandle, BodyStatus, ColliderDesc, Colliders, Physics,
+            RigidBodyDesc,
+        },
+        renderer::{
+            Context, Material, Mesh, MeshBuilder, Normal3d, Position3d,
+            PositionNormalTangent3dUV, Renderable, Tangent3d, VertexType as _,
+            UV,
+        },
     },
     goods::{ready, Format, Ready, SyncAsset},
     hecs::{Entity, World},
@@ -248,6 +255,10 @@ impl Prefab for TerrainAsset {
     type Info = Isometry3;
 
     fn spawn(self, iso: Isometry3, world: &mut World, entity: Entity) {
+        let rigid_body = RigidBodyDesc::<f32>::new()
+            .status(BodyStatus::Static)
+            .build();
+
         let _ = world.insert(
             entity,
             (
@@ -256,7 +267,8 @@ impl Prefab for TerrainAsset {
                     material: Material::color([0.3, 0.5, 0.7, 1.0]),
                     transform: None,
                 },
-                ShapeHandle::from_arc(self.shape),
+                rigid_body,
+                Colliders::from(ShapeHandle::from_arc(self.shape)),
                 iso,
                 Terrain,
             ),

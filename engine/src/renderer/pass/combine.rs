@@ -11,7 +11,8 @@ use {
 pub struct Input {
     pub albedo: Image,
     pub normal_depth: Image,
-    pub emissive_direct: Image,
+    pub emissive: Image,
+    pub direct: Image,
     pub diffuse: Image,
     pub combined: Image,
 }
@@ -22,7 +23,8 @@ pub struct CombinePass {
     sampler: Sampler,
     albedo: [Option<ImageView>; 2],
     normal_depth: [Option<ImageView>; 2],
-    emissive_direct: [Option<ImageView>; 2],
+    emissive: [Option<ImageView>; 2],
+    direct: [Option<ImageView>; 2],
     diffuse: [Option<ImageView>; 2],
     combined: Option<ImageView>,
     render_pass: Option<RenderPass>,
@@ -33,7 +35,6 @@ pub struct CombinePass {
     frag: FragmentShader,
 
     pipeline_layout: PipelineLayout,
-    set_layout: DescriptorSetLayout,
     per_frame_sets: [DescriptorSet; 2],
 }
 
@@ -60,7 +61,7 @@ impl CombinePass {
                         stages: ShaderStageFlags::FRAGMENT,
                         flags: DescriptorBindingFlags::empty(),
                     },
-                    // emissive-direct
+                    // emissive
                     DescriptorSetLayoutBinding {
                         binding: 2,
                         ty: DescriptorType::CombinedImageSampler,
@@ -68,9 +69,17 @@ impl CombinePass {
                         stages: ShaderStageFlags::FRAGMENT,
                         flags: DescriptorBindingFlags::empty(),
                     },
-                    // diffuse
+                    // direct
                     DescriptorSetLayoutBinding {
                         binding: 3,
+                        ty: DescriptorType::CombinedImageSampler,
+                        count: 1,
+                        stages: ShaderStageFlags::FRAGMENT,
+                        flags: DescriptorBindingFlags::empty(),
+                    },
+                    // diffuse
+                    DescriptorSetLayoutBinding {
+                        binding: 4,
                         ty: DescriptorType::CombinedImageSampler,
                         count: 1,
                         stages: ShaderStageFlags::FRAGMENT,
@@ -120,14 +129,14 @@ impl CombinePass {
             sampler,
             albedo: [None, None],
             normal_depth: [None, None],
-            emissive_direct: [None, None],
+            emissive: [None, None],
+            direct: [None, None],
             diffuse: [None, None],
             combined: None,
             render_pass: None,
             pipeline: None,
             framebuffer: None,
 
-            set_layout,
             per_frame_sets: [set0, set1],
             pipeline_layout,
 
@@ -306,23 +315,45 @@ impl<'a> Pass<'a> for CombinePass {
             }
         }
 
-        match &self.emissive_direct[fid as usize] {
-            Some(emissive_direct)
-                if emissive_direct.info().image == input.emissive_direct => {}
+        match &self.emissive[fid as usize] {
+            Some(emissive) if emissive.info().image == input.emissive => {}
             _ => {
-                self.emissive_direct[fid as usize] = None;
-                let emissive_direct = ctx.create_image_view(
-                    ImageViewInfo::new(input.emissive_direct.clone()),
-                )?;
-                let emissive_direct = self.emissive_direct[fid as usize]
-                    .get_or_insert(emissive_direct);
+                self.emissive[fid as usize] = None;
+                let emissive = ctx.create_image_view(ImageViewInfo::new(
+                    input.emissive.clone(),
+                ))?;
+                let emissive =
+                    self.emissive[fid as usize].get_or_insert(emissive);
                 writes.push(WriteDescriptorSet {
                     set,
                     binding: 2,
                     element: 0,
                     descriptors: Descriptors::CombinedImageSampler(bump.alloc(
                         [(
-                            emissive_direct.clone(),
+                            emissive.clone(),
+                            Layout::ShaderReadOnlyOptimal,
+                            self.sampler.clone(),
+                        )],
+                    )),
+                });
+            }
+        }
+
+        match &self.direct[fid as usize] {
+            Some(direct) if direct.info().image == input.direct => {}
+            _ => {
+                self.direct[fid as usize] = None;
+                let direct = ctx.create_image_view(ImageViewInfo::new(
+                    input.direct.clone(),
+                ))?;
+                let direct = self.direct[fid as usize].get_or_insert(direct);
+                writes.push(WriteDescriptorSet {
+                    set,
+                    binding: 3,
+                    element: 0,
+                    descriptors: Descriptors::CombinedImageSampler(bump.alloc(
+                        [(
+                            direct.clone(),
                             Layout::ShaderReadOnlyOptimal,
                             self.sampler.clone(),
                         )],
@@ -341,7 +372,7 @@ impl<'a> Pass<'a> for CombinePass {
                 let diffuse = self.diffuse[fid as usize].get_or_insert(diffuse);
                 writes.push(WriteDescriptorSet {
                     set,
-                    binding: 3,
+                    binding: 4,
                     element: 0,
                     descriptors: Descriptors::CombinedImageSampler(bump.alloc(
                         [(

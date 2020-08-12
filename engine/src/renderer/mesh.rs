@@ -269,20 +269,14 @@ impl Mesh {
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BindingData<'a> {
-    #[cfg_attr(
-        feature = "serde-1",
-        serde(with = "serde_bytes", borrow = "'a")
-    )]
+    #[serde(with = "serde_bytes", borrow = "'a")]
     pub data: Cow<'a, [u8]>,
     pub layout: VertexLayout,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct IndicesData<'a> {
-    #[cfg_attr(
-        feature = "serde-1",
-        serde(with = "serde_bytes", borrow = "'a")
-    )]
+    #[serde(with = "serde_bytes", borrow = "'a")]
     pub data: Cow<'a, [u8]>,
     pub index_type: IndexType,
 }
@@ -319,22 +313,13 @@ impl<'a> From<&'a [u32]> for IndicesData<'a> {
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MeshData<'a> {
-    #[cfg_attr(
-        feature = "serde-1",
-        serde(skip_serializing_if = "Vec::is_empty", default, borrow = "'a")
-    )]
+    #[serde(skip_serializing_if = "Vec::is_empty", default, borrow = "'a")]
     pub bindings: Vec<BindingData<'a>>,
-    #[cfg_attr(
-        feature = "serde-1",
-        serde(skip_serializing_if = "Option::is_none", default, borrow = "'a")
-    )]
+    #[serde(skip_serializing_if = "Option::is_none", default, borrow = "'a")]
     pub indices: Option<IndicesData<'a>>,
-    #[cfg_attr(
-        feature = "serde-1",
-        serde(
-            skip_serializing_if = "topology_is_triangles",
-            default = "topology_triangles"
-        )
+    #[serde(
+        skip_serializing_if = "topology_is_triangles",
+        default = "topology_triangles"
     )]
     pub topology: PrimitiveTopology,
 }

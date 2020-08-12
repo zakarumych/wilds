@@ -4,6 +4,8 @@
 
 #define M_PI 3.1415926535897932384626433832795
 #define M_FI 1.61803398874989484820458683436563811772030917980576286213544862270526046281890244970720720418939113748475
+#define M_PL 1.32471795724474602596090885447809734073440405690173336453401505030282785124554759405469934798178728032991
+#define M_PX 1.22074408460576
 
 struct RecursiveRay {
     vec3 origin;
@@ -15,7 +17,7 @@ struct PrimaryHitPayload {
     float depth;
     vec4 albedo;
     vec3 emissive;
-    uint direct;
+    vec3 direct;
     vec3 diffuse;
     uvec3 co;
 };
@@ -62,6 +64,7 @@ layout(binding = 5, set = 0) uniform sampler2D normal[];
 layout(binding = 0, set = 1, std140) uniform Globals {
     Camera cam;
     DirLight dirlight;
+    vec3 skylight;
     uint frame;
 } globals;
 

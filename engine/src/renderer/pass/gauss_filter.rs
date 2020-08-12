@@ -9,16 +9,18 @@ use {
 };
 
 pub struct Input {
-    pub diffuse: Image,
+    pub normal_depth: Image,
+    pub unfiltered: Image,
 }
 
 pub struct Output {
     pub filtered: Image,
 }
 
-pub struct DiffuseFilter {
+pub struct GaussFilter {
     sampler: Sampler,
-    diffuse: [Option<ImageView>; 2],
+    normal_depth: [Option<ImageView>; 2],
+    unfiltered: [Option<ImageView>; 2],
     filtered: Option<ImageView>,
     framebuffer: Option<Framebuffer>,
 
@@ -26,20 +28,26 @@ pub struct DiffuseFilter {
     pipeline: GraphicsPipeline,
 
     pipeline_layout: PipelineLayout,
-    set_layout: DescriptorSetLayout,
     per_frame_sets: [DescriptorSet; 2],
 }
 
-impl DiffuseFilter {
+impl GaussFilter {
     pub fn new(ctx: &mut Context) -> Result<Self, Report> {
         let set_layout =
             ctx.create_descriptor_set_layout(DescriptorSetLayoutInfo {
                 flags: DescriptorSetLayoutFlags::UPDATE_AFTER_BIND_POOL,
                 bindings: vec![
-                    // Inputs
-                    // Diffuse
+                    // Normal-Depth
                     DescriptorSetLayoutBinding {
                         binding: 0,
+                        ty: DescriptorType::CombinedImageSampler,
+                        count: 1,
+                        stages: ShaderStageFlags::FRAGMENT,
+                        flags: DescriptorBindingFlags::empty(),
+                    },
+                    // Unfiltered
+                    DescriptorSetLayoutBinding {
+                        binding: 1,
                         ty: DescriptorType::CombinedImageSampler,
                         count: 1,
                         stages: ShaderStageFlags::FRAGMENT,
@@ -56,7 +64,7 @@ impl DiffuseFilter {
         let vert = VertexShader::with_main(
             ctx.create_shader_module(
                 Spirv::new(
-                    include_bytes!("diffuse_filter/diffuse_filter.vert.spv")
+                    include_bytes!("gauss_filter/gauss_filter.vert.spv")
                         .to_vec(),
                 )
                 .into(),
@@ -66,7 +74,7 @@ impl DiffuseFilter {
         let frag = FragmentShader::with_main(
             ctx.create_shader_module(
                 Spirv::new(
-                    include_bytes!("diffuse_filter/diffuse_filter.frag.spv")
+                    include_bytes!("gauss_filter/gauss_filter.frag.spv")
                         .to_vec(),
                 )
                 .into(),
@@ -130,13 +138,13 @@ impl DiffuseFilter {
                 }
             })?;
 
-        Ok(DiffuseFilter {
+        Ok(GaussFilter {
             sampler,
-            diffuse: [None, None],
+            normal_depth: [None, None],
+            unfiltered: [None, None],
             filtered: None,
             framebuffer: None,
 
-            set_layout,
             per_frame_sets: [set0, set1],
             pipeline_layout,
             render_pass,
@@ -145,7 +153,7 @@ impl DiffuseFilter {
     }
 }
 
-impl<'a> Pass<'a> for DiffuseFilter {
+impl<'a> Pass<'a> for GaussFilter {
     type Input = Input;
     type Output = Output;
 
@@ -161,7 +169,7 @@ impl<'a> Pass<'a> for DiffuseFilter {
         _clock: &ClockIndex,
         bump: &Bump,
     ) -> Result<Output, Report> {
-        let extent = input.diffuse.info().extent.into_2d();
+        let extent = input.normal_depth.info().extent.into_2d();
 
         let filtered = match &self.filtered {
             Some(filtered)
@@ -207,30 +215,60 @@ impl<'a> Pass<'a> for DiffuseFilter {
         let fid = (frame % 2) as u32;
         let set = &self.per_frame_sets[fid as usize];
 
-        match &self.diffuse[fid as usize] {
-            Some(diffuse) if diffuse.info().image == input.diffuse => {}
+        let mut update_set = false;
+        let normal_depth = match &self.normal_depth[fid as usize] {
+            Some(normal_depth)
+                if normal_depth.info().image == input.normal_depth =>
+            {
+                normal_depth
+            }
             _ => {
-                self.diffuse[fid as usize] = None;
-                let diffuse = ctx.create_image_view(ImageViewInfo::new(
-                    input.diffuse.clone(),
+                update_set = true;
+                self.normal_depth[fid as usize] = None;
+                let normal_depth = ctx.create_image_view(
+                    ImageViewInfo::new(input.normal_depth.clone()),
+                )?;
+                self.normal_depth[fid as usize].get_or_insert(normal_depth)
+            }
+        };
+
+        let unfiltered = match &self.unfiltered[fid as usize] {
+            Some(unfiltered) if unfiltered.info().image == input.unfiltered => {
+                unfiltered
+            }
+            _ => {
+                update_set = true;
+                self.unfiltered[fid as usize] = None;
+                let unfiltered = ctx.create_image_view(ImageViewInfo::new(
+                    input.unfiltered.clone(),
                 ))?;
-                let diffuse = self.diffuse[fid as usize].get_or_insert(diffuse);
-                ctx.update_descriptor_sets(
-                    bump.alloc([WriteDescriptorSet {
-                        set,
-                        binding: 0,
-                        element: 0,
-                        descriptors: Descriptors::CombinedImageSampler(
-                            bump.alloc([(
-                                diffuse.clone(),
+                self.unfiltered[fid as usize].get_or_insert(unfiltered)
+            }
+        };
+
+        if update_set {
+            ctx.update_descriptor_sets(
+                bump.alloc([WriteDescriptorSet {
+                    set,
+                    binding: 0,
+                    element: 0,
+                    descriptors: Descriptors::CombinedImageSampler(bump.alloc(
+                        [
+                            (
+                                normal_depth.clone(),
                                 Layout::ShaderReadOnlyOptimal,
                                 self.sampler.clone(),
-                            )]),
-                        ),
-                    }]),
-                    &[],
-                );
-            }
+                            ),
+                            (
+                                unfiltered.clone(),
+                                Layout::ShaderReadOnlyOptimal,
+                                self.sampler.clone(),
+                            ),
+                        ],
+                    )),
+                }]),
+                &[],
+            );
         }
 
         let mut encoder = ctx.queue.create_encoder()?;
