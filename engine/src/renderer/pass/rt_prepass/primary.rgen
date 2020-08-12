@@ -9,8 +9,9 @@ layout(location = 0) rayPayloadEXT PrimaryHitPayload prd;
 
 layout(binding = 6, set = 0, rgba32f) uniform image2D output_albedo;
 layout(binding = 7, set = 0, rgba32f) uniform image2D output_normals_depth;
-layout(binding = 8, set = 0, rgba32f) uniform image2D output_emissive_direct;
-layout(binding = 9, set = 0, rgba32f) uniform image2D output_diffuse;
+layout(binding = 8, set = 0, rgba32f) uniform image2D output_emissive;
+layout(binding = 9, set = 0, rgba32f) uniform image2D output_direct;
+layout(binding = 10, set = 0, rgba32f) uniform image2D output_diffuse;
 
 void main()
 {
@@ -22,7 +23,8 @@ void main()
     vec4 proj  = globals.cam.iproj * vec4(d.x, d.y, 1, 1);
     vec4 target = globals.cam.view * vec4(normalize(proj.xyz), 1.0);
 
-    vec2 off = (blue_rand_circle(co + uvec3(13)) - 0.5);
+    // vec2 off = (blue_rand_circle(co + uvec3(13)) - 0.5);
+    vec2 off = vec2(0, 0);
     vec4 origin = globals.cam.view[3];
 
     prd.co = co;
@@ -30,12 +32,14 @@ void main()
     prd.depth = -1;
     prd.albedo = vec4(0, 0, 0, 0);
     prd.emissive = vec3(0, 0, 0);
-    prd.direct = 0;
+    prd.direct = vec3(0, 0, 0);
     prd.diffuse = vec3(0, 0, 0);
+
     traceRayEXT(tlas, 0, 0xff, 0, 0, 0, origin.xyz, 0.0, normalize((target - origin).xyz), 1000.0, 0);
 
     imageStore(output_albedo, ivec2(gl_LaunchIDEXT.xy), prd.albedo);
     imageStore(output_normals_depth, ivec2(gl_LaunchIDEXT.xy), vec4(prd.normal, prd.depth));
-    imageStore(output_emissive_direct, ivec2(gl_LaunchIDEXT.xy), vec4(prd.emissive, prd.direct));
+    imageStore(output_emissive, ivec2(gl_LaunchIDEXT.xy), vec4(prd.emissive, 0));
+    imageStore(output_direct, ivec2(gl_LaunchIDEXT.xy), vec4(prd.direct, 0));
     imageStore(output_diffuse, ivec2(gl_LaunchIDEXT.xy), vec4(prd.diffuse, 1.0));
 }

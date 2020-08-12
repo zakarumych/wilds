@@ -3,17 +3,24 @@ use {
     eyre::Report,
     goods::SyncAsset,
     hecs::{Entity, World},
+    nalgebra as na,
     ncollide3d::{
         math::Point,
         procedural::{capsule, IndexBuffer},
         shape::{Capsule, ShapeHandle},
     },
     std::sync::Arc,
-    ultraviolet::Isometry3,
+    ultraviolet::{Isometry3, Vec3},
     wilds::{
-        BindingData, BufferUsage, Context, Material, Mesh, MeshData, Normal3d,
-        OutOfMemory, Position3d, PositionNormalTangent3dUV, Prefab,
-        PrimitiveTopology, Renderable, Tangent3d, UV,
+        assets::Prefab,
+        physics::{
+            BodyPartHandle, ColliderDesc, Colliders, Physics, RigidBodyDesc,
+        },
+        renderer::{
+            BindingData, BufferUsage, Context, Material, Mesh, MeshData,
+            Normal3d, OutOfMemory, Position3d, PositionNormalTangent3dUV,
+            PrimitiveTopology, Renderable, Tangent3d, UV,
+        },
     },
 };
 
@@ -32,7 +39,7 @@ impl PawnAsset {
         height: f32,
         ctx: &mut Context,
     ) -> Result<Self, OutOfMemory> {
-        let trimesh = capsule(&diameter, &height, 6, 6);
+        let trimesh = capsule(&diameter, &height, 16, 16);
 
         assert!(trimesh.has_normals());
         let normals = trimesh.normals.as_ref().unwrap();
@@ -92,6 +99,10 @@ impl Prefab for PawnAsset {
     type Info = Isometry3;
 
     fn spawn(self, iso: Isometry3, world: &mut World, entity: Entity) {
+        let body = RigidBodyDesc::<f32>::new()
+            .kinematic_rotations(na::Vector3::new(true, true, true))
+            .build();
+
         let _ = world.insert(
             entity,
             (
@@ -100,7 +111,12 @@ impl Prefab for PawnAsset {
                     material: Material::color([0.7, 0.5, 0.3, 1.0]),
                     transform: None,
                 },
-                ShapeHandle::from_arc(self.shape),
+                body,
+                Colliders::from(
+                    ColliderDesc::new(ShapeHandle::from_arc(self.shape))
+                        .density(1.0)
+                        .margin(0.3),
+                ),
                 iso,
                 Pawn,
             ),

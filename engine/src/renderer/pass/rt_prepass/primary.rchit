@@ -80,25 +80,40 @@ void main()
     prd.normal = world_space_normal;
     prd.depth = gl_HitTEXT;
 
-    float dirlight_attenuation = -dot(globals.dirlight.dir, world_space_normal);
+    float light_distance = length(globals.dirlight.dir);
+    vec3 light_direction = normalize(-globals.dirlight.dir);
+
+    float dirlight_attenuation = dot(light_direction, world_space_normal);
     if (dirlight_attenuation > 0.0 && components_sum(globals.dirlight.rad) > 0.0)
     {
-        vec3 tolight = -globals.dirlight.dir;
+        float ray_contribution = dirlight_attenuation / shadow_rays;
+
+        // vec3 lx = cross(vec3(1, 0, 0), light_direction);
+        // vec3 ly = cross(vec3(0, 1, 0), light_direction);
+        // vec3 lz = cross(vec3(0, 0, 1), light_direction);
+        // vec3 lo = normalize(max(lx, max(ly, lz)));
+        // vec3 lt = normalize(cross(lo, light_direction));
+
+        // mat3 light_space = mat3(lt, lo, light_direction);
+
+        unshadows = 0;
         for (int i = 0; i < shadow_rays; ++i)
         {
-            vec3 r = tang_space * blue_rand_cone(prd.co + uvec3(i * 137), 10 / length(globals.dirlight.dir));
-            unshadows = 0;
-            traceRayEXT(tlas, shadow_ray_flags, 0xff, 0, 0, 2, worls_space_pos, 0.001, normalize(tolight), 100.0, 1);
-            prd.direct = unshadows;
+            // vec3 r = tang_space * blue_rand_cone(prd.co + uvec3(i * 137), .8);
+            // vec3 r = blue_rand_cone_dir(prd.co + uvec3(i * 137), light_distance / (1 + light_distance), light_direction);
+
+            vec3 r = normalize(blue_rand_sphere(prd.co + uvec3(i)) - globals.dirlight.dir);
+            traceRayEXT(tlas, shadow_ray_flags, 0xff, 0, 0, 2, worls_space_pos, 0.01, r, 100.0, 1);
         }
+        prd.direct = globals.dirlight.rad * (ray_contribution * unshadows);
     }
 
     for (int i = 0; i < 1; ++i)
     {
-        vec3 dir = normalize(tang_space * blue_rand_hemisphere_cosine(prd.co + uvec3(i, i * 131, i * 65537)));
+        // vec3 dir = normalize(tang_space * blue_rand_hemisphere_cosine(prd.co + uvec3(i, i * 131, i * 65537)));
+        vec3 dir = blue_rand_hemisphere_cosine_dir(prd.co + uvec3(i), normal);
         dprd.radiation = vec3(0, 0, 0);
         traceRayEXT(tlas, 00, 0xff, 1, 0, 1, worls_space_pos, 0.001, dir, 10.0, 2);
         prd.diffuse += dprd.radiation;
     }
-    prd.diffuse /= 4;
 }

@@ -1,6 +1,6 @@
 use {
     nalgebra as na,
-    ultraviolet::{Bivec3, Isometry3, Rotor3, Similarity3},
+    ultraviolet::{Bivec3, Isometry3, Rotor3},
 };
 
 pub fn rotor_to_quaternion(r: Rotor3) -> na::Quaternion<f32> {

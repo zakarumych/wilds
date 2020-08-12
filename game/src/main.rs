@@ -9,9 +9,20 @@ use {
     std::{cmp::max, collections::VecDeque, task::Poll, time::Duration},
     ultraviolet::{Isometry3, Mat3, Mat4, Rotor3, Vec3},
     wilds::{
-        Camera, Clocks, DirectionalLight, Engine, FpsCounter, FreeCamera,
-        FreeCameraSystem, Gltf, GltfFormat, GltfNode, Material, Mesh, Prefab,
-        Renderable, Renderer, Terrain, TerrainAsset, TerrainFormat,
+        assets::{
+            Gltf, GltfFormat, GltfNode, Prefab, Terrain, TerrainAsset,
+            TerrainFormat,
+        },
+        camera::{
+            following::{FollowingCamera, FollowingCameraSystem},
+            Camera,
+        },
+        clocks::Clocks,
+        engine::Engine,
+        fps_counter::FpsCounter,
+        light::{DirectionalLight, SkyLight},
+        physics::Physics,
+        renderer::{Material, Mesh, Renderable, Renderer},
     },
     winit::{
         dpi::PhysicalSize,
@@ -21,17 +32,22 @@ use {
 };
 
 fn main() -> Result<(), Report> {
+    tracing_subscriber::fmt::init();
+    tracing::info!("App started");
+
     Engine::run(|mut engine| async move {
         engine.add_system(
-            FreeCameraSystem::new()
+            FollowingCameraSystem::new()
                 .with_factor(0.3, 0.3)
-                .with_speed(5.0),
+                .with_speed(50.0),
         );
+
+        engine.add_system(Physics::new());
 
         let window = engine.build_window(
             WindowBuilder::new().with_inner_size(PhysicalSize {
-                width: 1920,
-                height: 1080,
+                width: 640,
+                height: 480,
             }),
         )?;
 
@@ -39,21 +55,24 @@ fn main() -> Result<(), Report> {
         let mut renderer = Renderer::new(&window)?;
         let mut clocks = Clocks::new();
 
-        engine.world.spawn((
-            Camera::Perspective {
-                vertical_fov: std::f32::consts::PI / 3.0,
-                aspect_ratio: 1920.0 / 1080.0,
-                z_near: 0.1,
-                z_far: 1000.0,
-            },
-            Isometry3::identity(),
-            FreeCamera,
-        ));
+        let sunlight = Vec3::new(255.0, 207.0, 72.0)
+            .map(|c| c / 255.0)
+            .map(|c| c / (1.3 - c));
+        let skylight = Vec3::new(117.0, 187.0, 253.0)
+            .map(|c| c / 255.0)
+            .map(|c| c / (1.3 - c));
 
-        engine.world.spawn((DirectionalLight {
-            direction: -Vec3::unit_y(),
-            radiance: [8.5, 6.9, 2.4],
-        },));
+        dbg!(sunlight, skylight);
+
+        engine.world.spawn((
+            DirectionalLight {
+                direction: Vec3::new(-3.0, -3.0, -3.0),
+                radiance: sunlight.into(),
+            },
+            SkyLight {
+                radiance: skylight.into(),
+            },
+        ));
 
         // let mut city_opt = Some(engine.assets.load_with_format(
         //     "thor_and_the_midgard_serpent/scene.gltf".to_owned(),
@@ -80,6 +99,18 @@ fn main() -> Result<(), Report> {
             RonFormat,
             Isometry3::new(Vec3::new(32.0, 5.0, 32.0), Rotor3::identity()),
         );
+
+        engine.world.spawn((
+            Camera::Perspective {
+                vertical_fov: std::f32::consts::PI / 3.0,
+                aspect_ratio: 640.0 / 480.0,
+                z_near: 0.1,
+                z_far: 1000.0,
+            },
+            // Isometry3::new(Vec3::new(32.0, 5.0, 35.0), Rotor3::identity()),
+            Isometry3::identity(),
+            FollowingCamera { follows: pawn },
+        ));
 
         window.request_redraw();
 
@@ -118,7 +149,7 @@ fn main() -> Result<(), Report> {
                     if ticker < clock.delta {
                         ticker += max(Duration::from_secs(1), clock.delta);
 
-                        eprintln!(
+                        tracing::info!(
                             "FPS: {}",
                             1.0 / fps_counter.average().as_secs_f32()
                         );

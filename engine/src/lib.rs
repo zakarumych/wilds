@@ -1,20 +1,14 @@
 // #![deny(unused_imports)]
+// #![deny(unused)]
 
-mod assets;
-mod broker;
-mod camera;
-mod clocks;
-mod config;
-mod engine;
-mod fps_counter;
-mod light;
-mod physics;
-mod renderer;
-mod util;
-
-pub use self::{
-    assets::*, broker::*, camera::*, clocks::*, config::*, engine::*,
-    fps_counter::*, light::*, renderer::*,
-};
-
-pub use illume::*;
+pub mod assets;
+pub mod broker;
+pub mod camera;
+pub mod clocks;
+pub mod config;
+pub mod engine;
+pub mod fps_counter;
+pub mod light;
+pub mod physics;
+pub mod renderer;
+pub mod util;

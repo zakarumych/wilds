@@ -1,9 +1,9 @@
 pub mod combine;
-pub mod diffuse_filter;
+pub mod gauss_filter;
 pub mod rt_prepass;
 
 pub use self::{
-    combine::CombinePass, diffuse_filter::DiffuseFilter, rt_prepass::RtPrepass,
+    combine::CombinePass, gauss_filter::GaussFilter, rt_prepass::RtPrepass,
 };
 
 use {

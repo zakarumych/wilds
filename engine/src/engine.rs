@@ -33,28 +33,24 @@ pub use winit::event::{
     MouseButton, MouseScrollDelta, Touch, TouchPhase,
 };
 
-pub type Events = EventBroker<Event<'static, ()>>;
+pub type InputEvents = EventBroker<Event<'static, ()>>;
+
+pub struct Resources<'a> {
+    pub input: &'a InputEvents,
+    pub world: &'a mut World,
+    pub clocks: ClockIndex,
+}
 
 pub trait System {
-    fn run(
-        &mut self,
-        world: &mut World,
-        events: &mut Events,
-        clocks: ClockIndex,
-    );
+    fn run(&mut self, resources: Resources<'_>);
 }
 
 impl<F> System for F
 where
-    F: FnMut(&mut World, &mut Events, ClockIndex),
+    F: FnMut(Resources<'_>),
 {
-    fn run(
-        &mut self,
-        world: &mut World,
-        events: &mut Events,
-        clocks: ClockIndex,
-    ) {
-        self(world, events, clocks)
+    fn run(&mut self, resources: Resources<'_>) {
+        self(resources)
     }
 }
 
@@ -62,7 +58,7 @@ where
 pub struct Engine {
     pub world: World,
     pub assets: Assets,
-    pub events: Events,
+    pub input: InputEvents,
     schedule: Vec<Box<dyn System>>,
     shared: Rc<Shared>,
     runtime: TokioHandle,
@@ -126,12 +122,18 @@ impl Engine {
         Ok(window)
     }
 
-    pub fn advance(&mut self, clock: ClockIndex) {
+    pub fn advance(&mut self, clocks: ClockIndex) {
         self.build_prefabs();
 
         for system in &mut self.schedule {
-            system.run(&mut self.world, &mut self.events, clock);
+            system.run(Resources {
+                world: &mut self.world,
+                input: &self.input,
+                clocks,
+            });
         }
+
+        self.input.clear();
     }
 
     /// Adds a system to this engine.
@@ -155,7 +157,7 @@ impl Engine {
             yield_now().await;
         };
 
-        self.events.add(event.clone());
+        self.input.add(event.clone());
         self.shared.waiting_for_event.set(false);
         event
     }
@@ -171,10 +173,6 @@ impl Engine {
         A: Future<Output = Result<(), Report>> + 'static,
     {
         let mut runtime = Runtime::new()?;
-
-        // Setup basic logging first to capture all following initializing
-        // errors.
-        runtime.block_on(Self::init_logger())?;
 
         let config = runtime.block_on(Self::load_config())?;
 
@@ -218,7 +216,7 @@ impl Engine {
             assets,
             schedule: Vec::new(),
             world: World::new(),
-            events: EventBroker::new(),
+            input: EventBroker::new(),
             shared: shared.clone(),
             recv_loaded_prefabs,
             send_loaded_prefabs,
@@ -269,8 +267,8 @@ impl Engine {
                     *flow = ControlFlow::Exit;
                     app_opt = None;
                 } else {
-                    *flow = ControlFlow::Wait;
-                    // *flow = ControlFlow::Poll;
+                    // *flow = ControlFlow::Wait;
+                    *flow = ControlFlow::Poll;
                 }
 
                 // Unset event loop before it is invalidated.
@@ -279,11 +277,6 @@ impl Engine {
                 *flow = ControlFlow::Exit;
             }
         })
-    }
-
-    async fn init_logger() -> Result<(), Report> {
-        tracing_subscriber::fmt::init();
-        Ok(())
     }
 
     async fn load_config() -> Result<Config, Report> {

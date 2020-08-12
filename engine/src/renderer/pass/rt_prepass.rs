@@ -2,10 +2,10 @@ use {
     super::Pass,
     crate::{
         clocks::ClockIndex,
-        light::DirectionalLight,
+        light::{DirectionalLight, SkyLight},
         renderer::{
-            Context, Material, Mesh, PositionNormalTangent3dUV, Renderable,
-            Texture, VertexType,
+            Context, Mesh, PositionNormalTangent3dUV, Renderable, Texture,
+            VertexType,
         },
     },
     bumpalo::{collections::Vec as BVec, Bump},
@@ -37,7 +37,8 @@ pub struct Output {
     pub tlas: AccelerationStructure,
     pub albedo: Image,
     pub normal_depth: Image,
-    pub emissive_direct: Image,
+    pub emissive: Image,
+    pub direct: Image,
     pub diffuse: Image,
 }
 
@@ -74,7 +75,7 @@ where
         }
     }
 
-    fn remove(&mut self, resource: &T) -> Option<u32> {
+    fn _remove(&mut self, resource: &T) -> Option<u32> {
         if let Some(value) = self.resources.remove(resource) {
             if value == self.next - 1 {
                 self.next -= 1;
@@ -89,9 +90,6 @@ where
 }
 
 pub struct RtPrepass {
-    set_layout: DescriptorSetLayout,
-    per_frame_set_layout: DescriptorSetLayout,
-
     pipeline_layout: PipelineLayout,
     pipeline: RayTracingPipeline,
     shader_binding_table: ShaderBindingTable,
@@ -107,16 +105,11 @@ pub struct RtPrepass {
     albedo: SparseDescriptors<Texture>,
     normal: SparseDescriptors<Texture>,
 
-    blue_noise_buffer_64x64x64: Buffer,
-
     output_albedo_image: Image,
-    output_albedo_view: ImageView,
     output_normal_depth_image: Image,
-    output_normal_depth_view: ImageView,
-    output_emissive_direct_image: Image,
-    output_emissive_direct_view: ImageView,
+    output_emissive_image: Image,
+    output_direct_image: Image,
     output_diffuse_image: Image,
-    output_diffuse_view: ImageView,
 }
 
 #[repr(C)]
@@ -209,7 +202,7 @@ impl RtPrepass {
                         stages: ShaderStageFlags::RAYGEN,
                         flags: DescriptorBindingFlags::empty(),
                     },
-                    // emissive-direct
+                    // emissive
                     DescriptorSetLayoutBinding {
                         binding: 8,
                         ty: DescriptorType::StorageImage,
@@ -217,9 +210,17 @@ impl RtPrepass {
                         stages: ShaderStageFlags::RAYGEN,
                         flags: DescriptorBindingFlags::empty(),
                     },
-                    // diffuse
+                    // direct
                     DescriptorSetLayoutBinding {
                         binding: 9,
+                        ty: DescriptorType::StorageImage,
+                        count: 1,
+                        stages: ShaderStageFlags::RAYGEN,
+                        flags: DescriptorBindingFlags::empty(),
+                    },
+                    // diffuse
+                    DescriptorSetLayoutBinding {
+                        binding: 10,
                         ty: DescriptorType::StorageImage,
                         count: 1,
                         stages: ShaderStageFlags::RAYGEN,
@@ -238,7 +239,8 @@ impl RtPrepass {
                         ty: DescriptorType::UniformBuffer,
                         count: 1,
                         stages: ShaderStageFlags::RAYGEN
-                            | ShaderStageFlags::CLOSEST_HIT,
+                            | ShaderStageFlags::CLOSEST_HIT
+                            | ShaderStageFlags::MISS,
                         flags: DescriptorBindingFlags::empty(),
                     },
                     // Scene
@@ -416,7 +418,7 @@ impl RtPrepass {
             ImageViewInfo::new(output_normal_depth_image.clone()),
         )?;
 
-        let output_emissive_direct_image = ctx.create_image(ImageInfo {
+        let output_emissive_image = ctx.create_image(ImageInfo {
             extent: extent.into(),
             format: Format::RGBA32Sfloat,
             levels: 1,
@@ -427,9 +429,24 @@ impl RtPrepass {
         })?;
 
         // View for whole image
-        let output_emissive_direct_view = ctx.create_image_view(
-            ImageViewInfo::new(output_emissive_direct_image.clone()),
+        let output_emissive_view = ctx.create_image_view(
+            ImageViewInfo::new(output_emissive_image.clone()),
         )?;
+
+        let output_direct_image = ctx.create_image(ImageInfo {
+            extent: extent.into(),
+            format: Format::RGBA32Sfloat,
+            levels: 1,
+            layers: 1,
+            samples: Samples::Samples1,
+            usage: ImageUsage::STORAGE | ImageUsage::SAMPLED,
+            memory: MemoryUsageFlags::empty(),
+        })?;
+
+        // View for whole image
+        let output_direct_view = ctx.create_image_view(ImageViewInfo::new(
+            output_direct_image.clone(),
+        ))?;
 
         let output_diffuse_image = ctx.create_image(ImageInfo {
             extent: extent.into(),
@@ -486,37 +503,13 @@ impl RtPrepass {
                     set: &set,
                     binding: 6,
                     element: 0,
-                    descriptors: Descriptors::StorageImage(&[(
-                        output_albedo_view.clone(),
-                        Layout::General,
-                    )]),
-                },
-                WriteDescriptorSet {
-                    set: &set,
-                    binding: 7,
-                    element: 0,
-                    descriptors: Descriptors::StorageImage(&[(
-                        output_normal_depth_view.clone(),
-                        Layout::General,
-                    )]),
-                },
-                WriteDescriptorSet {
-                    set: &set,
-                    binding: 8,
-                    element: 0,
-                    descriptors: Descriptors::StorageImage(&[(
-                        output_emissive_direct_view.clone(),
-                        Layout::General,
-                    )]),
-                },
-                WriteDescriptorSet {
-                    set: &set,
-                    binding: 9,
-                    element: 0,
-                    descriptors: Descriptors::StorageImage(&[(
-                        output_diffuse_view.clone(),
-                        Layout::General,
-                    )]),
+                    descriptors: Descriptors::StorageImage(&[
+                        (output_albedo_view.clone(), Layout::General),
+                        (output_normal_depth_view.clone(), Layout::General),
+                        (output_emissive_view.clone(), Layout::General),
+                        (output_direct_view.clone(), Layout::General),
+                        (output_diffuse_view.clone(), Layout::General),
+                    ]),
                 },
                 WriteDescriptorSet {
                     set: &per_frame_set0,
@@ -563,8 +556,6 @@ impl RtPrepass {
         );
 
         Ok(RtPrepass {
-            set_layout,
-            per_frame_set_layout,
             pipeline_layout,
             pipeline,
             shader_binding_table,
@@ -573,15 +564,11 @@ impl RtPrepass {
             globals_and_instances,
             set,
             per_frame_sets: [per_frame_set0, per_frame_set1],
-            blue_noise_buffer_64x64x64,
             output_albedo_image,
-            output_albedo_view,
             output_normal_depth_image,
-            output_normal_depth_view,
-            output_emissive_direct_image,
-            output_emissive_direct_view,
+            output_emissive_image,
+            output_direct_image,
             output_diffuse_image,
-            output_diffuse_view,
             meshes: SparseDescriptors::new(),
             albedo: SparseDescriptors::new(),
             normal: SparseDescriptors::new(),
@@ -829,6 +816,13 @@ impl<'a> Pass<'a> for RtPrepass {
                 _pad1: 0.0,
             });
 
+        let skylight = world
+            .query::<&SkyLight>()
+            .iter()
+            .next()
+            .map(|(_, sl)| Vec3::from(sl.radiance))
+            .unwrap_or_default();
+
         let globals = Globals {
             camera: GlobalsCamera {
                 view: input.camera_transform,
@@ -837,7 +831,10 @@ impl<'a> Pass<'a> for RtPrepass {
                 iproj: input.camera_projection.inversed(),
             },
             dirlight,
-            frame: frame as u32,
+            skylight,
+            _pad: 0.0,
+            // frame: frame as u32,
+            frame: 0,
         };
 
         ctx.write_memory(
@@ -871,7 +868,12 @@ impl<'a> Pass<'a> for RtPrepass {
             )
             .into(),
             ImageLayoutTransition::initialize_whole(
-                &self.output_emissive_direct_image,
+                &self.output_emissive_image,
+                Layout::General,
+            )
+            .into(),
+            ImageLayoutTransition::initialize_whole(
+                &self.output_direct_image,
                 Layout::General,
             )
             .into(),
@@ -910,7 +912,12 @@ impl<'a> Pass<'a> for RtPrepass {
             )
             .into(),
             ImageLayoutTransition::transition_whole(
-                &self.output_emissive_direct_image,
+                &self.output_emissive_image,
+                Layout::General..Layout::ShaderReadOnlyOptimal,
+            )
+            .into(),
+            ImageLayoutTransition::transition_whole(
+                &self.output_direct_image,
                 Layout::General..Layout::ShaderReadOnlyOptimal,
             )
             .into(),
@@ -932,7 +939,8 @@ impl<'a> Pass<'a> for RtPrepass {
         Ok(Output {
             albedo: self.output_albedo_image.clone(),
             normal_depth: self.output_normal_depth_image.clone(),
-            emissive_direct: self.output_emissive_direct_image.clone(),
+            emissive: self.output_emissive_image.clone(),
+            direct: self.output_direct_image.clone(),
             diffuse: self.output_diffuse_image.clone(),
             tlas: self.tlas.clone(),
         })
@@ -968,6 +976,8 @@ unsafe impl Pod for GlobalsDirLight {}
 struct Globals {
     camera: GlobalsCamera,
     dirlight: GlobalsDirLight,
+    skylight: Vec3,
+    _pad: f32,
     frame: u32,
 }
 
