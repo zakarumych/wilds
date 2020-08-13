@@ -1,10 +1,7 @@
 use {
     super::{Assets, Prefab},
     crate::{
-        physics::{
-            BodyPartHandle, BodyStatus, ColliderDesc, Colliders, Physics,
-            RigidBodyDesc,
-        },
+        physics::{BodyStatus, Colliders, RigidBodyDesc},
         renderer::{
             Context, Material, Mesh, MeshBuilder, Normal3d, Position3d,
             PositionNormalTangent3dUV, Renderable, Tangent3d, VertexType as _,
@@ -22,6 +19,7 @@ use {
     },
     nalgebra::{DMatrix, Dynamic, Vector3},
     ncollide3d::shape::{HeightField, ShapeHandle},
+    nphysics3d::object::ColliderDesc,
     num_traits::{bounds::Bounded, cast::ToPrimitive},
     std::{convert::TryFrom as _, sync::Arc},
     ultraviolet::{Isometry3, Vec3},
@@ -29,26 +27,26 @@ use {
 
 pub fn create_terrain_shape(
     width: u32,
-    height: u32,
+    depth: u32,
     heightmap: impl Fn(u32, u32) -> f32,
 ) -> HeightField<f32> {
     let mut matrix: DMatrix<f32> = DMatrix::zeros_generic(
+        Dynamic::new(depth as usize),
         Dynamic::new(width as usize),
-        Dynamic::new(height as usize),
     );
 
     for x in 0..width {
-        for y in 0..height {
-            matrix[(x as usize, y as usize)] = heightmap(x, y);
+        for y in 0..depth {
+            matrix[(y as usize, x as usize)] = heightmap(x, y);
         }
     }
 
-    HeightField::new(matrix, Vector3::new(width as f32, 1.0, height as f32))
+    HeightField::new(matrix, Vector3::new(width as f32, 1.0, depth as f32))
 }
 
 pub fn create_terrain_mesh(
     width: u32,
-    height: u32,
+    depth: u32,
     heightmap: impl Fn(u32, u32) -> f32,
     buffer_usage: BufferUsage,
     ctx: &mut Context,
@@ -56,19 +54,20 @@ pub fn create_terrain_mesh(
     let mut data: Vec<u8> = Vec::new();
     let mut indices_offset = 0;
 
-    if width > 1 && height > 1 {
-        for y in 0..height - 1 {
+    let xoff = (width - 1) as f32 * 0.5;
+    let zoff = (depth - 1) as f32 * 0.5;
+
+    if width > 1 && depth > 1 {
+        for z in 0..depth - 1 {
             for x in 0..width - 1 {
-                let pos = Vec3::from([x as f32, heightmap(x, y), y as f32]);
-                let posx =
-                    Vec3::from([x as f32 + 1.0, heightmap(x + 1, y), y as f32]);
-                let posy =
-                    Vec3::from([x as f32, heightmap(x, y + 1), y as f32 + 1.0]);
-                let posxy = Vec3::from([
-                    x as f32 + 1.0,
-                    heightmap(x + 1, y + 1),
-                    y as f32 + 1.0,
-                ]);
+                let xf = x as f32 - xoff;
+                let zf = z as f32 - zoff;
+
+                let pos = Vec3::from([xf, heightmap(x, z), zf]);
+                let posx = Vec3::from([xf + 1.0, heightmap(x + 1, z), zf]);
+                let posy = Vec3::from([xf, heightmap(x, z + 1), zf + 1.0]);
+                let posxy =
+                    Vec3::from([xf + 1.0, heightmap(x + 1, z + 1), zf + 1.0]);
 
                 let n1 = (pos - posx).cross(posy - pos);
                 let n2 = (posy - posxy).cross(posxy - posx);
@@ -82,25 +81,25 @@ pub fn create_terrain_mesh(
                     PositionNormalTangent3dUV {
                         position: Position3d(pos.into()),
                         normal: Normal3d(normal.into()),
-                        uv: UV([x as f32, y as f32]),
+                        uv: UV([xf, zf]),
                         tangent,
                     },
                     PositionNormalTangent3dUV {
                         position: Position3d(posx.into()),
                         normal: Normal3d(normal.into()),
-                        uv: UV([x as f32 + 1.0, y as f32]),
+                        uv: UV([xf + 1.0, zf]),
                         tangent,
                     },
                     PositionNormalTangent3dUV {
                         position: Position3d(posy.into()),
                         normal: Normal3d(normal.into()),
-                        uv: UV([x as f32, y as f32 + 1.0]),
+                        uv: UV([xf, zf + 1.0]),
                         tangent,
                     },
                     PositionNormalTangent3dUV {
                         position: Position3d(posxy.into()),
                         normal: Normal3d(normal.into()),
-                        uv: UV([x as f32 + 1.0, y as f32 + 1.0]),
+                        uv: UV([xf + 1.0, zf + 1.0]),
                         tangent,
                     },
                 ]));
@@ -110,7 +109,7 @@ pub fn create_terrain_mesh(
         indices_offset = data.len();
 
         let mut index: u32 = 0;
-        for _ in 0..height - 1 {
+        for _ in 0..depth - 1 {
             for _ in 0..width - 1 {
                 data.extend_from_slice(bytemuck::cast_slice(&[
                     index + 0,
@@ -139,8 +138,8 @@ pub fn create_terrain_mesh(
         &data,
     )?;
 
-    let squares = if width > 1 && height > 1 {
-        (height - 1) * (width - 1)
+    let squares = if width > 1 && depth > 1 {
+        (depth - 1) * (width - 1)
     } else {
         0
     };
@@ -204,6 +203,7 @@ impl SyncAsset for TerrainAsset {
         let (w, h, f) = image_heightmap(&repr.image, repr.factor);
         let mesh = create_terrain_mesh(w, h, &f, repr.buffer_usage, ctx)?;
         let shape = Arc::new(create_terrain_shape(w, h, &f));
+
         Ok(TerrainAsset { mesh, shape })
     }
 }
@@ -268,7 +268,10 @@ impl Prefab for TerrainAsset {
                     transform: None,
                 },
                 rigid_body,
-                Colliders::from(ShapeHandle::from_arc(self.shape)),
+                Colliders::from(
+                    ColliderDesc::new(ShapeHandle::from_arc(self.shape))
+                        .margin(0.01),
+                ),
                 iso,
                 Terrain,
             ),

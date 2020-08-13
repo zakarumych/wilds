@@ -1,11 +1,6 @@
 use {
-    super::Pass,
-    crate::{clocks::ClockIndex, renderer::Context},
-    bumpalo::Bump,
-    color_eyre::Report,
-    hecs::World,
-    illume::*,
-    smallvec::smallvec,
+    super::Pass, crate::renderer::Context, bumpalo::Bump, color_eyre::Report,
+    hecs::World, illume::*, smallvec::smallvec,
 };
 
 pub struct Input {
@@ -21,6 +16,7 @@ pub struct GaussFilter {
     sampler: Sampler,
     normal_depth: [Option<ImageView>; 2],
     unfiltered: [Option<ImageView>; 2],
+    // intermediate: Option<ImageView>,
     filtered: Option<ImageView>,
     framebuffer: Option<Framebuffer>,
 
@@ -166,7 +162,6 @@ impl<'a> Pass<'a> for GaussFilter {
         fence: Option<&Fence>,
         ctx: &mut Context,
         _world: &mut World,
-        _clock: &ClockIndex,
         bump: &Bump,
     ) -> Result<Output, Report> {
         let extent = input.normal_depth.info().extent.into_2d();

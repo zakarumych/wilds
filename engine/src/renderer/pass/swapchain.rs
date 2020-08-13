@@ -1,10 +1,6 @@
 use {
-    super::Pass,
-    crate::{clocks::ClockIndex, renderer::Context},
-    bumpalo::Bump,
-    color_eyre::Report,
-    hecs::World,
-    illume::*,
+    super::Pass, crate::renderer::Context, bumpalo::Bump, color_eyre::Report,
+    hecs::World, illume::*,
 };
 
 pub struct SwapchainBlitPresentPass;
@@ -28,7 +24,6 @@ impl Pass<'_> for SwapchainBlitPresentPass {
         fence: Option<&Fence>,
         ctx: &mut Context,
         _world: &mut World,
-        _clock: &ClockIndex,
         _bump: &Bump,
     ) -> Result<Output, Report> {
         let frame_image = &input.frame.info().image;

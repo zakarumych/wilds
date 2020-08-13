@@ -55,7 +55,7 @@ hitAttributeEXT vec2 attribs;
 
 void main()
 {
-    const uint shadow_rays = 1;
+    const uint shadow_rays = 2;
     const uint shadow_ray_flags = gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsSkipClosestHitShaderEXT;
     const vec3 barycentrics = vec3(1.0f - attribs.x - attribs.y, attribs.x, attribs.y);
     uvec3 indices = instance_triangle_indices();
@@ -102,18 +102,18 @@ void main()
             // vec3 r = tang_space * blue_rand_cone(prd.co + uvec3(i * 137), .8);
             // vec3 r = blue_rand_cone_dir(prd.co + uvec3(i * 137), light_distance / (1 + light_distance), light_direction);
 
-            vec3 r = normalize(blue_rand_sphere(prd.co + uvec3(i)) - globals.dirlight.dir);
-            traceRayEXT(tlas, shadow_ray_flags, 0xff, 0, 0, 2, worls_space_pos, 0.01, r, 100.0, 1);
+            vec3 r = normalize(blue_rand_sphere(prd.co + uvec3(0, i, i)) - globals.dirlight.dir);
+            traceRayEXT(tlas, shadow_ray_flags, 0xff, 0, 0, 2, worls_space_pos, 0.01, r, 1000.0, 1);
         }
         prd.direct = globals.dirlight.rad * (ray_contribution * unshadows);
     }
 
-    for (int i = 0; i < 1; ++i)
+    for (int i = 0; i < 2; ++i)
     {
         // vec3 dir = normalize(tang_space * blue_rand_hemisphere_cosine(prd.co + uvec3(i, i * 131, i * 65537)));
-        vec3 dir = blue_rand_hemisphere_cosine_dir(prd.co + uvec3(i), normal);
+        vec3 dir = blue_rand_hemisphere_cosine_dir(prd.co + uvec3(i, 0, i), normal);
         dprd.radiation = vec3(0, 0, 0);
-        traceRayEXT(tlas, 00, 0xff, 1, 0, 1, worls_space_pos, 0.001, dir, 10.0, 2);
-        prd.diffuse += dprd.radiation;
+        traceRayEXT(tlas, 00, 0xff, 1, 0, 1, worls_space_pos, 0.001, dir, 1000.0, 2);
+        prd.diffuse += dprd.radiation / 2;
     }
 }

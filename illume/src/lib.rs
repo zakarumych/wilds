@@ -15,16 +15,6 @@ use std::{
     num::TryFromIntError,
 };
 
-macro_rules! debug_handle {
-    ($handle:ty) => {
-        impl std::fmt::Debug for $handle {
-            fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
-                std::fmt::Debug::fmt(&self.handle, fmt)
-            }
-        }
-    };
-}
-
 macro_rules! define_handle {
     ($(#[$meta:meta])* $vis:vis struct $handle:ident($handle_info:ident);) => {
         $(#[$meta])*

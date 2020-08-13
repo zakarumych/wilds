@@ -18,6 +18,10 @@ use std::sync::{
 };
 use tvma::Block;
 
+fn leaked<T: 'static>() {
+    eprintln!("LEAKED: {}", std::any::type_name::<T>());
+}
+
 pub(super) unsafe trait EruptResource: ResourceTrait {
     type Owner: Sized;
 
@@ -41,11 +45,16 @@ pub(super) unsafe trait EruptResource: ResourceTrait {
 }
 
 #[derive(Debug)]
-
 pub(super) struct EruptSurface {
     pub handle: SurfaceKHR,
     pub used: AtomicBool,
     pub owner: Weak<EruptGraphics>,
+}
+
+impl Drop for EruptSurface {
+    fn drop(&mut self) {
+        leaked::<Self>()
+    }
 }
 
 impl Specific<Surface> for EruptSurface {}
@@ -63,12 +72,17 @@ unsafe impl EruptResource for Surface {
 }
 
 #[derive(Debug)]
-
 pub(super) struct EruptImage {
     pub handle: vk1_0::Image,
     pub block: Option<Block>,
     pub owner: Weak<EruptDevice>,
     pub index: usize,
+}
+
+impl Drop for EruptImage {
+    fn drop(&mut self) {
+        leaked::<Self>()
+    }
 }
 
 impl Specific<Image> for EruptImage {}
@@ -86,11 +100,16 @@ unsafe impl EruptResource for Image {
 }
 
 #[derive(Debug)]
-
 pub(super) struct EruptImageView {
     pub handle: vk1_0::ImageView,
     pub owner: Weak<EruptDevice>,
     pub index: usize,
+}
+
+impl Drop for EruptImageView {
+    fn drop(&mut self) {
+        leaked::<Self>()
+    }
 }
 
 impl Specific<ImageView> for EruptImageView {}
@@ -108,13 +127,18 @@ unsafe impl EruptResource for ImageView {
 }
 
 #[derive(Debug)]
-
 pub(super) struct EruptBuffer {
     pub handle: vk1_0::Buffer,
     pub address: Option<DeviceAddress>,
     pub block: Block,
     pub owner: Weak<EruptDevice>,
     pub index: usize,
+}
+
+impl Drop for EruptBuffer {
+    fn drop(&mut self) {
+        leaked::<Self>()
+    }
 }
 
 impl Specific<Buffer> for EruptBuffer {}
@@ -132,11 +156,16 @@ unsafe impl EruptResource for Buffer {
 }
 
 #[derive(Debug)]
-
 pub(super) struct EruptSemaphore {
     pub handle: vk1_0::Semaphore,
     pub owner: Weak<EruptDevice>,
     pub index: usize,
+}
+
+impl Drop for EruptSemaphore {
+    fn drop(&mut self) {
+        leaked::<Self>()
+    }
 }
 
 impl Specific<Semaphore> for EruptSemaphore {}
@@ -154,11 +183,16 @@ unsafe impl EruptResource for Semaphore {
 }
 
 #[derive(Debug)]
-
 pub(super) struct EruptFence {
     pub handle: vk1_0::Fence,
     pub owner: Weak<EruptDevice>,
     pub index: usize,
+}
+
+impl Drop for EruptFence {
+    fn drop(&mut self) {
+        leaked::<Self>()
+    }
 }
 
 impl Specific<Fence> for EruptFence {}
@@ -176,11 +210,16 @@ unsafe impl EruptResource for Fence {
 }
 
 #[derive(Debug)]
-
 pub(super) struct EruptRenderPass {
     pub handle: vk1_0::RenderPass,
     pub owner: Weak<EruptDevice>,
     pub index: usize,
+}
+
+impl Drop for EruptRenderPass {
+    fn drop(&mut self) {
+        leaked::<Self>()
+    }
 }
 
 impl Specific<RenderPass> for EruptRenderPass {}
@@ -198,11 +237,16 @@ unsafe impl EruptResource for RenderPass {
 }
 
 #[derive(Debug)]
-
 pub(super) struct EruptFramebuffer {
     pub handle: vk1_0::Framebuffer,
     pub owner: Weak<EruptDevice>,
     pub index: usize,
+}
+
+impl Drop for EruptFramebuffer {
+    fn drop(&mut self) {
+        leaked::<Self>()
+    }
 }
 
 impl Specific<Framebuffer> for EruptFramebuffer {}
@@ -220,11 +264,16 @@ unsafe impl EruptResource for Framebuffer {
 }
 
 #[derive(Debug)]
-
 pub(super) struct EruptShaderModule {
     pub handle: vk1_0::ShaderModule,
     pub owner: Weak<EruptDevice>,
     pub index: usize,
+}
+
+impl Drop for EruptShaderModule {
+    fn drop(&mut self) {
+        leaked::<Self>()
+    }
 }
 
 impl Specific<ShaderModule> for EruptShaderModule {}
@@ -242,12 +291,17 @@ unsafe impl EruptResource for ShaderModule {
 }
 
 #[derive(Debug)]
-
 pub(super) struct EruptDescriptorSetLayout {
     pub handle: vk1_0::DescriptorSetLayout,
     pub owner: Weak<EruptDevice>,
     pub index: usize,
     pub sizes: DescriptorSizes,
+}
+
+impl Drop for EruptDescriptorSetLayout {
+    fn drop(&mut self) {
+        leaked::<Self>()
+    }
 }
 
 impl Specific<DescriptorSetLayout> for EruptDescriptorSetLayout {}
@@ -265,13 +319,18 @@ unsafe impl EruptResource for DescriptorSetLayout {
 }
 
 #[derive(Debug)]
-
 pub(super) struct EruptDescriptorSet {
     pub handle: vk1_0::DescriptorSet,
     pub pool: vk1_0::DescriptorPool,
     pub owner: Weak<EruptDevice>,
     pub index: usize,
     pub pool_index: usize,
+}
+
+impl Drop for EruptDescriptorSet {
+    fn drop(&mut self) {
+        leaked::<Self>()
+    }
 }
 
 impl Specific<DescriptorSet> for EruptDescriptorSet {}
@@ -289,11 +348,16 @@ unsafe impl EruptResource for DescriptorSet {
 }
 
 #[derive(Debug)]
-
 pub(super) struct EruptPipelineLayout {
     pub handle: vk1_0::PipelineLayout,
     pub owner: Weak<EruptDevice>,
     pub index: usize,
+}
+
+impl Drop for EruptPipelineLayout {
+    fn drop(&mut self) {
+        leaked::<Self>()
+    }
 }
 
 impl Specific<PipelineLayout> for EruptPipelineLayout {}
@@ -311,11 +375,16 @@ unsafe impl EruptResource for PipelineLayout {
 }
 
 #[derive(Debug)]
-
 pub(super) struct EruptGraphicsPipeline {
     pub handle: vk1_0::Pipeline,
     pub owner: Weak<EruptDevice>,
     pub index: usize,
+}
+
+impl Drop for EruptGraphicsPipeline {
+    fn drop(&mut self) {
+        leaked::<Self>()
+    }
 }
 
 impl Specific<GraphicsPipeline> for EruptGraphicsPipeline {}
@@ -333,7 +402,6 @@ unsafe impl EruptResource for GraphicsPipeline {
 }
 
 #[derive(Debug)]
-
 pub(super) struct EruptSwapchainImage {
     pub swapchain: SwapchainKHR,
     pub index: u32,
@@ -365,13 +433,18 @@ unsafe impl EruptResource for SwapchainImage {
 }
 
 #[derive(Debug)]
-
 pub(super) struct EruptAccelerationStructure {
     pub handle: vkrt::AccelerationStructureKHR,
     pub address: DeviceAddress,
     pub block: Block,
     pub owner: Weak<EruptDevice>,
     pub index: usize,
+}
+
+impl Drop for EruptAccelerationStructure {
+    fn drop(&mut self) {
+        leaked::<Self>()
+    }
 }
 
 impl Specific<AccelerationStructure> for EruptAccelerationStructure {}
@@ -389,13 +462,18 @@ unsafe impl EruptResource for AccelerationStructure {
 }
 
 #[derive(Debug)]
-
 pub(super) struct EruptRayTracingPipeline {
     pub handle: vk1_0::Pipeline,
     pub owner: Weak<EruptDevice>,
     pub index: usize,
 
     pub group_handlers: Vec<u8>,
+}
+
+impl Drop for EruptRayTracingPipeline {
+    fn drop(&mut self) {
+        leaked::<Self>()
+    }
 }
 
 impl Specific<RayTracingPipeline> for EruptRayTracingPipeline {}
@@ -413,11 +491,16 @@ unsafe impl EruptResource for RayTracingPipeline {
 }
 
 #[derive(Debug)]
-
 pub(super) struct EruptSampler {
     pub handle: vk1_0::Sampler,
     pub owner: Weak<EruptDevice>,
     pub index: usize,
+}
+
+impl Drop for EruptSampler {
+    fn drop(&mut self) {
+        leaked::<Self>()
+    }
 }
 
 impl Specific<Sampler> for EruptSampler {}

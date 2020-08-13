@@ -251,6 +251,12 @@ define_handle! {
     pub struct ImageView(ImageViewInfo);
 }
 
+impl ImageView {
+    pub fn image_info(&self) -> &ImageInfo {
+        self.info().image.info()
+    }
+}
+
 /// Kind of image view.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]

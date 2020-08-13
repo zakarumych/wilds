@@ -1,13 +1,15 @@
+pub mod atrous;
 pub mod combine;
 pub mod gauss_filter;
 pub mod rt_prepass;
 
 pub use self::{
-    combine::CombinePass, gauss_filter::GaussFilter, rt_prepass::RtPrepass,
+    atrous::ATrousFilter, combine::CombinePass, gauss_filter::GaussFilter,
+    rt_prepass::RtPrepass,
 };
 
 use {
-    crate::{clocks::ClockIndex, renderer::Context},
+    crate::renderer::Context,
     bumpalo::Bump,
     color_eyre::Report,
     hecs::World,
@@ -27,7 +29,6 @@ pub trait Pass<'a> {
         fence: Option<&Fence>,
         ctx: &mut Context,
         world: &mut World,
-        clock: &ClockIndex,
         bump: &Bump,
     ) -> Result<Self::Output, Report>;
 }

@@ -18,6 +18,14 @@ vec3 blue_rand(uvec3 co) {
     float z = fract(0.5 + dot(co, gamma));
     vec3 v = vec3(x, y, z);
 
+    // const vec3 alpha = vec3(1/M_PX, 1/M_FI, 1/M_PL);
+    // const vec3 beta = vec3(1/M_FI, 1/M_PL, 1/M_PI);
+    // const vec3 gamma = vec3(1/M_PL, 1/M_PX, 1/M_FI);
+    // float x = fract(0.5 + dot(co, alpha));
+    // float y = fract(0.5 + dot(co, beta));
+    // float z = fract(0.5 + dot(co, gamma));
+    // vec3 v = vec3(x, y, z);
+
     return v;
 }
 

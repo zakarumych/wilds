@@ -411,7 +411,7 @@ impl ChunkedAllocator {
         }
     }
 
-    #[tracing::instrument(skip(self, device))]
+    #[tracing::instrument(level = "info", skip(self, device))]
     unsafe fn alloc_chunk(
         &mut self,
         device: &DeviceLoader,
