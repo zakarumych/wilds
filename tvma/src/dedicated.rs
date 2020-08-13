@@ -33,7 +33,7 @@ impl DedicatedAllocator {
 
     /// Allocates new memory object and returns as memory block.
     /// This function must always me called with same logical device object.
-    #[tracing::instrument(skip(device))]
+    #[tracing::instrument(level = "info", skip(device))]
     pub unsafe fn alloc(
         &self,
         device: &DeviceLoader,

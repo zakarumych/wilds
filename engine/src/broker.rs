@@ -14,7 +14,7 @@ impl<T> EventBroker<T> {
         }
     }
 
-    pub fn read<'a>(&'a self) -> impl ExactSizeIterator<Item = &'a T> + Clone {
+    pub fn read(&self) -> std::slice::Iter<'_, T> {
         self.pool.iter()
     }
 

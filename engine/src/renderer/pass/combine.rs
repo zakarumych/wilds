@@ -1,10 +1,11 @@
 use {
     super::Pass,
-    crate::{clocks::ClockIndex, renderer::Context},
+    crate::renderer::Context,
     bumpalo::{collections::Vec as BVec, Bump},
     color_eyre::Report,
     hecs::World,
     illume::*,
+    lru::LruCache,
     smallvec::smallvec,
 };
 
@@ -26,10 +27,11 @@ pub struct CombinePass {
     emissive: [Option<ImageView>; 2],
     direct: [Option<ImageView>; 2],
     diffuse: [Option<ImageView>; 2],
-    combined: Option<ImageView>,
+
+    framebuffer: LruCache<Image, Framebuffer>,
+
     render_pass: Option<RenderPass>,
     pipeline: Option<GraphicsPipeline>,
-    framebuffer: Option<Framebuffer>,
 
     vert: VertexShader,
     frag: FragmentShader,
@@ -132,10 +134,11 @@ impl CombinePass {
             emissive: [None, None],
             direct: [None, None],
             diffuse: [None, None],
-            combined: None,
+
+            framebuffer: LruCache::new(3),
+
             render_pass: None,
             pipeline: None,
-            framebuffer: None,
 
             per_frame_sets: [set0, set1],
             pipeline_layout,
@@ -159,25 +162,11 @@ impl<'a> Pass<'a> for CombinePass {
         fence: Option<&Fence>,
         ctx: &mut Context,
         _world: &mut World,
-        _clock: &ClockIndex,
         bump: &Bump,
     ) -> Result<Output, Report> {
-        let extent = input.combined.info().extent.into_2d();
-        let format = input.combined.info().format;
-
-        let combined = match &self.combined {
-            Some(combined) if combined.info().image == input.combined => {
-                combined
-            }
-            _ => {
-                self.framebuffer = None;
-                self.combined = None;
-                let combined = ctx.create_image_view(ImageViewInfo::new(
-                    input.combined.clone(),
-                ))?;
-                self.combined.get_or_insert(combined)
-            }
-        };
+        let combined_info = input.combined.info();
+        let extent = combined_info.extent.into_2d();
+        let format = combined_info.format;
 
         let render_pass = match &self.render_pass {
             Some(render_pass)
@@ -186,7 +175,8 @@ impl<'a> Pass<'a> for CombinePass {
                 render_pass
             }
             _ => {
-                self.framebuffer = None;
+                self.framebuffer.clear();
+                self.pipeline = None;
                 self.render_pass = None;
                 let render_pass = ctx.create_render_pass(RenderPassInfo {
                     attachments: smallvec![AttachmentInfo {
@@ -224,27 +214,8 @@ impl<'a> Pass<'a> for CombinePass {
             }
         };
 
-        let framebuffer = match &self.framebuffer {
-            Some(framebuffer) => {
-                assert_eq!(framebuffer.info().views[0], *combined);
-                assert_eq!(framebuffer.info().render_pass, *render_pass);
-                framebuffer
-            }
-            _ => {
-                self.framebuffer = None;
-                let framebuffer = ctx.create_framebuffer(FramebufferInfo {
-                    render_pass: render_pass.clone(),
-                    views: smallvec![combined.clone()],
-                    extent,
-                })?;
-                self.framebuffer.get_or_insert(framebuffer)
-            }
-        };
-
         let pipeline = match &self.pipeline {
-            Some(pipeline) if pipeline.info().render_pass == *render_pass => {
-                pipeline
-            }
+            Some(pipeline) => pipeline,
             _ => {
                 self.pipeline = None;
 
@@ -259,6 +230,29 @@ impl<'a> Pass<'a> for CombinePass {
                     })?;
 
                 self.pipeline.get_or_insert(pipeline)
+            }
+        };
+
+        let framebuffer = match self.framebuffer.get(&input.combined) {
+            Some(framebuffer) => {
+                assert_eq!(framebuffer.info().render_pass, *render_pass);
+                framebuffer.clone()
+            }
+            None => {
+                let combined = ctx.create_image_view(ImageViewInfo::new(
+                    input.combined.clone(),
+                ))?;
+
+                let framebuffer = ctx.create_framebuffer(FramebufferInfo {
+                    render_pass: render_pass.clone(),
+                    views: smallvec![combined],
+                    extent,
+                })?;
+
+                self.framebuffer
+                    .put(input.combined.clone(), framebuffer.clone());
+
+                framebuffer
             }
         };
 
@@ -391,7 +385,7 @@ impl<'a> Pass<'a> for CombinePass {
 
         let mut render_pass_encoder = encoder.with_render_pass(
             render_pass,
-            framebuffer,
+            &framebuffer,
             &[ClearValue::Color(0.3, 0.4, 0.5, 1.0)],
         );
 

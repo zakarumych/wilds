@@ -1,24 +1,20 @@
 use {
     crate::{
-        clocks::ClockIndex,
-        engine::{InputEvents, Resources, System},
+        engine::{System, SystemContext},
         util::{iso_from_nalgebra, iso_to_nalgebra},
     },
-    hecs::{Entity, QueryBorrow, QueryOne, World},
-    nalgebra as na, ncollide3d,
-    ncollide3d::shape::{Shape, ShapeHandle},
+    hecs::{Entity, World},
+    nalgebra as na,
+    ncollide3d::shape::ShapeHandle,
     nphysics3d::{
         force_generator::DefaultForceGeneratorSet,
         joint::DefaultJointConstraintSet,
-        object::{
-            Body, BodySet, ColliderData, ColliderSet, DefaultColliderHandle,
-            DefaultColliderSet, Ground,
-        },
+        object::{Body, BodySet, DefaultColliderHandle, DefaultColliderSet},
         world::{GeometricalWorld, MechanicalWorld},
     },
     parking_lot::Mutex,
     smallvec::{smallvec, SmallVec},
-    ultraviolet::{Isometry3, Vec3},
+    ultraviolet::Isometry3,
 };
 
 pub use nphysics3d::object::{
@@ -29,6 +25,23 @@ pub use nphysics3d::object::{
 // FIXME: All `Physics` instances share colliders set.
 lazy_static::lazy_static! {
     pub static ref COLLIDER_SET: Mutex<DefaultColliderSet<f32, Entity>> = Mutex::new(DefaultColliderSet::new());
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Constants {
+    pub time_factor: f32,
+}
+
+impl Constants {
+    const fn new() -> Self {
+        Constants { time_factor: 1.0 }
+    }
+}
+
+impl Default for Constants {
+    fn default() -> Self {
+        Constants::new()
+    }
 }
 
 pub struct Physics {
@@ -104,11 +117,16 @@ impl Physics {
 }
 
 impl System for Physics {
-    fn run(&mut self, resources: Resources<'_>) {
-        tracing::info!("Start of physics system");
+    fn run(&mut self, ctx: SystemContext<'_>) {
+        let world = ctx.world;
 
-        let world = resources.world;
-        let delta = resources.clocks.delta.as_secs_f32();
+        const DEFAULT_CONSTANTS: Constants = Constants::new();
+        let constants = ctx
+            .resources
+            .get::<Constants>()
+            .unwrap_or(&DEFAULT_CONSTANTS);
+
+        let delta = ctx.clocks.delta.as_secs_f32() * constants.time_factor;
 
         let mut lock = None;
 
@@ -133,7 +151,7 @@ impl System for Physics {
             .collect();
 
         for (entity, attached) in attached {
-            world.insert_one(entity, attached);
+            world.insert_one(entity, attached).unwrap();
         }
 
         for (_, (iso, body)) in
@@ -167,8 +185,6 @@ impl System for Physics {
             // FIXME: Update position only if changed.
             *iso = iso_from_nalgebra(body.position());
         }
-
-        tracing::info!("End of physics system");
     }
 }
 

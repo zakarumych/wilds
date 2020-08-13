@@ -128,6 +128,7 @@ impl Device {
         &self,
         info: BufferInfo,
     ) -> Result<Buffer, OutOfMemory> {
+        tracing::error!("!");
         assert!(info.is_valid());
         self.inner.clone().create_buffer(info)
     }
@@ -148,6 +149,7 @@ impl Device {
     where
         T: Pod,
     {
+        tracing::error!("!");
         assert!(info.is_valid());
         if arith_ne(info.size, size_of_val(data)) {
             panic!(
@@ -166,6 +168,7 @@ impl Device {
     /// Fences are create in unsignaled state.
     #[tracing::instrument]
     pub fn create_fence(&self) -> Result<Fence, OutOfMemory> {
+        tracing::error!("!");
         self.inner.clone().create_fence()
     }
 
@@ -175,6 +178,7 @@ impl Device {
         &self,
         info: FramebufferInfo,
     ) -> Result<Framebuffer, OutOfMemory> {
+        tracing::error!("!");
         self.inner.clone().create_framebuffer(info)
     }
 
@@ -184,6 +188,7 @@ impl Device {
         &self,
         info: GraphicsPipelineInfo,
     ) -> Result<GraphicsPipeline, OutOfMemory> {
+        tracing::error!("!");
         self.inner.clone().create_graphics_pipeline(info)
     }
 
@@ -193,6 +198,7 @@ impl Device {
         &self,
         info: ImageInfo,
     ) -> Result<Image, CreateImageError> {
+        tracing::error!("!");
         self.inner.clone().create_image(info)
     }
 
@@ -210,6 +216,7 @@ impl Device {
     where
         T: Pod,
     {
+        tracing::error!("!");
         // assert!(info.is_valid());
         self.inner
             .clone()
@@ -222,6 +229,7 @@ impl Device {
         &self,
         info: ImageViewInfo,
     ) -> Result<ImageView, OutOfMemory> {
+        tracing::error!("!");
         self.inner.clone().create_image_view(info)
     }
 
@@ -231,6 +239,7 @@ impl Device {
         &self,
         info: PipelineLayoutInfo,
     ) -> Result<PipelineLayout, OutOfMemory> {
+        tracing::error!("!");
         self.inner.clone().create_pipeline_layout(info)
     }
 
@@ -240,12 +249,14 @@ impl Device {
         &self,
         info: RenderPassInfo,
     ) -> Result<RenderPass, CreateRenderPassError> {
+        tracing::error!("!");
         self.inner.clone().create_render_pass(info)
     }
 
     /// Creates semaphore. Semaphores are created in unsignaled state.
     #[tracing::instrument]
     pub fn create_semaphore(&self) -> Result<Semaphore, OutOfMemory> {
+        tracing::error!("!");
         self.inner.clone().create_semaphore()
     }
 
@@ -254,6 +265,7 @@ impl Device {
         &self,
         info: ShaderModuleInfo,
     ) -> Result<ShaderModule, CreateShaderModuleError> {
+        tracing::error!("!");
         self.inner.clone().create_shader_module(info)
     }
 
@@ -264,6 +276,7 @@ impl Device {
         &self,
         surface: &mut Surface,
     ) -> Result<Swapchain, SurfaceError> {
+        tracing::error!("!");
         self.inner.clone().create_swapchain(surface)
     }
 
@@ -310,6 +323,7 @@ impl Device {
         &self,
         info: AccelerationStructureInfo,
     ) -> Result<AccelerationStructure, OutOfMemory> {
+        tracing::error!("!");
         self.inner.clone().create_acceleration_structure(info)
     }
 
@@ -337,6 +351,7 @@ impl Device {
         acceleration_structure: &AccelerationStructure,
         update: bool,
     ) -> Result<Buffer, OutOfMemory> {
+        tracing::error!("!");
         self.inner
             .clone()
             .allocate_acceleration_structure_build_scratch(
@@ -350,6 +365,7 @@ impl Device {
         &self,
         info: RayTracingPipelineInfo,
     ) -> Result<RayTracingPipeline, OutOfMemory> {
+        tracing::error!("!");
         self.inner.clone().create_ray_tracing_pipeline(info)
     }
 
@@ -358,6 +374,7 @@ impl Device {
         &self,
         info: DescriptorSetLayoutInfo,
     ) -> Result<DescriptorSetLayout, OutOfMemory> {
+        tracing::error!("!");
         self.inner.clone().create_descriptor_set_layout(info)
     }
 
@@ -366,6 +383,7 @@ impl Device {
         &self,
         info: DescriptorSetInfo,
     ) -> Result<DescriptorSet, OutOfMemory> {
+        tracing::error!("!");
         self.inner.clone().create_descriptor_set(info)
     }
 
@@ -387,6 +405,7 @@ impl Device {
         &self,
         info: SamplerInfo,
     ) -> Result<Sampler, OutOfMemory> {
+        tracing::error!("!");
         self.inner.clone().create_sampler(info)
     }
 
@@ -396,6 +415,7 @@ impl Device {
         pipeline: &RayTracingPipeline,
         info: ShaderBindingTableInfo,
     ) -> Result<ShaderBindingTable, OutOfMemory> {
+        tracing::error!("!");
         self.inner
             .clone()
             .create_ray_tracing_shader_binding_table(pipeline, info)

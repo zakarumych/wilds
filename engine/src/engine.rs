@@ -2,9 +2,10 @@ use {
     crate::{
         assets::{Assets, Prefab},
         broker::EventBroker,
-        clocks::ClockIndex,
+        clocks::{ClockIndex, Clocks},
         config::{AssetSource, Config},
     },
+    bumpalo::Bump,
     cfg_if::cfg_if,
     eyre::Report,
     flume::{bounded, Receiver, Sender},
@@ -16,11 +17,13 @@ use {
         pin::Pin,
         rc::Rc,
         task::{Context, Poll},
+        time::Duration,
     },
     tokio::{
         runtime::{Handle as TokioHandle, Runtime},
         task::yield_now,
     },
+    type_map::TypeMap,
     winit::{
         event::Event,
         event_loop::{ControlFlow, EventLoop, EventLoopWindowTarget},
@@ -35,35 +38,41 @@ pub use winit::event::{
 
 pub type InputEvents = EventBroker<Event<'static, ()>>;
 
-pub struct Resources<'a> {
+pub struct SystemContext<'a> {
     pub input: &'a InputEvents,
     pub world: &'a mut World,
+    pub resources: &'a mut TypeMap,
+    pub bump: &'a Bump,
     pub clocks: ClockIndex,
 }
 
 pub trait System {
-    fn run(&mut self, resources: Resources<'_>);
+    fn run(&mut self, ctx: SystemContext<'_>);
 }
 
 impl<F> System for F
 where
-    F: FnMut(Resources<'_>),
+    F: FnMut(SystemContext<'_>),
 {
-    fn run(&mut self, resources: Resources<'_>) {
-        self(resources)
+    fn run(&mut self, ctx: SystemContext<'_>) {
+        self(ctx)
     }
 }
 
 /// Root data structure for the game engine.
 pub struct Engine {
     pub world: World,
+    pub resources: TypeMap,
     pub assets: Assets,
     pub input: InputEvents,
     schedule: Vec<Box<dyn System>>,
+    fixed_schedule: Vec<Box<dyn System>>,
     shared: Rc<Shared>,
     runtime: TokioHandle,
     recv_loaded_prefabs: Receiver<LoadedPrefab>,
     send_loaded_prefabs: Sender<LoadedPrefab>,
+    clocks: Clocks,
+    fixed_step_delta: Duration,
 }
 
 impl Engine {
@@ -122,15 +131,31 @@ impl Engine {
         Ok(window)
     }
 
-    pub fn advance(&mut self, clocks: ClockIndex) {
+    pub fn advance(&mut self, bump: &Bump) {
         self.build_prefabs();
 
+        let clocks = self.clocks.step();
+
         for system in &mut self.schedule {
-            system.run(Resources {
+            system.run(SystemContext {
                 world: &mut self.world,
+                resources: &mut self.resources,
                 input: &self.input,
                 clocks,
+                bump,
             });
+        }
+
+        for clocks in self.clocks.fixed_steps(self.fixed_step_delta) {
+            for system in &mut self.fixed_schedule {
+                system.run(SystemContext {
+                    world: &mut self.world,
+                    resources: &mut self.resources,
+                    input: &self.input,
+                    clocks,
+                    bump,
+                });
+            }
         }
 
         self.input.clear();
@@ -142,6 +167,15 @@ impl Engine {
         S: System + 'static,
     {
         self.schedule.push(Box::new(system));
+        self
+    }
+
+    /// Adds a system to this engine.
+    pub fn add_fixed_step_system<S>(&mut self, system: S) -> &mut Self
+    where
+        S: System + 'static,
+    {
+        self.fixed_schedule.push(Box::new(system));
         self
     }
 
@@ -215,12 +249,16 @@ impl Engine {
         let engine = Engine {
             assets,
             schedule: Vec::new(),
+            fixed_schedule: Vec::new(),
             world: World::new(),
+            resources: TypeMap::new(),
             input: EventBroker::new(),
             shared: shared.clone(),
             recv_loaded_prefabs,
             send_loaded_prefabs,
             runtime: runtime.handle().clone(),
+            fixed_step_delta: Duration::from_millis(10),
+            clocks: Clocks::new(),
         };
 
         let event_loop = EventLoop::new();

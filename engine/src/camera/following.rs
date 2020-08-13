@@ -1,13 +1,11 @@
 use {
     super::Camera,
-    crate::engine::{Resources, System},
+    crate::engine::{System, SystemContext},
     hecs::Entity,
-    std::f32::consts::{FRAC_PI_2, PI},
+    std::f32::consts::FRAC_PI_2,
     ultraviolet::{Isometry3, Rotor3, Vec3},
     winit::event::{DeviceEvent, ElementState, Event, VirtualKeyCode},
 };
-
-const TAU: f32 = 6.28318530717958647692528676655900577f32;
 
 #[derive(Clone, Copy)]
 /// Following camera marker component.
@@ -34,17 +32,19 @@ pub struct FollowingCameraSystem {
     pitch_factor: f32,
     yaw_factor: f32,
     speed: f32,
+    direction: Direction,
 }
 
 impl FollowingCameraSystem {
     pub fn new() -> Self {
         FollowingCameraSystem {
-            pitch: 0.0,
-            yaw: 0.0,
+            pitch: FRAC_PI_2 / 2.0,
+            yaw: FRAC_PI_2 / 2.0,
             distance: 5.0,
             pitch_factor: 1.0,
             yaw_factor: 1.0,
             speed: 1.0,
+            direction: Direction::empty(),
         }
     }
 
@@ -61,42 +61,44 @@ impl FollowingCameraSystem {
 }
 
 impl System for FollowingCameraSystem {
-    fn run(&mut self, resources: Resources<'_>) {
-        let world = resources.world;
-        let delta = resources.clocks.delta.as_secs_f32();
+    fn run(&mut self, ctx: SystemContext<'_>) {
+        let world = ctx.world;
+        let delta = ctx.clocks.delta.as_secs_f32();
 
-        let mut direction = Direction::empty();
-        for event in resources.input.read() {
+        for event in ctx.input.read() {
             match event {
                 Event::DeviceEvent { event, .. } => match event {
-                    &DeviceEvent::MouseMotion { delta: (x, y) } => {
-                        self.pitch -= y as f32 * delta * self.pitch_factor;
-                        self.yaw += x as f32 * delta * self.yaw_factor;
+                    // &DeviceEvent::MouseMotion { delta: (x, y) } => {
+                    //     self.pitch += y as f32 * delta * self.pitch_factor;
+                    //     self.yaw += x as f32 * delta * self.yaw_factor;
 
-                        self.pitch = self.pitch.min(FRAC_PI_2).max(-FRAC_PI_2);
+                    //     self.pitch =
+                    // self.pitch.min(FRAC_PI_2).max(-FRAC_PI_2);
 
-                        if self.yaw < -PI {
-                            self.yaw -= (self.yaw / TAU).floor() * TAU;
-                        }
+                    //     if self.yaw < -PI {
+                    //         self.yaw -= (self.yaw / TAU).floor() * TAU;
+                    //     }
 
-                        if self.yaw > PI {
-                            self.yaw -= (self.yaw / TAU).ceil() * TAU;
-                        }
-                    }
+                    //     if self.yaw > PI {
+                    //         self.yaw -= (self.yaw / TAU).ceil() * TAU;
+                    //     }
+                    // }
                     DeviceEvent::Key(input) => {
                         let flag = match input.virtual_keycode {
                             Some(VirtualKeyCode::W) => Direction::FORWARD,
                             Some(VirtualKeyCode::S) => Direction::BACKWARD,
                             Some(VirtualKeyCode::A) => Direction::LEFT,
                             Some(VirtualKeyCode::D) => Direction::RIGHT,
-                            Some(VirtualKeyCode::Space) => Direction::UP,
-                            Some(VirtualKeyCode::LControl) => Direction::DOWN,
                             _ => continue,
                         };
 
                         match input.state {
-                            ElementState::Pressed => direction.insert(flag),
-                            ElementState::Released => direction.remove(flag),
+                            ElementState::Pressed => {
+                                self.direction.insert(flag)
+                            }
+                            ElementState::Released => {
+                                self.direction.remove(flag)
+                            }
                         }
                     }
                     _ => {}
@@ -105,11 +107,18 @@ impl System for FollowingCameraSystem {
             }
         }
 
-        if direction.contains(Direction::FORWARD) {
+        if self.direction.contains(Direction::FORWARD) {
             self.distance -= self.speed * delta;
         }
-        if direction.contains(Direction::BACKWARD) {
+        if self.direction.contains(Direction::BACKWARD) {
             self.distance += self.speed * delta;
+        }
+
+        if self.direction.contains(Direction::LEFT) {
+            self.yaw -= delta * self.yaw_factor;
+        }
+        if self.direction.contains(Direction::RIGHT) {
+            self.yaw += delta * self.yaw_factor;
         }
 
         let found = world
@@ -128,7 +137,8 @@ impl System for FollowingCameraSystem {
                 .cloned()
                 .unwrap_or_default();
 
-            let rotation = Rotor3::from_euler_angles(0.0, self.pitch, self.yaw);
+            let rotation =
+                Rotor3::from_euler_angles(0.0, -self.pitch, self.yaw);
             let translation =
                 (Vec3::unit_z() * self.distance).rotated_by(rotation);
             iso.prepend_isometry(Isometry3 {

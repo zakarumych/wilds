@@ -1,7 +1,6 @@
 use {
     super::Pass,
     crate::{
-        clocks::ClockIndex,
         light::{DirectionalLight, SkyLight},
         renderer::{
             Context, Mesh, PositionNormalTangent3dUV, Renderable, Texture,
@@ -130,7 +129,7 @@ impl RtPrepass {
     pub fn new(
         extent: Extent2d,
         ctx: &mut Context,
-        blue_noise_buffer_64x64x64: Buffer,
+        // blue_noise_buffer_64x64x64: Buffer,
     ) -> Result<Self, Report> {
         // Create pipeline.
         let set_layout = ctx.create_descriptor_set_layout(DescriptorSetLayoutInfo {
@@ -489,16 +488,16 @@ impl RtPrepass {
                         std::slice::from_ref(&tlas),
                     ),
                 },
-                WriteDescriptorSet {
-                    set: &set,
-                    binding: 1,
-                    element: 0,
-                    descriptors: Descriptors::StorageBuffer(&[(
-                        blue_noise_buffer_64x64x64.clone(),
-                        0,
-                        blue_noise_buffer_64x64x64.info().size,
-                    )]),
-                },
+                // WriteDescriptorSet {
+                //     set: &set,
+                //     binding: 1,
+                //     element: 0,
+                //     descriptors: Descriptors::StorageBuffer(&[(
+                //         blue_noise_buffer_64x64x64.clone(),
+                //         0,
+                //         blue_noise_buffer_64x64x64.info().size,
+                //     )]),
+                // },
                 WriteDescriptorSet {
                     set: &set,
                     binding: 6,
@@ -589,9 +588,10 @@ impl<'a> Pass<'a> for RtPrepass {
         fence: Option<&Fence>,
         ctx: &mut Context,
         world: &mut World,
-        _clock: &ClockIndex,
         bump: &Bump,
     ) -> Result<Output, Report> {
+        // let mut reg = Region::new();
+
         let fid = (frame % 2) as u32;
 
         assert_eq!(self.output_albedo_image.info().extent, input.extent.into());
@@ -604,8 +604,11 @@ impl<'a> Pass<'a> for RtPrepass {
         //   and having a good quality top-level acceleration structure can have
         // a significant payoff   (bad quality has a higher cost further
         // up in the tree).
-        let mut instances: Vec<ShaderInstance> = Vec::new();
-        let mut acc_instances: Vec<AccelerationStructureInstance> = Vec::new();
+        let mut instances: BVec<ShaderInstance> = BVec::new_in(bump);
+        let mut acc_instances: BVec<AccelerationStructureInstance> =
+            BVec::new_in(bump);
+
+        // tracing::info!("Bumps:\n{:#?}", reg.change_and_reset());
 
         let mut writes = BVec::with_capacity_in(3, bump);
 
@@ -750,10 +753,18 @@ impl<'a> Pass<'a> for RtPrepass {
             } else {
                 tracing::error!("Missing BLAS for mesh @ {:?}", entity);
             }
+
+            // tracing::info!(
+            //     "Prepass. Per object:\n{:#?}",
+            //     reg.change_and_reset()
+            // );
         }
 
         ctx.update_descriptor_sets(&writes, &[]);
         drop(writes);
+
+        // tracing::info!("Prepass. Sets update:\n{:#?}",
+        // reg.change_and_reset());
 
         ensure!(
             instances.len() <= MAX_INSTANCE_COUNT.into(),
@@ -934,7 +945,13 @@ impl<'a> Pass<'a> for RtPrepass {
             &images,
         );
 
-        ctx.queue.submit(wait, encoder.finish(), signal, fence);
+        let cbuf = encoder.finish();
+
+        // tracing::info!("Prepass. Encoding:\n{:#?}", reg.change_and_reset());
+
+        ctx.queue.submit(wait, cbuf, signal, fence);
+
+        // tracing::info!("Prepass. Submit:\n{:#?}", reg.change_and_reset());
 
         Ok(Output {
             albedo: self.output_albedo_image.clone(),

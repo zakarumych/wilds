@@ -9,6 +9,9 @@ pub struct Clocks {
 
     /// Instant of last step.
     last: Instant,
+
+    /// Instant of last fixed step.
+    last_fixed: Instant,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -33,6 +36,7 @@ impl Clocks {
         Clocks {
             start: now,
             last: now,
+            last_fixed: now,
         }
     }
 
@@ -99,7 +103,7 @@ pub struct FixedClockStepIter<'a> {
 
 impl<'a> FixedClockStepIter<'a> {
     pub fn len(&self) -> Option<u128> {
-        (self.now - self.clocks.last)
+        (self.now - self.clocks.last_fixed)
             .as_nanos()
             .checked_div(self.fixed.as_nanos())
     }
@@ -109,13 +113,13 @@ impl<'a> Iterator for FixedClockStepIter<'a> {
     type Item = ClockIndex;
 
     fn next(&mut self) -> Option<ClockIndex> {
-        if self.now < self.clocks.last.checked_add(self.fixed)? {
+        if self.now < self.clocks.last_fixed.checked_add(self.fixed)? {
             None
         } else {
-            self.clocks.last += self.fixed;
+            self.clocks.last_fixed += self.fixed;
             Some(ClockIndex {
                 delta: self.fixed,
-                step: self.clocks.last,
+                step: self.clocks.last_fixed,
                 start: self.clocks.start,
             })
         }

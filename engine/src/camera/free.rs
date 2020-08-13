@@ -1,6 +1,6 @@
 use {
     super::Camera,
-    crate::engine::{Resources, System},
+    crate::engine::{System, SystemContext},
     std::f32::consts::{FRAC_PI_2, PI},
     ultraviolet::{Isometry3, Rotor3, Vec3},
     winit::event::{DeviceEvent, ElementState, Event, VirtualKeyCode},
@@ -57,16 +57,16 @@ impl FreeCameraSystem {
 }
 
 impl System for FreeCameraSystem {
-    fn run(&mut self, resources: Resources<'_>) {
-        let delta = resources.clocks.delta.as_secs_f32();
-        let mut query = resources
+    fn run(&mut self, ctx: SystemContext<'_>) {
+        let delta = ctx.clocks.delta.as_secs_f32();
+        let mut query = ctx
             .world
             .query::<&mut Isometry3>()
             .with::<Camera>()
             .with::<FreeCamera>();
 
         if let Some((_, iso)) = query.iter().next() {
-            for event in resources.input.read() {
+            for event in ctx.input.read() {
                 match event {
                     Event::DeviceEvent { event, .. } => match event {
                         &DeviceEvent::MouseMotion { delta: (x, y) } => {

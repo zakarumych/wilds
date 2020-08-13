@@ -1,7 +1,7 @@
 use {
     crate::{
         clocks::ClockIndex,
-        engine::{InputEvents, Resources, System},
+        engine::{InputEvents, System, SystemContext},
         util::iso_to_nalgebra,
     },
     hecs::{Entity, QueryBorrow, QueryOne, World},
@@ -142,9 +142,9 @@ struct Animated;
 struct Dynamic;
 
 impl System for Physics {
-    fn run(&mut self, resources: Resources<'_>) {
-        let world = resources.world;
-        let delta = resources.clocks.delta.as_secs_f32();
+    fn run(&mut self, ctx: SystemContext<'_>) {
+        let world = ctx.world;
+        let delta = ctx.clocks.delta.as_secs_f32();
 
         // Remove internal components for entites that lost their `Physical`
         // component.

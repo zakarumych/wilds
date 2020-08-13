@@ -1,24 +1,22 @@
 use {
     bytemuck::cast_slice,
-    eyre::Report,
     goods::SyncAsset,
     hecs::{Entity, World},
     nalgebra as na,
     ncollide3d::{
         math::Point,
-        procedural::{capsule, IndexBuffer},
+        procedural::IndexBuffer,
         shape::{Capsule, ShapeHandle},
+        transformation::ToTriMesh as _,
     },
     std::sync::Arc,
-    ultraviolet::{Isometry3, Vec3},
+    ultraviolet::Isometry3,
     wilds::{
         assets::Prefab,
-        physics::{
-            BodyPartHandle, ColliderDesc, Colliders, Physics, RigidBodyDesc,
-        },
+        physics::{ColliderDesc, Colliders, RigidBodyDesc},
         renderer::{
-            BindingData, BufferUsage, Context, Material, Mesh, MeshData,
-            Normal3d, OutOfMemory, Position3d, PositionNormalTangent3dUV,
+            BufferUsage, Context, Material, Mesh, MeshData, Normal3d,
+            OutOfMemory, Position3d, PositionNormalTangent3dUV,
             PrimitiveTopology, Renderable, Tangent3d, UV,
         },
     },
@@ -39,7 +37,11 @@ impl PawnAsset {
         height: f32,
         ctx: &mut Context,
     ) -> Result<Self, OutOfMemory> {
-        let trimesh = capsule(&diameter, &height, 16, 16);
+        // let trimesh = capsule(&diameter, &height, 16, 16);
+
+        let capsule = Capsule::new((height + diameter) / 2.0, diameter / 2.0);
+
+        let trimesh = capsule.to_trimesh((16, 16));
 
         assert!(trimesh.has_normals());
         let normals = trimesh.normals.as_ref().unwrap();
@@ -72,7 +74,6 @@ impl PawnAsset {
             }))
             .build(ctx, usage, usage)?;
 
-        let capsule = Capsule::new((height + diameter) / 2.0, diameter / 2.0);
         let shape = Arc::new(capsule);
 
         Ok(PawnAsset { mesh, shape })
@@ -115,7 +116,7 @@ impl Prefab for PawnAsset {
                 Colliders::from(
                     ColliderDesc::new(ShapeHandle::from_arc(self.shape))
                         .density(1.0)
-                        .margin(0.3),
+                        .margin(0.01),
                 ),
                 iso,
                 Pawn,

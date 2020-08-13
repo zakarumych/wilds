@@ -90,7 +90,7 @@ impl LinearAllocator {
         }
     }
 
-    pub fn can_allocate(&self, size: u64, align: u64) -> bool {
+    pub fn can_allocate(&self, size: u64, _align: u64) -> bool {
         size <= self.chunk_size / 2
     }
 
@@ -218,7 +218,7 @@ impl LinearAllocator {
         );
     }
 
-    #[tracing::instrument(skip(self, device))]
+    #[tracing::instrument(level = "info", skip(self, device))]
     unsafe fn alloc_chunk(
         &mut self,
         device: &DeviceLoader,
