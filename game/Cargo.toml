@@ -8,7 +8,7 @@ publish = false
 [dependencies]
 goods = { version = "0.5", path = "../../goods", features = ["fs", "ron-format"] }
 hecs = "0.2"
-wilds = { path = "../engine", features = ["vulkan"] }
+wilds = { path = "../engine" }
 
 bumpalo = { version = "3.4", features = ["collections"] }
 eyre = "0.6"

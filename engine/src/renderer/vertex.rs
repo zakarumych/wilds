@@ -9,6 +9,35 @@ use std::{
     mem::{size_of, size_of_val},
 };
 
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Hash,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+pub enum Semantics {
+    Position3d,
+    Normal3d,
+    Tangent3d,
+    UV,
+    Color,
+    Joint,
+    Weigth,
+}
+
+impl Semantics {
+    pub fn animate(&self) -> bool {
+        matches!(
+            self,
+            Semantics::Position3d | Semantics::Normal3d | Semantics::Tangent3d
+        )
+    }
+}
+
 /// Describes single vertex location.
 #[derive(
     Clone,
@@ -28,6 +57,9 @@ pub struct VertexLocation {
 
     /// Offset of data in vertex buffer element.
     pub offset: u32,
+
+    /// Vertex attribute semantics.
+    pub semantics: Option<Semantics>,
 }
 
 /// Describes layout of vertex buffer element.
@@ -86,8 +118,7 @@ pub trait VertexType: FromBytes + Pod {
     const LOCATIONS: &'static [VertexLocation];
     const RATE: VertexInputRate;
 
-    /// Get layout of the vertex type.
-    /// FIXME: make function const when stable.
+    /// Get layout of this vertex type.
     fn layout() -> VertexLayout
     where
         Self: Sized,
@@ -95,16 +126,6 @@ pub trait VertexType: FromBytes + Pod {
         VertexLayout {
             locations: Cow::Borrowed(Self::LOCATIONS),
             stride: size_of::<Self>() as u32,
-            rate: Self::RATE,
-        }
-    }
-
-    /// Get layout of the vertex value.
-    /// FIXME: make function const when stable.
-    fn layout_of_val(&self) -> VertexLayout {
-        VertexLayout {
-            locations: Cow::Borrowed(Self::LOCATIONS),
-            stride: size_of_val(self) as u32,
             rate: Self::RATE,
         }
     }
@@ -130,6 +151,7 @@ impl VertexType for Position3d {
     const LOCATIONS: &'static [VertexLocation] = &[VertexLocation {
         format: Format::RGB32Sfloat,
         offset: 0,
+        semantics: Some(Semantics::Position3d),
     }];
     const NAME: &'static str = "Position3d";
     const RATE: VertexInputRate = VertexInputRate::Vertex;
@@ -155,6 +177,7 @@ impl VertexType for Normal3d {
     const LOCATIONS: &'static [VertexLocation] = &[VertexLocation {
         format: Format::RGB32Sfloat,
         offset: 0,
+        semantics: Some(Semantics::Normal3d),
     }];
     const NAME: &'static str = "Normal3d";
     const RATE: VertexInputRate = VertexInputRate::Vertex;
@@ -180,6 +203,7 @@ impl VertexType for Tangent3d {
     const LOCATIONS: &'static [VertexLocation] = &[VertexLocation {
         format: Format::RGBA32Sfloat,
         offset: 0,
+        semantics: Some(Semantics::Tangent3d),
     }];
     const NAME: &'static str = "Tangent3d";
     const RATE: VertexInputRate = VertexInputRate::Vertex;
@@ -205,6 +229,7 @@ impl VertexType for Color {
     const LOCATIONS: &'static [VertexLocation] = &[VertexLocation {
         format: Format::RGBA32Sfloat,
         offset: 0,
+        semantics: Some(Semantics::Color),
     }];
     const NAME: &'static str = "Color";
     const RATE: VertexInputRate = VertexInputRate::Vertex;
@@ -230,6 +255,7 @@ impl VertexType for UV {
     const LOCATIONS: &'static [VertexLocation] = &[VertexLocation {
         format: Format::RG32Sfloat,
         offset: 0,
+        semantics: Some(Semantics::UV),
     }];
     const NAME: &'static str = "UV";
     const RATE: VertexInputRate = VertexInputRate::Vertex;
@@ -265,10 +291,12 @@ impl VertexType for Position3dUV {
         VertexLocation {
             format: Format::RGB32Sfloat,
             offset: 0,
+            semantics: Some(Semantics::Position3d),
         },
         VertexLocation {
             format: Format::RG32Sfloat,
             offset: size_of::<Position3d>() as u32,
+            semantics: Some(Semantics::Position3d),
         },
     ];
     const NAME: &'static str = "Position3dUV";
@@ -305,10 +333,12 @@ impl VertexType for Position3dColor {
         VertexLocation {
             format: Format::RGB32Sfloat,
             offset: 0,
+            semantics: Some(Semantics::Position3d),
         },
         VertexLocation {
             format: Format::RGBA32Sfloat,
             offset: size_of::<Position3d>() as u32,
+            semantics: Some(Semantics::Color),
         },
     ];
     const NAME: &'static str = "Position3dColor";
@@ -345,10 +375,12 @@ impl VertexType for PositionNormal3d {
         VertexLocation {
             format: Format::RGB32Sfloat,
             offset: 0,
+            semantics: Some(Semantics::Position3d),
         },
         VertexLocation {
             format: Format::RGB32Sfloat,
             offset: size_of::<Position3d>() as u32,
+            semantics: Some(Semantics::Normal3d),
         },
     ];
     const NAME: &'static str = "PositionNormal3d";
@@ -393,15 +425,18 @@ impl VertexType for PositionNormalTangent3d {
         VertexLocation {
             format: Format::RGB32Sfloat,
             offset: 0,
+            semantics: Some(Semantics::Position3d),
         },
         VertexLocation {
             format: Format::RGB32Sfloat,
             offset: size_of::<Position3d>() as u32,
+            semantics: Some(Semantics::Normal3d),
         },
         VertexLocation {
             format: Format::RGBA32Sfloat,
             offset: size_of::<Position3d>() as u32
                 + size_of::<Normal3d>() as u32,
+            semantics: Some(Semantics::Tangent3d),
         },
     ];
     const NAME: &'static str = "PositionNormalTangent3d";
@@ -446,15 +481,18 @@ impl VertexType for PositionNormal3dUV {
         VertexLocation {
             format: Format::RGB32Sfloat,
             offset: 0,
+            semantics: Some(Semantics::Position3d),
         },
         VertexLocation {
             format: Format::RGB32Sfloat,
             offset: size_of::<Position3d>() as u32,
+            semantics: Some(Semantics::Normal3d),
         },
         VertexLocation {
             format: Format::RG32Sfloat,
             offset: size_of::<Position3d>() as u32
                 + size_of::<Normal3d>() as u32,
+            semantics: Some(Semantics::UV),
         },
     ];
     const NAME: &'static str = "PositionNormal3dUV";
@@ -504,21 +542,25 @@ impl VertexType for PositionNormalTangent3dUV {
         VertexLocation {
             format: Format::RGB32Sfloat,
             offset: 0,
+            semantics: Some(Semantics::Position3d),
         },
         VertexLocation {
             format: Format::RGB32Sfloat,
             offset: size_of::<Position3d>() as u32,
+            semantics: Some(Semantics::Normal3d),
         },
         VertexLocation {
             format: Format::RGBA32Sfloat,
             offset: size_of::<Position3d>() as u32
                 + size_of::<Normal3d>() as u32,
+            semantics: Some(Semantics::Tangent3d),
         },
         VertexLocation {
             format: Format::RG32Sfloat,
             offset: size_of::<Position3d>() as u32
                 + size_of::<Normal3d>() as u32
                 + size_of::<Tangent3d>() as u32,
+            semantics: Some(Semantics::UV),
         },
     ];
     const NAME: &'static str = "PositionNormalTangent3dUV";
@@ -563,15 +605,18 @@ impl VertexType for PositionNormal3dColor {
         VertexLocation {
             format: Format::RGB32Sfloat,
             offset: 0,
+            semantics: Some(Semantics::Position3d),
         },
         VertexLocation {
             format: Format::RGB32Sfloat,
             offset: size_of::<Position3d>() as u32,
+            semantics: Some(Semantics::Normal3d),
         },
         VertexLocation {
             format: Format::RGBA32Sfloat,
             offset: size_of::<Position3d>() as u32
                 + size_of::<Normal3d>() as u32,
+            semantics: Some(Semantics::Color),
         },
     ];
     const NAME: &'static str = "PositionNormal3dColor";
@@ -604,18 +649,22 @@ impl VertexType for Transformation3d {
         VertexLocation {
             format: Format::RGBA32Sfloat,
             offset: size_of::<[[f32; 4]; 0]>() as u32,
+            semantics: None,
         },
         VertexLocation {
             format: Format::RGBA32Sfloat,
             offset: size_of::<[[f32; 4]; 1]>() as u32,
+            semantics: None,
         },
         VertexLocation {
             format: Format::RGBA32Sfloat,
             offset: size_of::<[[f32; 4]; 2]>() as u32,
+            semantics: None,
         },
         VertexLocation {
             format: Format::RGBA32Sfloat,
             offset: size_of::<[[f32; 4]; 3]>() as u32,
+            semantics: None,
         },
     ];
     const NAME: &'static str = "Transformation3d";
@@ -627,13 +676,13 @@ pub fn vertex_layouts_for_pipeline(
 ) -> (Vec<VertexInputBinding>, Vec<VertexInputAttribute>) {
     let mut next_location = 0;
 
-    let mut attributes = Vec::new();
+    let mut locations = Vec::new();
 
     let bindings = layouts
         .iter()
         .enumerate()
         .map(|(binding, layout)| {
-            attributes.extend(layout.locations.iter().map(|layout| {
+            locations.extend(layout.locations.iter().map(|layout| {
                 next_location += 1;
 
                 VertexInputAttribute {
@@ -651,7 +700,7 @@ pub fn vertex_layouts_for_pipeline(
         })
         .collect();
 
-    (bindings, attributes)
+    (bindings, locations)
 }
 
 #[cfg(feature = "genmesh")]

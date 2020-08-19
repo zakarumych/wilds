@@ -4,14 +4,14 @@ mod ray_tracing;
 
 pub use self::{compute::*, graphics::*, ray_tracing::*};
 
-use crate::{
-    descriptor::DescriptorSetLayout,
-    resource::{Handle, ResourceTrait},
-};
+use {crate::descriptor::DescriptorSetLayout, erupt::vk1_0};
 
 define_handle! {
     /// Resource that describes layout of a pipeline.
-    pub struct PipelineLayout(PipelineLayoutInfo);
+    pub struct PipelineLayout {
+        pub info: PipelineLayoutInfo,
+        handle: vk1_0::PipelineLayout,
+    }
 }
 
 /// Defines layouts of all descriptor sets used with pipeline.

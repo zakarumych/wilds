@@ -1,28 +1,63 @@
+use super::{surface_error_from_erupt, PresentMode, Surface, SurfaceError};
 use crate::{
     convert::{from_erupt, FromErupt as _, ToErupt as _},
-    device::EruptDevice,
-    handle::{EruptImage, EruptResource as _, EruptSwapchainImage},
-    surface_error_from_erupt,
+    device::{Device, WeakDevice},
+    format::Format,
+    image::{Image, ImageInfo, ImageUsage, Samples},
+    memory::MemoryUsageFlags,
+    out_of_host_memory,
+    semaphore::Semaphore,
+    Extent2d, OutOfMemory,
 };
 use erupt::{
     extensions::{
         khr_surface::{self as vks, KhrSurfaceInstanceLoaderExt as _},
+        khr_swapchain::SwapchainKHR,
         khr_swapchain::{self as vksw, KhrSwapchainDeviceLoaderExt as _},
     },
     vk1_0,
-};
-use illume::{
-    out_of_host_memory, DeviceTrait, Extent2d, Format, Image, ImageInfo,
-    ImageUsage, MemoryUsageFlags, OutOfMemory, PresentMode, Samples, Semaphore,
-    Surface, SurfaceError, SwapchainImage, SwapchainImageInfo, SwapchainTrait,
 };
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc, Weak,
 };
 
-#[derive(Debug)]
+define_handle! {
+    pub struct SwapchainImage {
+        pub info: SwapchainImageInfo,
+        handle: SwapchainKHR,
+        supported_families: Arc<Vec<bool>>,
+        counter: Weak<AtomicUsize>,
+    }
+}
 
+impl Drop for SwapchainImage {
+    fn drop(&mut self) {
+        if let Some(counter) = self.inner.counter.upgrade() {
+            counter.fetch_sub(1, Ordering::Release);
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SwapchainImageInfo {
+    /// Swapchain image.
+    pub image: Image,
+
+    /// Semaphore that should be waited upon before accessing an image.
+    ///
+    /// Acquisition semaphore management may be rather complex,
+    /// so keep that to the implementation.
+    pub wait: Semaphore,
+
+    /// Semaphore that should be signaled after last image access.
+    ///
+    /// Presentation semaphore management may be rather complex,
+    /// so keep that to the implementation.
+    pub signal: Semaphore,
+}
+
+#[derive(Debug)]
 struct SwapchainImageAndSemaphores {
     image: Image,
     acquire: [Semaphore; 3],
@@ -32,7 +67,6 @@ struct SwapchainImageAndSemaphores {
 }
 
 #[derive(Debug)]
-
 struct SwapchainInner {
     handle: vksw::SwapchainKHR,
     index: usize,
@@ -44,35 +78,35 @@ struct SwapchainInner {
 }
 
 #[derive(Debug)]
-pub(super) struct EruptSwapchain {
+pub struct Swapchain {
     inner: Option<SwapchainInner>,
     retired: Vec<SwapchainInner>,
     retired_offset: u64,
     free_semaphore: Semaphore,
-    device: Weak<EruptDevice>,
+    device: WeakDevice,
     surface: Surface,
     supported_families: Arc<Vec<bool>>,
 }
 
-impl EruptSwapchain {
-    pub(super) fn new(
+impl Swapchain {
+    pub(crate) fn new(
         surface: &Surface,
-        device: &Arc<EruptDevice>,
+        device: &Device,
     ) -> Result<Self, SurfaceError> {
-        let handle = surface.erupt_ref(&*device.graphics).handle;
+        let handle = surface.handle();
 
         assert!(
-            device.graphics.instance.khr_surface.is_some(),
+            device.graphics().instance.khr_surface.is_some(),
             "Should be enabled given that there is a Surface"
         );
 
-        let instance = &device.graphics.instance;
+        let instance = &device.graphics().instance;
 
-        let supported_families = (0..device.properties.family.len() as u32)
+        let supported_families = (0..device.properties().family.len() as u32)
             .map(|family| unsafe {
                 instance
                     .get_physical_device_surface_support_khr(
-                        device.physical,
+                        device.physical(),
                         family,
                         handle,
                         None,
@@ -95,15 +129,9 @@ impl EruptSwapchain {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        if surface
-            .erupt_ref(&*device.graphics)
-            .used
-            .fetch_or(true, Ordering::SeqCst)
-        {
-            return Err(SurfaceError::AlreadyUsed);
-        }
+        surface.mark_used()?;
 
-        Ok(EruptSwapchain {
+        Ok(Swapchain {
             surface: surface.clone(),
             free_semaphore: device
                 .clone()
@@ -112,14 +140,14 @@ impl EruptSwapchain {
             inner: None,
             retired: Vec::new(),
             retired_offset: 0,
-            device: Arc::downgrade(device),
+            device: device.downgrade(),
             supported_families: Arc::new(supported_families),
         })
     }
 }
 
-impl SwapchainTrait for EruptSwapchain {
-    fn configure(
+impl Swapchain {
+    pub fn configure(
         &mut self,
         usage: ImageUsage,
         format: Format,
@@ -130,22 +158,22 @@ impl SwapchainTrait for EruptSwapchain {
             .upgrade()
             .ok_or_else(|| SurfaceError::SurfaceLost)?;
 
-        let surface = self.surface.erupt_ref(&*device.graphics).handle;
+        let surface = self.surface.handle();
 
         assert!(
-            device.graphics.instance.khr_surface.is_some(),
+            device.graphics().instance.khr_surface.is_some(),
             "Should be enabled given that there is a Swapchain"
         );
         assert!(
-            device.logical.khr_swapchain.is_some(),
+            device.logical().khr_swapchain.is_some(),
             "Should be enabled given that there is a Swapchain"
         );
-        let instance = &device.graphics.instance;
-        let logical = &device.logical;
+        let instance = &device.graphics().instance;
+        let logical = &device.logical();
 
         let caps = unsafe {
             instance.get_physical_device_surface_capabilities_khr(
-                device.physical,
+                device.physical(),
                 surface,
                 None,
             )
@@ -170,7 +198,7 @@ impl SwapchainTrait for EruptSwapchain {
 
         let formats = unsafe {
             instance.get_physical_device_surface_formats_khr(
-                device.physical,
+                device.physical(),
                 surface,
                 None,
             )
@@ -201,7 +229,7 @@ impl SwapchainTrait for EruptSwapchain {
 
         let modes = unsafe {
             instance.get_physical_device_surface_present_modes_khr(
-                device.physical,
+                device.physical(),
                 surface,
                 None,
             )
@@ -284,7 +312,7 @@ impl SwapchainTrait for EruptSwapchain {
                 SurfaceError::OutOfMemory { source: err }
             })?;
 
-        let index = device.swapchains.lock().insert(handle);
+        let index = device.swapchains().lock().insert(handle);
 
         self.inner = Some(SwapchainInner {
             handle,
@@ -294,12 +322,6 @@ impl SwapchainTrait for EruptSwapchain {
                 .zip(semaphores)
                 .map(|(i, (a, r))| SwapchainImageAndSemaphores {
                     image: Image::make(
-                        EruptImage {
-                            handle: i,
-                            owner: self.device.clone(),
-                            index: 0,
-                            block: None,
-                        },
                         ImageInfo {
                             extent: Extent2d::from_erupt(caps.current_extent)
                                 .into(),
@@ -310,6 +332,10 @@ impl SwapchainTrait for EruptSwapchain {
                             usage,
                             memory: MemoryUsageFlags::empty(),
                         },
+                        i,
+                        None,
+                        self.device.clone(),
+                        !0,
                     ),
                     acquire: a,
                     acquire_index: 0,
@@ -326,7 +352,7 @@ impl SwapchainTrait for EruptSwapchain {
         Ok(())
     }
 
-    fn acquire_image(
+    pub fn acquire_image(
         &mut self,
     ) -> Result<Option<SwapchainImage>, SurfaceError> {
         let device = self
@@ -335,12 +361,13 @@ impl SwapchainTrait for EruptSwapchain {
             .ok_or_else(|| SurfaceError::SurfaceLost)?;
 
         assert!(
-            device.logical.khr_swapchain.is_some(),
+            device.logical().khr_swapchain.is_some(),
             "Should be enabled given that there is a Swapchain"
         );
 
         if let Some(inner) = self.inner.as_mut() {
             if inner.counter.load(Ordering::Acquire) >= inner.images.len() {
+                tracing::error!("Acquire would block");
                 return Ok(None);
             }
 
@@ -348,11 +375,11 @@ impl SwapchainTrait for EruptSwapchain {
             let wait = self.free_semaphore.clone();
 
             let index = unsafe {
-                device.logical.acquire_next_image_khr(
+                device.logical().acquire_next_image_khr(
                     inner.handle,
                     !0, /* wait indefinitely. This is OK as we never try to
                          * acquire more images than there is in swaphain. */
-                    wait.erupt_ref_unchecked().handle,
+                    unsafe { wait.handle(&device) },
                     vk1_0::Fence::null(),
                     None,
                 )
@@ -379,18 +406,16 @@ impl SwapchainTrait for EruptSwapchain {
             image_and_semaphores.release_index += 1;
 
             Ok(Some(SwapchainImage::make(
-                EruptSwapchainImage {
-                    counter: Arc::downgrade(&inner.counter),
-                    swapchain: inner.handle,
-                    index,
-                    supported_families: self.supported_families.clone(),
-                    owner: self.device.clone(),
-                },
                 SwapchainImageInfo {
                     image: image_and_semaphores.image.clone(),
                     wait,
                     signal,
                 },
+                inner.handle,
+                self.supported_families.clone(),
+                Arc::downgrade(&inner.counter),
+                self.device.clone(),
+                index as usize,
             )))
         } else {
             Ok(None)
@@ -398,7 +423,7 @@ impl SwapchainTrait for EruptSwapchain {
     }
 }
 
-impl EruptSwapchain {
+impl Swapchain {
     // /// Destroys retired swapchains that are no longer used
     // ///
     // /// # Safety

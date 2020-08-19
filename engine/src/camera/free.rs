@@ -3,7 +3,9 @@ use {
     crate::engine::{System, SystemContext},
     std::f32::consts::{FRAC_PI_2, PI},
     ultraviolet::{Isometry3, Rotor3, Vec3},
-    winit::event::{DeviceEvent, ElementState, Event, VirtualKeyCode},
+    winit::event::{
+        DeviceEvent, ElementState, Event, KeyboardInput, VirtualKeyCode,
+    },
 };
 
 const TAU: f32 = 6.28318530717958647692528676655900577f32;
@@ -30,6 +32,7 @@ pub struct FreeCameraSystem {
     pitch_factor: f32,
     yaw_factor: f32,
     speed: f32,
+    enabled: bool,
 }
 
 impl FreeCameraSystem {
@@ -41,6 +44,7 @@ impl FreeCameraSystem {
             pitch_factor: 1.0,
             yaw_factor: 1.0,
             speed: 1.0,
+            enabled: true,
         }
     }
 
@@ -69,17 +73,18 @@ impl System for FreeCameraSystem {
             for event in ctx.input.read() {
                 match event {
                     Event::DeviceEvent { event, .. } => match event {
-                        &DeviceEvent::MouseMotion { delta: (x, y) } => {
-                            // let x = Rotor3::from_rotation_xz(
-                            //     x as f32 * delta,
-                            // );
-                            // let y = Rotor3::from_rotation_yz(
-                            //     -y as f32 * delta,
-                            // );
-                            // iso.rotation = x * iso.rotation * y;
-
-                            self.pitch -= y as f32 * delta * self.pitch_factor;
-                            self.yaw += x as f32 * delta * self.yaw_factor;
+                        DeviceEvent::Key(KeyboardInput {
+                            virtual_keycode: Some(VirtualKeyCode::Z),
+                            state: ElementState::Released,
+                            ..
+                        }) => {
+                            self.enabled = !self.enabled;
+                        }
+                        &DeviceEvent::MouseMotion { delta: (x, y) }
+                            if self.enabled =>
+                        {
+                            self.pitch -= y as f32 * self.pitch_factor;
+                            self.yaw += x as f32 * self.yaw_factor;
 
                             self.pitch =
                                 self.pitch.min(FRAC_PI_2).max(-FRAC_PI_2);
@@ -96,7 +101,7 @@ impl System for FreeCameraSystem {
                                 0.0, self.pitch, self.yaw,
                             )
                         }
-                        DeviceEvent::Key(input) => {
+                        DeviceEvent::Key(input) if self.enabled => {
                             let flag = match input.virtual_keycode {
                                 Some(VirtualKeyCode::W) => Direction::FORWARD,
                                 Some(VirtualKeyCode::S) => Direction::BACKWARD,

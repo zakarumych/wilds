@@ -1,0 +1,34 @@
+[package]
+name = "animate"
+version = "0.1.0"
+authors = ["Zakarum <zakarumych@ya.ru>"]
+edition = "2018"
+
+[dependencies]
+
+# Physics
+ncollide3d = "0.23"
+
+# Linear algebra
+nalgebra = "0.21"
+ultraviolet = "0.4"
+
+# Low-Level
+bytemuck = "1.2"
+bumpalo = { version = "3.4", features = ["collections"] }
+
+# Error handling
+eyre = "0.6"
+color-eyre = "0.5"
+thiserror = "1.0"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_bytes = "0.11"
+ron = "0.6"
+
+# Tracing and profiling
+tracing = { version = "0.1", features = ["log"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "0.2", features = ["macros", "rt-threaded", "blocking"] }

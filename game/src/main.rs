@@ -22,13 +22,16 @@ use {
         clocks::Clocks,
         engine::Engine,
         fps_counter::FpsCounter,
-        light::{DirectionalLight, SkyLight},
+        light::{DirectionalLight, PointLight, SkyLight},
         physics::Physics,
-        renderer::{Renderable, Renderer},
+        renderer::{RenderConstants, Renderable, Renderer},
     },
     winit::{
         dpi::PhysicalSize,
-        event::{Event, WindowEvent},
+        event::{
+            DeviceEvent, ElementState, Event, KeyboardInput, VirtualKeyCode,
+            WindowEvent,
+        },
         window::WindowBuilder,
     },
 };
@@ -42,14 +45,16 @@ fn main() -> Result<(), Report> {
             .resources
             .insert(wilds::physics::Constants { time_factor: 0.1 });
 
-        engine.add_system(Physics::new());
+        // engine.add_system(Physics::new());
 
         let window = engine.build_window(
             WindowBuilder::new().with_inner_size(PhysicalSize {
-                width: 1280,
-                height: 720,
+                width: 640,
+                height: 480,
             }),
         )?;
+
+        let aspect = 640.0 / 480.0;
 
         let mut bump = Bump::with_capacity(1024 * 1024);
         let mut renderer = Renderer::new(&window)?;
@@ -57,14 +62,16 @@ fn main() -> Result<(), Report> {
 
         let sunlight = Vec3::new(255.0, 207.0, 72.0)
             .map(|c| c / 255.0)
-            .map(|c| c / (1.3 - c));
+            .map(|c| c / (1.3 - c))
+            .map(|c| c * 5.0);
         let skylight = Vec3::new(117.0, 187.0, 253.0)
             .map(|c| c / 255.0)
-            .map(|c| c / (1.3 - c));
+            .map(|c| c / (1.3 - c))
+            .map(|c| c * 5.0);
 
         engine.world.spawn((
             DirectionalLight {
-                direction: Vec3::new(-3.0, -3.0, -3.0) * 30.0,
+                direction: Vec3::new(-30.0, -30.0, -30.0),
                 radiance: sunlight.into(),
             },
             SkyLight {
@@ -72,63 +79,85 @@ fn main() -> Result<(), Report> {
             },
         ));
 
-        // let mut city_opt = Some(engine.assets.load_with_format(
-        //     "thor_and_the_midgard_serpent/scene.gltf".to_owned(),
-        //     GltfFormat {
-        //         raster: false,
-        //         blas: true,
-        //     },
-        // ));
+        engine.world.spawn((
+            PointLight {
+                radiance: [10.0, 10.0, 10.0],
+            },
+            Isometry3::new(Vec3::new(0.0, 0.0, 0.0), Rotor3::identity()),
+        ));
 
-        let _terrain = TerrainAsset::load(
-            &engine,
-            "terrain/0001.png".to_owned(),
-            TerrainFormat {
+        engine.add_system(|ctx: wilds::engine::SystemContext<'_>| {
+            let mut query =
+                ctx.world.query::<&mut Isometry3>().with::<PointLight>();
+
+            for (_, iso) in query.iter() {
+                iso.translation.x =
+                    (ctx.clocks.step - ctx.clocks.start).as_secs_f32().sin();
+                iso.translation.y = 5.0
+                    + 3.0
+                        * (ctx.clocks.step - ctx.clocks.start)
+                            .as_secs_f32()
+                            .cos();
+            }
+        });
+
+        let mut gltf_opt = Some(engine.assets.load_with_format(
+            "sponza/Sponza.gltf".to_owned(),
+            GltfFormat {
                 raster: false,
                 blas: true,
-                factor: 3.0,
             },
-            Isometry3::identity(),
-        );
+        ));
 
-        let pawn = PawnAsset::load(
-            &engine,
-            "pawn.ron".to_owned(),
-            RonFormat,
-            Isometry3::new(Vec3::new(0.0, 5.0, 0.0), Rotor3::identity()),
-        );
+        // let _terrain = TerrainAsset::load(
+        //     &engine,
+        //     "terrain/0001.png".to_owned(),
+        //     TerrainFormat {
+        //         raster: false,
+        //         blas: true,
+        //         factor: 3.0,
+        //     },
+        //     Isometry3::identity(),
+        // );
 
-        let pawn2 = PawnAsset::load(
-            &engine,
-            "pawn.ron".to_owned(),
-            RonFormat,
-            Isometry3::new(Vec3::new(1.0, 10.0, 1.0), Rotor3::identity()),
-        );
+        // let pawn = PawnAsset::load(
+        //     &engine,
+        //     "pawn.ron".to_owned(),
+        //     RonFormat,
+        //     Isometry3::new(Vec3::new(0.0, 5.0, 0.0), Rotor3::identity()),
+        // );
 
-        engine.add_system(player::Player::new(&window, pawn));
+        // let pawn2 = PawnAsset::load(
+        //     &engine,
+        //     "pawn.ron".to_owned(),
+        //     RonFormat,
+        //     Isometry3::new(Vec3::new(1.0, 10.0, 1.0), Rotor3::identity()),
+        // );
+
+        // engine.add_system(player::Player::new(&window, pawn));
 
         engine.world.spawn((
             Camera::Perspective {
                 vertical_fov: std::f32::consts::PI / 3.0,
-                aspect_ratio: 1280.0 / 720.0,
+                aspect_ratio: aspect,
                 z_near: 0.1,
                 z_far: 1000.0,
             },
             Isometry3::identity(),
-            FollowingCamera { follows: pawn },
-            // FreeCamera,
+            // FollowingCamera { follows: pawn },
+            FreeCamera,
         ));
 
         engine.add_system(
             FollowingCameraSystem::new()
-                .with_factor(0.3, 0.3)
+                .with_factor(0.01, 0.01 * aspect)
                 .with_speed(50.0),
         );
 
         engine.add_system(
             FreeCameraSystem::new()
-                .with_factor(0.3, 0.3)
-                .with_speed(50.0),
+                .with_factor(0.003, 0.003)
+                .with_speed(3.0),
         );
 
         window.request_redraw();
@@ -139,19 +168,20 @@ fn main() -> Result<(), Report> {
         let mut reg = Region::new();
 
         loop {
-            // if let Some(city) = &mut city_opt {
-            //     if let Some(city) = city.get() {
-            //         tracing::info!("Scene loaded");
-            //         load_gltf_scene(
-            //             city,
-            //             &mut engine.world,
-            //             Isometry3::identity(),
-            //             0.01,
-            //         );
+            if let Some(gltf) = &mut gltf_opt {
+                if let Some(gltf) = gltf.get() {
+                    tracing::info!("Scene loaded");
+                    load_gltf_scene(
+                        gltf,
+                        &mut engine.world,
+                        Isometry3::identity(),
+                        1.0,
+                    );
 
-            //         city_opt = None;
-            //     }
-            // }
+                    gltf_opt = None;
+                }
+            }
+
             // Main game loop
             match engine.next().await {
                 Event::WindowEvent {
@@ -191,7 +221,29 @@ fn main() -> Result<(), Report> {
                     ticker -= clock.delta;
 
                     tracing::trace!("Request redraw");
-                    renderer.draw(&mut engine.world, &clock, &bump)?;
+                    renderer.draw(
+                        &mut engine.world,
+                        &mut engine.resources,
+                        &clock,
+                        &bump,
+                    )?;
+                }
+                Event::DeviceEvent {
+                    event:
+                        DeviceEvent::Key(KeyboardInput {
+                            virtual_keycode: Some(VirtualKeyCode::F),
+                            state: ElementState::Released,
+                            ..
+                        }),
+                    ..
+                } => {
+                    let filter_enabled = &mut engine
+                        .resources
+                        .entry::<RenderConstants>()
+                        .or_insert_with(RenderConstants::new)
+                        .filter_enabled;
+
+                    *filter_enabled = !*filter_enabled;
                 }
                 _ => {}
             }

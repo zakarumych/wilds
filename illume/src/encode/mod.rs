@@ -1,8 +1,31 @@
 use crate::{
+    accel::{
+        AccelerationStructureBuildGeometryInfo, AccelerationStructureGeometry,
+        AccelerationStructureLevel, IndexData,
+    },
     access::supported_access,
+    buffer::{Buffer, StridedBufferRegion},
     convert::{oom_error_from_erupt, ToErupt},
-    device::EruptDevice,
-    handle::EruptResource as _,
+    descriptor::DescriptorSet,
+    device::{Device, WeakDevice},
+    format::{FormatDescription, FormatType, Repr},
+    framebuffer::Framebuffer,
+    image::{
+        Image, ImageBlit, ImageMemoryBarrier, ImageSubresourceLayers, Layout,
+    },
+    pipeline::{
+        GraphicsPipeline, PipelineLayout, RayTracingPipeline,
+        ShaderBindingTable, Viewport,
+    },
+    queue::QueueCapabilityFlags,
+    queue::QueueId,
+    render_pass::{
+        AttachmentLoadOp, ClearValue, RenderPass,
+        RENDERPASS_SMALLVEC_ATTACHMENTS,
+    },
+    sampler::Filter,
+    stage::PipelineStageFlags,
+    Extent3d, IndexType, Offset3d, OutOfMemory, Rect2d,
 };
 use erupt::{
     extensions::khr_ray_tracing::{
@@ -10,34 +33,598 @@ use erupt::{
     },
     vk1_0::{self, Vk10DeviceLoaderExt as _},
 };
-use illume::{
-    AccelerationStructureGeometry, AccelerationStructureLevel,
-    AttachmentLoadOp, ClearValue, Command, CommandBufferTrait,
-    FormatDescription, FormatType, IndexData, IndexType, OutOfMemory, Repr,
-    StridedBufferRegion, SMALLVEC_ATTACHMENTS,
-};
 use smallvec::SmallVec;
 use std::{
     convert::TryFrom as _,
     fmt::{self, Debug},
-    sync::Weak,
+    ops::Range,
 };
 
-pub(super) struct EruptCommandBuffer {
-    pub(super) handle: vk1_0::CommandBuffer,
-    pub(super) device: Weak<EruptDevice>,
-    pub(super) family: u32,
-    pub(super) queue: u32,
-    pub(super) recording: bool,
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
+pub struct BufferCopy {
+    pub src_offset: u64,
+    pub dst_offset: u64,
+    pub size: u64,
 }
 
-impl Debug for EruptCommandBuffer {
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
+pub struct ImageCopy {
+    pub src_subresource: ImageSubresourceLayers,
+    pub src_offset: Offset3d,
+    pub dst_subresource: ImageSubresourceLayers,
+    pub dst_offset: Offset3d,
+    pub extent: Extent3d,
+}
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
+pub struct BufferImageCopy {
+    pub buffer_offset: u64,
+    pub buffer_row_length: u32,
+    pub buffer_image_height: u32,
+    pub image_subresource: ImageSubresourceLayers,
+    pub image_offset: Offset3d,
+    pub image_extent: Extent3d,
+}
+
+#[derive(Debug)]
+pub enum Command<'a> {
+    BeginRenderPass {
+        pass: &'a RenderPass,
+        framebuffer: &'a Framebuffer,
+        clears: &'a [ClearValue],
+    },
+    EndRenderPass,
+
+    BindGraphicsPipeline {
+        pipeline: &'a GraphicsPipeline,
+    },
+
+    BindRayTracingPipeline {
+        pipeline: &'a RayTracingPipeline,
+    },
+
+    BindGraphicsDescriptorSets {
+        layout: &'a PipelineLayout,
+        first_set: u32,
+        sets: &'a [DescriptorSet],
+        dynamic_offsets: &'a [u32],
+    },
+
+    BindComputeDescriptorSets {
+        layout: &'a PipelineLayout,
+        first_set: u32,
+        sets: &'a [DescriptorSet],
+        dynamic_offsets: &'a [u32],
+    },
+
+    BindRayTracingDescriptorSets {
+        layout: &'a PipelineLayout,
+        first_set: u32,
+        sets: &'a [DescriptorSet],
+        dynamic_offsets: &'a [u32],
+    },
+
+    SetViewport {
+        viewport: Viewport,
+    },
+
+    SetScissor {
+        scissor: Rect2d,
+    },
+
+    Draw {
+        vertices: Range<u32>,
+        instances: Range<u32>,
+    },
+
+    DrawIndexed {
+        indices: Range<u32>,
+        vertex_offset: i32,
+        instances: Range<u32>,
+    },
+
+    UpdateBuffer {
+        buffer: &'a Buffer,
+        offset: u64,
+        data: &'a [u8],
+    },
+
+    BindVertexBuffers {
+        first: u32,
+        buffers: &'a [(Buffer, u64)],
+    },
+
+    BindIndexBuffer {
+        buffer: &'a Buffer,
+        offset: u64,
+        index_type: IndexType,
+    },
+
+    BuildAccelerationStructure {
+        infos: &'a [AccelerationStructureBuildGeometryInfo<'a>],
+    },
+
+    TraceRays {
+        shader_binding_table: &'a ShaderBindingTable,
+        extent: Extent3d,
+    },
+
+    CopyBuffer {
+        src_buffer: &'a Buffer,
+        dst_buffer: &'a Buffer,
+        regions: &'a [BufferCopy],
+    },
+
+    CopyImage {
+        src_image: &'a Image,
+        src_layout: Layout,
+        dst_image: &'a Image,
+        dst_layout: Layout,
+        regions: &'a [ImageCopy],
+    },
+
+    CopyBufferImage {
+        src_buffer: &'a Buffer,
+        dst_image: &'a Image,
+        dst_layout: Layout,
+        regions: &'a [BufferImageCopy],
+    },
+
+    BlitImage {
+        src_image: &'a Image,
+        src_layout: Layout,
+        dst_image: &'a Image,
+        dst_layout: Layout,
+        regions: &'a [ImageBlit],
+        filter: Filter,
+    },
+
+    PipelineBarrier {
+        src: PipelineStageFlags,
+        dst: PipelineStageFlags,
+        images: &'a [ImageMemoryBarrier<'a>],
+    },
+}
+
+/// Basis for encoding capabilities.
+/// Implements encoding of commands that can be inside and outside of render
+/// pass.
+#[derive(Debug)]
+pub struct EncoderCommon<'a> {
+    capabilities: QueueCapabilityFlags,
+    commands: Vec<Command<'a>>,
+}
+
+impl<'a> EncoderCommon<'a> {
+    pub fn set_viewport(&mut self, viewport: Viewport) {
+        assert!(self.capabilities.supports_graphics());
+
+        self.commands.push(Command::SetViewport { viewport })
+    }
+
+    pub fn set_scissor(&mut self, scissor: Rect2d) {
+        assert!(self.capabilities.supports_graphics());
+
+        self.commands.push(Command::SetScissor { scissor })
+    }
+
+    pub fn bind_graphics_pipeline(&mut self, pipeline: &'a GraphicsPipeline) {
+        assert!(self.capabilities.supports_graphics());
+
+        self.commands
+            .push(Command::BindGraphicsPipeline { pipeline })
+    }
+
+    // pub fn bind_compute_pipeline(&mut self, pipeline: &'a ComputePipeline) {
+    //     assert!(self.capabilities.supports_compute());
+    //     self.commands
+    //         .push(Command::BindComputePipeline { pipeline })
+    // }
+
+    pub fn bind_ray_tracing_pipeline(
+        &mut self,
+        pipeline: &'a RayTracingPipeline,
+    ) {
+        assert!(self.capabilities.supports_compute());
+
+        self.commands
+            .push(Command::BindRayTracingPipeline { pipeline })
+    }
+
+    pub fn bind_vertex_buffers(
+        &mut self,
+        first: u32,
+        buffers: &'a [(Buffer, u64)],
+    ) {
+        assert!(self.capabilities.supports_graphics());
+
+        self.commands
+            .push(Command::BindVertexBuffers { first, buffers })
+    }
+
+    pub fn bind_index_buffer(
+        &mut self,
+        buffer: &'a Buffer,
+        offset: u64,
+        index_type: IndexType,
+    ) {
+        assert!(self.capabilities.supports_graphics());
+
+        self.commands.push(Command::BindIndexBuffer {
+            buffer,
+            offset,
+            index_type,
+        })
+    }
+
+    pub fn bind_graphics_descriptor_sets(
+        &mut self,
+        layout: &'a PipelineLayout,
+        first_set: u32,
+        sets: &'a [DescriptorSet],
+        dynamic_offsets: &'a [u32],
+    ) {
+        assert!(self.capabilities.supports_graphics());
+
+        self.commands.push(Command::BindGraphicsDescriptorSets {
+            layout,
+            first_set,
+            sets,
+            dynamic_offsets,
+        });
+    }
+
+    pub fn bind_compute_descriptor_sets(
+        &mut self,
+        layout: &'a PipelineLayout,
+        first_set: u32,
+        sets: &'a [DescriptorSet],
+        dynamic_offsets: &'a [u32],
+    ) {
+        assert!(self.capabilities.supports_compute());
+
+        self.commands.push(Command::BindComputeDescriptorSets {
+            layout,
+            first_set,
+            sets,
+            dynamic_offsets,
+        });
+    }
+
+    pub fn bind_ray_tracing_descriptor_sets(
+        &mut self,
+        layout: &'a PipelineLayout,
+        first_set: u32,
+        sets: &'a [DescriptorSet],
+        dynamic_offsets: &'a [u32],
+    ) {
+        assert!(self.capabilities.supports_compute());
+
+        self.commands.push(Command::BindRayTracingDescriptorSets {
+            layout,
+            first_set,
+            sets,
+            dynamic_offsets,
+        });
+    }
+
+    pub fn pipeline_barrier(
+        &mut self,
+        src: PipelineStageFlags,
+        dst: PipelineStageFlags,
+    ) {
+        self.commands.push(Command::PipelineBarrier {
+            src,
+            dst,
+            images: &[],
+        });
+    }
+
+    pub fn image_barriers(
+        &mut self,
+        src: PipelineStageFlags,
+        dst: PipelineStageFlags,
+        images: &'a [ImageMemoryBarrier<'a>],
+    ) {
+        self.commands
+            .push(Command::PipelineBarrier { src, dst, images });
+    }
+}
+
+/// Command encoder that can encode commands outside render pass.
+#[derive(Debug)]
+
+pub struct Encoder<'a> {
+    inner: EncoderCommon<'a>,
+    command_buffer: CommandBuffer,
+}
+
+impl<'a> std::ops::Deref for Encoder<'a> {
+    type Target = EncoderCommon<'a>;
+
+    fn deref(&self) -> &EncoderCommon<'a> {
+        &self.inner
+    }
+}
+
+impl<'a> std::ops::DerefMut for Encoder<'a> {
+    fn deref_mut(&mut self) -> &mut EncoderCommon<'a> {
+        &mut self.inner
+    }
+}
+
+impl<'a> Encoder<'a> {
+    pub(crate) fn new(
+        command_buffer: CommandBuffer,
+        capabilities: QueueCapabilityFlags,
+    ) -> Self {
+        Encoder {
+            inner: EncoderCommon {
+                capabilities,
+                commands: Vec::new(),
+            },
+            command_buffer,
+        }
+    }
+
+    /// Begins render pass and returns `RenderPassEncoder` to encode commands of
+    /// the render pass. `RenderPassEncoder` borrows `Encoder`.
+    /// To continue use this `Encoder` returned `RenderPassEncoder` must be
+    /// dropped which implicitly ends render pass.
+    ///
+    /// `pass` - render pass to encode.
+    /// `framebuffer` - a framebuffer (set of attachments) for render pass to
+    /// use. `clears` - an array of clear values.
+    ///            render pass will clear attachments with `load_op ==
+    /// AttachmentLoadOp::Clear` using those values.            they will be
+    /// used in order.
+
+    pub fn with_render_pass(
+        &mut self,
+        pass: &'a RenderPass,
+        framebuffer: &'a Framebuffer,
+        clears: &'a [ClearValue],
+    ) -> RenderPassEncoder<'_, 'a> {
+        assert!(self.inner.capabilities.supports_graphics());
+
+        self.inner.commands.push(Command::BeginRenderPass {
+            pass,
+            framebuffer,
+            clears,
+        });
+
+        RenderPassEncoder {
+            inner: &mut self.inner,
+        }
+    }
+
+    /// Updates a buffer's contents from host memory
+
+    pub fn update_buffer<T>(
+        &mut self,
+        buffer: &'a Buffer,
+        offset: u64,
+        data: &'a [T],
+    ) {
+        let data = unsafe {
+            std::slice::from_raw_parts(
+                data.as_ptr() as *const u8,
+                std::mem::size_of_val(data),
+            )
+        };
+
+        self.inner.commands.push(Command::UpdateBuffer {
+            buffer,
+            offset,
+            data,
+        })
+    }
+
+    /// Builds acceleration structures.
+
+    pub fn build_acceleration_structure(
+        &mut self,
+        infos: &'a [AccelerationStructureBuildGeometryInfo<'a>],
+    ) {
+        assert!(self.inner.capabilities.supports_compute());
+
+        if infos.is_empty() {
+            return;
+        }
+
+        // Checks.
+        for (i, info) in infos.iter().enumerate() {
+            if let Some(src) = &info.src {
+                for (j, info) in infos[..i].iter().enumerate() {
+                    assert_ne!(
+                        &info.dst, src,
+                        "`infos[{}].src` and `infos[{}].dst` collision",
+                        i, j,
+                    );
+                }
+            }
+
+            let dst = &info.dst;
+
+            for (j, info) in infos[..i].iter().enumerate() {
+                assert_ne!(
+                    info.src.as_ref(),
+                    Some(dst),
+                    "`infos[{}].src` and `infos[{}].dst` collision",
+                    j,
+                    i,
+                );
+            }
+
+            assert!(
+                info.geometries.len() <= dst.info().geometries.len(),
+                "Wrong number of geometries supplied to build: {}. Acceleration structure has: {}",
+                info.geometries.len(),
+                dst.info().geometries.len()
+            );
+        }
+
+        self.inner
+            .commands
+            .push(Command::BuildAccelerationStructure { infos })
+    }
+
+    pub fn trace_rays(
+        &mut self,
+        shader_binding_table: &'a ShaderBindingTable,
+        extent: Extent3d,
+    ) {
+        assert!(self.inner.capabilities.supports_compute());
+
+        self.commands.push(Command::TraceRays {
+            shader_binding_table,
+            extent,
+        })
+    }
+
+    pub fn copy_buffer(
+        &mut self,
+        src_buffer: &'a Buffer,
+        dst_buffer: &'a Buffer,
+        regions: &'a [BufferCopy],
+    ) {
+        self.commands.push(Command::CopyBuffer {
+            src_buffer,
+            dst_buffer,
+            regions,
+        })
+    }
+
+    pub fn copy_image(
+        &mut self,
+        src_image: &'a Image,
+        src_layout: Layout,
+        dst_image: &'a Image,
+        dst_layout: Layout,
+        regions: &'a [ImageCopy],
+    ) {
+        self.commands.push(Command::CopyImage {
+            src_image,
+            src_layout,
+            dst_image,
+            dst_layout,
+            regions,
+        })
+    }
+
+    pub fn copy_buffer_to_image(
+        &mut self,
+        src_buffer: &'a Buffer,
+        dst_image: &'a Image,
+        dst_layout: Layout,
+        regions: &'a [BufferImageCopy],
+    ) {
+        self.commands.push(Command::CopyBufferImage {
+            src_buffer,
+            dst_image,
+            dst_layout,
+            regions,
+        })
+    }
+
+    pub fn blit_image(
+        &mut self,
+        src_image: &'a Image,
+        src_layout: Layout,
+        dst_image: &'a Image,
+        dst_layout: Layout,
+        regions: &'a [ImageBlit],
+        filter: Filter,
+    ) {
+        assert!(self.capabilities.supports_graphics());
+
+        self.commands.push(Command::BlitImage {
+            src_image,
+            src_layout,
+            dst_image,
+            dst_layout,
+            regions,
+            filter,
+        })
+    }
+
+    /// Flushes commands recorded into this encoder to the underlying command
+    /// buffer.
+
+    pub fn finish(mut self) -> CommandBuffer {
+        self.command_buffer
+            .write(&self.inner.commands)
+            .expect("TODO: Handle command buffer writing error");
+
+        self.command_buffer
+    }
+}
+
+/// Command encoder that can encode commands inside render pass.
+#[derive(Debug)]
+
+pub struct RenderPassEncoder<'a, 'b> {
+    inner: &'a mut EncoderCommon<'b>,
+}
+
+impl<'a, 'b> RenderPassEncoder<'a, 'b> {
+    pub fn draw(&mut self, vertices: Range<u32>, instances: Range<u32>) {
+        self.inner.commands.push(Command::Draw {
+            vertices,
+            instances,
+        });
+    }
+
+    pub fn draw_indexed(
+        &mut self,
+        indices: Range<u32>,
+        vertex_offset: i32,
+        instances: Range<u32>,
+    ) {
+        self.inner.commands.push(Command::DrawIndexed {
+            indices,
+            vertex_offset,
+            instances,
+        });
+    }
+}
+
+impl Drop for RenderPassEncoder<'_, '_> {
+    fn drop(&mut self) {
+        self.inner.commands.push(Command::EndRenderPass);
+    }
+}
+
+impl<'a, 'b> std::ops::Deref for RenderPassEncoder<'a, 'b> {
+    type Target = EncoderCommon<'b>;
+
+    fn deref(&self) -> &EncoderCommon<'b> {
+        self.inner
+    }
+}
+
+impl<'a, 'b> std::ops::DerefMut for RenderPassEncoder<'a, 'b> {
+    fn deref_mut(&mut self) -> &mut EncoderCommon<'b> {
+        self.inner
+    }
+}
+
+pub struct CommandBuffer {
+    handle: vk1_0::CommandBuffer,
+    queue: QueueId,
+    device: WeakDevice,
+    recording: bool,
+}
+
+impl Debug for CommandBuffer {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         if fmt.alternate() {
-            fmt.debug_struct("EruptCommandBuffer")
+            fmt.debug_struct("CommandBuffer ")
                 .field("handle", &self.handle)
                 .field("device", &self.device)
-                .field("family", &self.family)
                 .field("queue", &self.queue)
                 .finish()
         } else {
@@ -46,12 +633,33 @@ impl Debug for EruptCommandBuffer {
     }
 }
 
-unsafe impl CommandBufferTrait for EruptCommandBuffer {
-    fn type_id(&self) -> std::any::TypeId {
-        std::any::TypeId::of::<Self>()
+impl CommandBuffer {
+    pub(crate) fn new(
+        handle: vk1_0::CommandBuffer,
+        queue: QueueId,
+        device: WeakDevice,
+    ) -> Self {
+        CommandBuffer {
+            handle,
+            queue,
+            device,
+            recording: false,
+        }
     }
 
-    fn write(&mut self, commands: &[Command<'_>]) -> Result<(), OutOfMemory> {
+    pub(crate) fn handle(&self, device: &Device) -> vk1_0::CommandBuffer {
+        assert!(self.device.is(device));
+        self.handle
+    }
+
+    pub fn queue(&self) -> QueueId {
+        self.queue
+    }
+
+    pub fn write(
+        &mut self,
+        commands: &[Command<'_>],
+    ) -> Result<(), OutOfMemory> {
         let device = match self.device.upgrade() {
             Some(device) => device,
             None => return Ok(()),
@@ -59,7 +667,7 @@ unsafe impl CommandBufferTrait for EruptCommandBuffer {
 
         if !self.recording {
             unsafe {
-                device.logical.begin_command_buffer(
+                device.logical().begin_command_buffer(
                     self.handle,
                     &vk1_0::CommandBufferBeginInfo::default()
                         .builder()
@@ -72,7 +680,7 @@ unsafe impl CommandBufferTrait for EruptCommandBuffer {
             self.recording = true;
         }
 
-        let logical = &device.logical;
+        let logical = &device.logical();
 
         for command in commands {
             match command {
@@ -109,17 +717,15 @@ unsafe impl CommandBufferTrait for EruptCommandBuffer {
                                     }
                                 }}
                             })
-                            .collect::<SmallVec<[_; SMALLVEC_ATTACHMENTS]>>();
+                            .collect::<SmallVec<[_; RENDERPASS_SMALLVEC_ATTACHMENTS]>>();
 
                     unsafe {
                         logical.cmd_begin_render_pass(
                             self.handle,
                             &vk1_0::RenderPassBeginInfo::default()
                                 .builder()
-                                .render_pass(pass.erupt_ref(&*device).handle)
-                                .framebuffer(
-                                    framebuffer.erupt_ref(&*device).handle,
-                                ) //FIXME: Check `framebuffer` belongs to the
+                                .render_pass(pass.handle(&device))
+                                .framebuffer(framebuffer.handle(&device)) //FIXME: Check `framebuffer` belongs to the
                                 // pass.
                                 .render_area(vk1_0::Rect2D {
                                     offset: vk1_0::Offset2D { x: 0, y: 0 },
@@ -140,7 +746,7 @@ unsafe impl CommandBufferTrait for EruptCommandBuffer {
                     logical.cmd_bind_pipeline(
                         self.handle,
                         vk1_0::PipelineBindPoint::GRAPHICS,
-                        pipeline.erupt_ref(&*device).handle,
+                        pipeline.handle(&device),
                     )
                 },
                 Command::Draw {
@@ -198,7 +804,7 @@ unsafe impl CommandBufferTrait for EruptCommandBuffer {
 
                     logical.cmd_update_buffer(
                         self.handle,
-                        buffer.erupt_ref(&*device).handle,
+                        buffer.handle(&device),
                         offset,
                         data.len() as _,
                         data.as_ptr() as _,
@@ -210,7 +816,7 @@ unsafe impl CommandBufferTrait for EruptCommandBuffer {
 
                     let buffers: SmallVec<[_; 8]> = buffers
                         .iter()
-                        .map(|(buffer, _)| buffer.erupt_ref(&*device).handle)
+                        .map(|(buffer, _)| buffer.handle(&device))
                         .collect();
 
                     logical.cmd_bind_vertex_buffers(
@@ -221,7 +827,7 @@ unsafe impl CommandBufferTrait for EruptCommandBuffer {
                     );
                 },
                 &Command::BuildAccelerationStructure { infos } => {
-                    assert!(device.logical.khr_ray_tracing.is_some());
+                    assert!(device.logical().khr_ray_tracing.is_some());
 
                     // Vulkan specific checks.
                     assert!(
@@ -232,7 +838,7 @@ unsafe impl CommandBufferTrait for EruptCommandBuffer {
                     for (i, info) in infos.iter().enumerate() {
                         if let Some(src) = &info.src {
                             assert!(
-                                src.is_owner(&*device),
+                                src.is_owner(&device),
                                 "`infos[{}].src` belongs to wrong device",
                                 i
                             );
@@ -241,7 +847,7 @@ unsafe impl CommandBufferTrait for EruptCommandBuffer {
                         let dst = &info.dst;
 
                         assert!(
-                            dst.is_owner(&*device),
+                            dst.is_owner(&device),
                             "`infos[{}].dst` belongs to wrong device",
                             i,
                         );
@@ -329,7 +935,7 @@ unsafe impl CommandBufferTrait for EruptCommandBuffer {
                             }
 
                             if let AccelerationStructureLevel::Bottom = info.dst.info().level {
-                                assert!(total_primitive_count <= device.properties.rt.max_primitive_count);
+                                assert!(total_primitive_count <= device.properties().rt.max_primitive_count);
                             }
 
                             offset .. geometries.len()
@@ -348,9 +954,9 @@ unsafe impl CommandBufferTrait for EruptCommandBuffer {
                             let src = info
                                 .src
                                 .as_ref()
-                                .map(|src| src.erupt_ref(&*device).handle)
+                                .map(|src| src.handle(&device))
                                 .unwrap_or_default();
-                            let dst = info.dst.erupt_ref(&*device).handle;
+                            let dst = info.dst.handle(&device);
 
                             let dst_info = info.dst.info();
                             vkrt::AccelerationStructureBuildGeometryInfoKHR::default()
@@ -373,7 +979,7 @@ unsafe impl CommandBufferTrait for EruptCommandBuffer {
                         .collect();
 
                     unsafe {
-                        device.logical.cmd_build_acceleration_structure_khr(
+                        device.logical().cmd_build_acceleration_structure_khr(
                             self.handle,
                             &build_infos,
                             &build_offsets,
@@ -387,7 +993,7 @@ unsafe impl CommandBufferTrait for EruptCommandBuffer {
                 } => unsafe {
                     logical.cmd_bind_index_buffer(
                         self.handle,
-                        buffer.erupt_ref(&*device).handle,
+                        buffer.handle(&device),
                         offset,
                         match index_type {
                             IndexType::U16 => vk1_0::IndexType::UINT16,
@@ -400,7 +1006,7 @@ unsafe impl CommandBufferTrait for EruptCommandBuffer {
                     logical.cmd_bind_pipeline(
                         self.handle,
                         vk1_0::PipelineBindPoint::RAY_TRACING_KHR,
-                        pipeline.erupt_ref(&*device).handle,
+                        pipeline.handle(&device),
                     )
                 },
 
@@ -413,11 +1019,11 @@ unsafe impl CommandBufferTrait for EruptCommandBuffer {
                     logical.cmd_bind_descriptor_sets(
                         self.handle,
                         vk1_0::PipelineBindPoint::GRAPHICS,
-                        layout.erupt_ref(&*device).handle,
+                        layout.handle(&device),
                         first_set,
                         &sets
                             .iter()
-                            .map(|set| set.erupt_ref(&*device).handle)
+                            .map(|set| set.handle(&device))
                             .collect::<SmallVec<[_; 8]>>(),
                         dynamic_offsets,
                     )
@@ -432,11 +1038,11 @@ unsafe impl CommandBufferTrait for EruptCommandBuffer {
                     logical.cmd_bind_descriptor_sets(
                         self.handle,
                         vk1_0::PipelineBindPoint::COMPUTE,
-                        layout.erupt_ref(&*device).handle,
+                        layout.handle(&device),
                         first_set,
                         &sets
                             .iter()
-                            .map(|set| set.erupt_ref(&*device).handle)
+                            .map(|set| set.handle(&device))
                             .collect::<SmallVec<[_; 8]>>(),
                         dynamic_offsets,
                     )
@@ -451,11 +1057,11 @@ unsafe impl CommandBufferTrait for EruptCommandBuffer {
                     logical.cmd_bind_descriptor_sets(
                         self.handle,
                         vk1_0::PipelineBindPoint::RAY_TRACING_KHR,
-                        layout.erupt_ref(&*device).handle,
+                        layout.handle(&device),
                         first_set,
                         &sets
                             .iter()
-                            .map(|set| set.erupt_ref(&*device).handle)
+                            .map(|set| set.handle(&device))
                             .collect::<SmallVec<[_; 8]>>(),
                         dynamic_offsets,
                     )
@@ -465,7 +1071,7 @@ unsafe impl CommandBufferTrait for EruptCommandBuffer {
                     shader_binding_table,
                     extent,
                 } => {
-                    assert!(device.logical.khr_ray_tracing.is_some());
+                    assert!(device.logical().khr_ray_tracing.is_some());
 
                     let sbr = vkrt::StridedBufferRegionKHR::default()
                         .builder()
@@ -473,7 +1079,7 @@ unsafe impl CommandBufferTrait for EruptCommandBuffer {
 
                     let to_erupt = |sbr: &StridedBufferRegion| {
                         vkrt::StridedBufferRegionKHR {
-                            buffer: sbr.buffer.erupt_ref(&*device).handle,
+                            buffer: sbr.buffer.handle(&device),
                             offset: sbr.offset,
                             size: sbr.size,
                             stride: sbr.stride,
@@ -481,7 +1087,7 @@ unsafe impl CommandBufferTrait for EruptCommandBuffer {
                     };
 
                     unsafe {
-                        device.logical.cmd_trace_rays_khr(
+                        device.logical().cmd_trace_rays_khr(
                             self.handle,
                             &shader_binding_table
                                 .raygen
@@ -514,9 +1120,9 @@ unsafe impl CommandBufferTrait for EruptCommandBuffer {
                 } => unsafe {
                     logical.cmd_copy_image(
                         self.handle,
-                        src_image.erupt_ref(&*device).handle,
+                        src_image.handle(&device),
                         src_layout.to_erupt(),
-                        dst_image.erupt_ref(&*device).handle,
+                        dst_image.handle(&device),
                         dst_layout.to_erupt(),
                         &regions
                             .iter()
@@ -532,8 +1138,8 @@ unsafe impl CommandBufferTrait for EruptCommandBuffer {
                 } => unsafe {
                     logical.cmd_copy_buffer(
                         self.handle,
-                        src_buffer.erupt_ref(&*device).handle,
-                        dst_buffer.erupt_ref(&*device).handle,
+                        src_buffer.handle(&device),
+                        dst_buffer.handle(&device),
                         &regions
                             .iter()
                             .map(|region| region.to_erupt().builder())
@@ -548,8 +1154,8 @@ unsafe impl CommandBufferTrait for EruptCommandBuffer {
                 } => unsafe {
                     logical.cmd_copy_buffer_to_image(
                         self.handle,
-                        src_buffer.erupt_ref(&*device).handle,
-                        dst_image.erupt_ref(&*device).handle,
+                        src_buffer.handle(&device),
+                        dst_image.handle(&device),
                         dst_layout.to_erupt(),
                         &regions
                             .iter()
@@ -568,9 +1174,9 @@ unsafe impl CommandBufferTrait for EruptCommandBuffer {
                 } => unsafe {
                     logical.cmd_blit_image(
                         self.handle,
-                        src_image.erupt_ref(&*device).handle,
+                        src_image.handle(&device),
                         src_layout.to_erupt(),
-                        dst_image.erupt_ref(&*device).handle,
+                        dst_image.handle(&device),
                         dst_layout.to_erupt(),
                         &regions
                             .iter()
@@ -596,9 +1202,7 @@ unsafe impl CommandBufferTrait for EruptCommandBuffer {
                             .map(|image| {
                                 vk1_0::ImageMemoryBarrier::default()
                                     .builder()
-                                    .image(
-                                        image.image.erupt_ref(&*device).handle,
-                                    )
+                                    .image(image.image.handle(&device))
                                     .src_access_mask(supported_access(
                                         src.to_erupt(),
                                     ))

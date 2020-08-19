@@ -1,6 +1,6 @@
 use erupt::vk1_0::{AccessFlags, Flags, PipelineStageFlags};
 
-// pub(super) fn supported_stages(access: AccessFlags) ->
+// pub(crate) fn supported_stages(access: AccessFlags) ->
 // PipelineStageFlags {     let mut result =
 // PipelineStageFlags::empty();     let mut bits = access.as_raw();
 //     while bits != 0 {
@@ -64,7 +64,7 @@ fn supported_stages_inner(access: AccessFlags) -> PipelineStageFlags {
     }
 }
 
-pub(super) fn supported_access(stages: PipelineStageFlags) -> AccessFlags {
+pub(crate) fn supported_access(stages: PipelineStageFlags) -> AccessFlags {
     let mut result = AccessFlags::empty();
 
     let mut bits: Flags = !0;

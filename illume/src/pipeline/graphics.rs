@@ -1,13 +1,12 @@
-use crate::PipelineLayout;
+use super::PipelineLayout;
 use crate::{
-    descriptor::DescriptorSetLayout,
     format::Format,
     render_pass::RenderPass,
-    resource::{Handle, ResourceTrait},
     sampler::CompareOp,
     shader::{FragmentShader, VertexShader},
     Rect2d,
 };
+use erupt::vk1_0;
 use ordered_float::OrderedFloat;
 
 pub use self::State::{Dynamic, Static};
@@ -53,7 +52,10 @@ pub struct Bounds {
 
 define_handle! {
     /// Resource that describes whole graphics pipeline state.
-    pub struct GraphicsPipeline(GraphicsPipelineInfo);
+    pub struct GraphicsPipeline {
+        pub info: GraphicsPipelineInfo,
+        handle: vk1_0::Pipeline,
+    }
 }
 
 /// Graphics pipeline state definition.

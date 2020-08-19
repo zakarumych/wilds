@@ -1,7 +1,7 @@
-use crate::{
-    align_up,
-    memory::MemoryUsageFlags,
-    resource::{Handle, ResourceTrait},
+use {
+    crate::{align_up, memory::MemoryUsageFlags, DeviceAddress},
+    erupt::vk1_0,
+    tvma::Block,
 };
 
 bitflags::bitflags! {
@@ -25,16 +25,12 @@ bitflags::bitflags! {
 }
 
 define_handle! {
-    /// Handle to buffer.
-    /// Buffer stores data accessible by commands executed on device.
-    /// User must specify what usage newly created buffer would support.
-    /// See `BufferUsage` for set of usages.
-    ///
-    /// Buffer handle is shareable via cloning, clones of handle represent same
-    /// buffer. Graphics API verifies that buffer usage is valid in all safe public
-    /// functions. But device access to buffer data is not verified and can lead to
-    /// races resuling in undefined content observed.
-    pub struct Buffer(BufferInfo);
+    pub struct Buffer {
+        pub info: BufferInfo,
+        handle: vk1_0::Buffer,
+        address: Option<DeviceAddress>,
+        block: Block,
+    }
 }
 
 /// Information required to create a buffer.

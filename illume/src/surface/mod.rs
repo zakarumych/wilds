@@ -1,13 +1,19 @@
+mod swapchain;
+
+pub use self::swapchain::*;
+
 use crate::{
-    assert_error, assert_object,
-    format::Format,
-    image::{Image, ImageUsage},
-    resource::{Handle, ResourceTrait},
-    semaphore::Semaphore,
+    assert_error, format::Format, image::ImageUsage, out_of_host_memory,
     Extent2d, OutOfMemory,
 };
+use erupt::{extensions::khr_surface::SurfaceKHR, vk1_0};
 use raw_window_handle::RawWindowHandle;
-use std::{error::Error, fmt::Debug, ops::RangeInclusive};
+use std::{
+    error::Error,
+    fmt::Debug,
+    ops::RangeInclusive,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SurfaceError {
@@ -48,7 +54,6 @@ pub enum SurfaceError {
 }
 
 #[allow(dead_code)]
-
 fn check_surface_error() {
     assert_error::<SurfaceError>();
 }
@@ -57,7 +62,6 @@ fn check_surface_error() {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
-
 pub enum RawWindowHandleKind {
     IOS,
     MacOS,
@@ -72,7 +76,6 @@ pub enum RawWindowHandleKind {
 
 impl RawWindowHandleKind {
     /// Returns kind of the raw window handle.
-
     pub fn of(window: &RawWindowHandle) -> Self {
         match window {
             #[cfg(target_os = "android")]
@@ -163,8 +166,59 @@ pub struct SurfaceCapabilities {
     pub formats: Vec<Format>,
 }
 
-define_handle! {
-    pub struct Surface(SurfaceInfo);
+#[derive(Debug)]
+pub(crate) struct Inner {
+    pub handle: SurfaceKHR,
+    pub used: AtomicBool,
+    pub info: SurfaceInfo,
+}
+
+#[derive(Clone, Debug)]
+#[repr(transparent)]
+pub struct Surface {
+    inner: std::sync::Arc<Inner>,
+}
+
+impl std::cmp::PartialEq for Surface {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(&*self.inner, &*other.inner)
+    }
+}
+
+impl std::cmp::Eq for Surface {}
+
+impl std::hash::Hash for Surface {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::ptr::hash(&*self.inner, state)
+    }
+}
+
+impl Surface {
+    pub(crate) fn make(
+        handle: SurfaceKHR,
+        used: AtomicBool,
+        info: SurfaceInfo,
+    ) -> Self {
+        Surface {
+            inner: std::sync::Arc::new(Inner { handle, used, info }),
+        }
+    }
+
+    pub(crate) fn handle(&self) -> SurfaceKHR {
+        self.inner.handle
+    }
+
+    pub(crate) fn mark_used(&self) -> Result<(), SurfaceError> {
+        if self.inner.used.fetch_or(true, Ordering::SeqCst) {
+            return Err(SurfaceError::AlreadyUsed);
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn info(&self) -> &SurfaceInfo {
+        &self.inner.info
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -175,71 +229,17 @@ pub struct SurfaceInfo {
 unsafe impl Send for SurfaceInfo {}
 unsafe impl Sync for SurfaceInfo {}
 
-#[derive(Debug)]
-pub struct Swapchain {
-    inner: Box<dyn SwapchainTrait>,
-}
-
-impl Swapchain {
-    pub fn new(inner: Box<impl SwapchainTrait>) -> Self {
-        Swapchain { inner }
+pub(crate) fn surface_error_from_erupt(err: vk1_0::Result) -> SurfaceError {
+    match err {
+        vk1_0::Result::ERROR_OUT_OF_HOST_MEMORY => out_of_host_memory(),
+        vk1_0::Result::ERROR_OUT_OF_DEVICE_MEMORY => {
+            SurfaceError::OutOfMemory {
+                source: OutOfMemory,
+            }
+        }
+        vk1_0::Result::ERROR_SURFACE_LOST_KHR => SurfaceError::SurfaceLost,
+        _ => SurfaceError::Other {
+            source: Box::new(err),
+        },
     }
-}
-
-impl Swapchain {
-    pub fn configure(
-        &mut self,
-        image_usage: ImageUsage,
-        format: Format,
-        mode: PresentMode,
-    ) -> Result<(), SurfaceError> {
-        self.inner.configure(image_usage, format, mode)
-    }
-
-    pub fn acquire_image(
-        &mut self,
-    ) -> Result<Option<SwapchainImage>, SurfaceError> {
-        self.inner.acquire_image()
-    }
-}
-
-define_handle! {
-    pub struct SwapchainImage(SwapchainImageInfo);
-}
-
-#[derive(Clone, Debug)]
-pub struct SwapchainImageInfo {
-    /// Swapchain image.
-    pub image: Image,
-
-    /// Semaphore that should be waited upon before accessing an image.
-    ///
-    /// Acquisition semaphore management may be rather complex,
-    /// so keep that to the implementation.
-    pub wait: Semaphore,
-
-    /// Semaphore that should be signaled after last image access.
-    ///
-    /// Presentation semaphore management may be rather complex,
-    /// so keep that to the implementation.
-    pub signal: Semaphore,
-}
-
-pub trait SwapchainTrait: Debug + Send + Sync + 'static {
-    fn configure(
-        &mut self,
-        image_usage: ImageUsage,
-        format: Format,
-        mode: PresentMode,
-    ) -> Result<(), SurfaceError>;
-
-    fn acquire_image(&mut self)
-        -> Result<Option<SwapchainImage>, SurfaceError>;
-}
-
-#[allow(dead_code)]
-fn check() {
-    assert_error::<CreateSurfaceError>();
-
-    assert_object::<Swapchain>();
 }
