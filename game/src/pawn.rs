@@ -37,8 +37,6 @@ impl PawnAsset {
         height: f32,
         ctx: &mut Context,
     ) -> Result<Self, OutOfMemory> {
-        // let trimesh = capsule(&diameter, &height, 16, 16);
-
         let capsule = Capsule::new((height + diameter) / 2.0, diameter / 2.0);
 
         let trimesh = capsule.to_trimesh((16, 16));

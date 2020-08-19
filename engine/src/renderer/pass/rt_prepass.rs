@@ -1,7 +1,7 @@
 use {
     super::Pass,
     crate::{
-        light::{DirectionalLight, SkyLight},
+        light::{DirectionalLight, PointLight, SkyLight},
         renderer::{
             Context, Mesh, PositionNormalTangent3dUV, Renderable, Texture,
             VertexType,
@@ -124,6 +124,18 @@ struct ShaderInstance {
 
 unsafe impl Zeroable for ShaderInstance {}
 unsafe impl Pod for ShaderInstance {}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+struct ShaderPointLight {
+    position: [f32; 3],
+    _pad0: f32,
+    radiance: [f32; 3],
+    _pad1: f32,
+}
+
+unsafe impl Zeroable for ShaderPointLight {}
+unsafe impl Pod for ShaderPointLight {}
 
 impl RtPrepass {
     pub fn new(
@@ -248,7 +260,15 @@ impl RtPrepass {
                         ty: DescriptorType::StorageBuffer,
                         count: 1,
                         stages: ShaderStageFlags::CLOSEST_HIT,
-                        flags: DescriptorBindingFlags::PARTIALLY_BOUND,
+                        flags: DescriptorBindingFlags::empty(),
+                    },
+                    // Lights
+                    DescriptorSetLayoutBinding {
+                        binding: 2,
+                        ty: DescriptorType::StorageBuffer,
+                        count: 1,
+                        stages: ShaderStageFlags::CLOSEST_HIT,
+                        flags: DescriptorBindingFlags::empty(),
                     },
                 ],
             },
@@ -550,6 +570,26 @@ impl RtPrepass {
                         instances_size(),
                     )]),
                 },
+                WriteDescriptorSet {
+                    set: &per_frame_set0,
+                    binding: 2,
+                    element: 0,
+                    descriptors: Descriptors::StorageBuffer(&[(
+                        globals_and_instances.clone(),
+                        pointlight_offset(0),
+                        pointlight_size(),
+                    )]),
+                },
+                WriteDescriptorSet {
+                    set: &per_frame_set1,
+                    binding: 2,
+                    element: 0,
+                    descriptors: Descriptors::StorageBuffer(&[(
+                        globals_and_instances.clone(),
+                        pointlight_offset(1),
+                        pointlight_size(),
+                    )]),
+                },
             ],
             &[],
         );
@@ -732,7 +772,7 @@ impl<'a> Pass<'a> for RtPrepass {
                 };
 
                 instances.push(ShaderInstance {
-                    transform: iso.into_homogeneous_matrix(),
+                    transform: m,
                     mesh: mesh_index,
                     albedo_sampler: albedo_index,
                     normal_sampler: normal_index,
@@ -792,6 +832,28 @@ impl<'a> Pass<'a> for RtPrepass {
             instances_offset(fid),
             &instances,
         );
+
+        let mut pointlights: BVec<ShaderPointLight> =
+            BVec::with_capacity_in(32, bump);
+        pointlights.extend(
+            world
+                .query::<(&PointLight, &Isometry3)>()
+                .iter()
+                .map(|(_, (pl, iso))| ShaderPointLight {
+                    position: iso.translation.into(),
+                    radiance: pl.radiance,
+                    _pad0: 0.0,
+                    _pad1: 0.0,
+                })
+                .take(32),
+        );
+
+        ctx.write_memory(
+            &self.globals_and_instances,
+            pointlight_offset(fid),
+            &pointlights,
+        );
+
         let infos = bump.alloc([AccelerationStructureBuildGeometryInfo {
             src: None,
             dst: self.tlas.clone(),
@@ -843,9 +905,11 @@ impl<'a> Pass<'a> for RtPrepass {
             },
             dirlight,
             skylight,
-            _pad: 0.0,
+            plights: pointlights.len() as u32,
             // frame: frame as u32,
             frame: 0,
+            shadow_rays: 8,
+            diffuse_rays: 8,
         };
 
         ctx.write_memory(
@@ -994,8 +1058,10 @@ struct Globals {
     camera: GlobalsCamera,
     dirlight: GlobalsDirLight,
     skylight: Vec3,
-    _pad: f32,
+    plights: u32,
     frame: u32,
+    shadow_rays: u32,
+    diffuse_rays: u32,
 }
 
 unsafe impl Zeroable for Globals {}
@@ -1026,12 +1092,25 @@ fn instances_end(frame: u32) -> u64 {
     instances_offset(frame) + instances_size()
 }
 
+const fn pointlight_size() -> u64 {
+    size_of::<[ShaderPointLight; 32]>() as u64
+}
+
+fn pointlight_offset(frame: u32) -> u64 {
+    align_up(255, instances_end(1)).unwrap()
+        + u64::from(frame) * align_up(255, pointlight_size()).unwrap()
+}
+
+fn pointlight_end(frame: u32) -> u64 {
+    pointlight_offset(frame) + pointlight_size()
+}
+
 const fn acc_instances_size() -> u64 {
     size_of::<[AccelerationStructure; 1024]>() as u64
 }
 
 fn acc_instances_offset(frame: u32) -> u64 {
-    align_up(255, instances_end(1)).unwrap()
+    align_up(255, pointlight_end(1)).unwrap()
         + u64::from(frame) * align_up(255, acc_instances_size()).unwrap()
 }
 

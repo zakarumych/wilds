@@ -1,12 +1,11 @@
-use crate::{
-    assert_error,
-    resource::{Handle, ResourceTrait},
-    OutOfMemory,
-};
-use std::{
-    convert::TryFrom,
-    error::Error,
-    fmt::{self, Debug, Display},
+use {
+    crate::{assert_error, OutOfMemory},
+    erupt::vk1_0,
+    std::{
+        convert::TryFrom,
+        error::Error,
+        fmt::{self, Debug, Display},
+    },
 };
 
 bitflags::bitflags! {
@@ -32,7 +31,10 @@ bitflags::bitflags! {
 
 define_handle! {
     /// Resource that describes layout for descriptor sets.
-    pub struct ShaderModule(ShaderModuleInfo);
+    pub struct ShaderModule {
+        pub info: ShaderModuleInfo,
+        handle: vk1_0::ShaderModule,
+    }
 }
 
 /// Shader language.
@@ -983,4 +985,71 @@ impl From<IntersectionShader> for Shader {
 fn check_create_shader_module_error() {
     assert_error::<InvalidShader>();
     assert_error::<CreateShaderModuleError>();
+}
+
+#[cfg(feature = "shader-compiler")]
+mod shader_compiler {
+    use super::*;
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum ShaderCompileFailed {
+        #[error("Failed to compile shader. UTF-8 shader source code expected: {source}")]
+        NonUTF8 {
+            #[from]
+            source: std::str::Utf8Error,
+        },
+
+        #[error("Shaderc failed to compile shader source code: {source}")]
+        Shaderc {
+            #[from]
+            source: shaderc::Error,
+        },
+
+        #[error("Unsupported shader language {language}")]
+        Unsupported { language: ShaderLanguage },
+    }
+
+    pub fn compile_shader(
+        code: &[u8],
+        entry: &str,
+        language: ShaderLanguage,
+        source_name: &str,
+        include: impl Fn(&str, shaderc::IncludeType) -> Option<String>,
+    ) -> Result<Box<[u8]>, ShaderCompileFailed> {
+        let mut options = shaderc::CompileOptions::new().unwrap();
+
+        options.set_source_language(match language {
+            ShaderLanguage::GLSL => shaderc::SourceLanguage::GLSL,
+            ShaderLanguage::HLSL => shaderc::SourceLanguage::HLSL,
+            ShaderLanguage::SPIRV => return Ok(code.into()),
+            // _ => return Err(ShaderCompileFailed::Unsupported { language }),
+        });
+
+        options.set_include_callback(|path, ty, _, _| {
+            let content = include(path, ty).ok_or_else(|| {
+                format!("Failed to load shader file {}", path)
+            })?;
+
+            Ok(shaderc::ResolvedInclude {
+                resolved_name: path.to_owned(),
+                content,
+            })
+        });
+
+        let mut compiler = shaderc::Compiler::new().unwrap();
+
+        let binary_result = compiler.compile_into_spirv(
+            std::str::from_utf8(code)?,
+            shaderc::ShaderKind::InferFromSource,
+            source_name,
+            entry,
+            Some(&options),
+        )?;
+
+        if !binary_result.get_warning_messages().is_empty() {
+            tracing::warn!("{}", binary_result.get_warning_messages());
+        }
+
+        Ok(binary_result.as_binary_u8().into())
+    }
 }

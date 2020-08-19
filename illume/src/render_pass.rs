@@ -1,14 +1,13 @@
 use crate::{
     format::Format,
-    image::{ImageView, Layout, Samples},
-    resource::{Handle, ResourceTrait},
+    image::{Layout, Samples},
     stage::PipelineStageFlags,
-    Extent2d,
 };
+use erupt::vk1_0;
 use smallvec::SmallVec;
 
 /// Upper limit for smallvec array size for attachments.
-pub const SMALLVEC_ATTACHMENTS: usize = 8;
+pub const RENDERPASS_SMALLVEC_ATTACHMENTS: usize = 8;
 
 /// Upper limit for smallvec array size for subpasses.
 pub const SMALLVEC_SUBPASSES: usize = 4;
@@ -19,7 +18,10 @@ define_handle! {
     /// and describes how they are used over the course of the subpasses.
     ///
     /// This value is handle to a render pass resource.
-    pub struct RenderPass(RenderPassInfo);
+    pub struct RenderPass {
+        pub info: RenderPassInfo,
+        handle: vk1_0::RenderPass,
+    }
 }
 
 /// Defines render pass, its attachments and one implicit subpass.
@@ -31,7 +33,8 @@ pub struct RenderPassInfo {
         feature = "serde-1",
         serde(skip_serializing_if = "SmallVec::is_empty", default)
     )]
-    pub attachments: SmallVec<[AttachmentInfo; SMALLVEC_ATTACHMENTS]>,
+    pub attachments:
+        SmallVec<[AttachmentInfo; RENDERPASS_SMALLVEC_ATTACHMENTS]>,
     #[cfg_attr(
         feature = "serde-1",
         serde(skip_serializing_if = "SmallVec::is_empty", default)
@@ -115,7 +118,7 @@ pub struct Subpass {
         feature = "serde-1",
         serde(skip_serializing_if = "SmallVec::is_empty", default)
     )]
-    pub colors: SmallVec<[usize; SMALLVEC_ATTACHMENTS]>,
+    pub colors: SmallVec<[usize; RENDERPASS_SMALLVEC_ATTACHMENTS]>,
 
     /// Index of an attachment that is used as depth attachmetn in this
     /// subpass.
@@ -160,20 +163,6 @@ pub struct SubpassDependency {
     /// Stages of the second subpass that will be synchronized
     /// with stages for first subpass specified in `src_stages`.
     pub dst_stages: PipelineStageFlags,
-}
-
-define_handle! {
-    /// Framebuffer is a collection of attachments for render pass.
-    /// Images format and sample count should match attachment definitions.
-    /// All image views must be 2D with 1 mip level and 1 array level.
-    pub struct Framebuffer(FramebufferInfo);
-}
-
-#[derive(Clone, Debug, Hash)]
-pub struct FramebufferInfo {
-    pub render_pass: RenderPass,
-    pub views: SmallVec<[ImageView; SMALLVEC_ATTACHMENTS]>,
-    pub extent: Extent2d,
 }
 
 /// Value for attachment load clear operation.

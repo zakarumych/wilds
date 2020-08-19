@@ -6,7 +6,6 @@ edition = "2018"
 
 [features]
 # Graphics backend
-vulkan = ["illume-erupt"]
 
 # Image formats support
 
@@ -20,12 +19,12 @@ ncollide3d = "0.23"
 nphysics3d = "0.16"
 
 # Graphics
-illume = { path = "../illume", features = ["ultraviolet", "serde-1"] }
-illume-erupt = { path = "../erupt", optional = true, features = ["shader-compiler"] }
+illume = { path = "../illume", features = ["ultraviolet", "serde-1", "shader-compiler"] }
 genmesh = { version = "0.6", optional = true }
 palette = { version = "0.5", default-features = false, features = ["std"] }
 image = { version = "0.23", features = ["png"] }
 png = "0.16"
+animate = { path = "../animate" }
 
 # ECS
 hecs = "0.2"

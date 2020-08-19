@@ -1,6 +1,6 @@
 use {
     super::{
-        vertex::{VertexLayout, VertexType},
+        vertex::{Semantics, VertexLayout, VertexType},
         Context,
     },
     bumpalo::{collections::Vec as BVec, Bump},
@@ -52,8 +52,10 @@ impl MeshBuilder {
         offset: u64,
         layout: VertexLayout,
     ) -> Self {
+        if layout.rate == VertexInputRate::Instance {
+            tracing::warn!("Instance-rate attribute are not suitable for Mesh");
+        }
         self.add_binding(buffer, offset, layout);
-
         self
     }
 
@@ -146,21 +148,26 @@ impl Mesh {
         bump: &'a Bump,
     ) -> Result<AccelerationStructure, OutOfMemory> {
         assert_eq!(self.topology, PrimitiveTopology::TriangleList);
-
         assert_eq!(self.count % 3, 0);
-
         let triangle_count = self.count / 3;
 
-        let pos_binding: &Binding = &self.bindings[0];
-
-        let pos_layout = &pos_binding.layout;
-
-        assert_eq!(pos_layout.rate, VertexInputRate::Vertex);
-
-        let pos_location = pos_layout.locations.as_ref()[0];
+        let (pos_binding, pos_location) = self
+            .bindings
+            .iter()
+            .filter_map(|binding| {
+                binding
+                    .layout
+                    .locations
+                    .iter()
+                    .find(|&attr| attr.semantics == Some(Semantics::Position3d))
+                    .map(move |location| (binding, location))
+            })
+            .next()
+            .expect("Cannot create acceleration structure for mesh without position attribute");
+        assert_eq!(pos_binding.layout.rate, VertexInputRate::Vertex);
 
         let pos_address = device
-            .get_buffer_device_address(&self.bindings[0].buffer)
+            .get_buffer_device_address(&pos_binding.buffer)
             .unwrap()
             .offset(pos_binding.offset)
             .offset(pos_location.offset.into());
@@ -195,7 +202,7 @@ impl Mesh {
                 flags: GeometryFlags::empty(),
                 vertex_format: Format::RGB32Sfloat,
                 vertex_data: pos_address,
-                vertex_stride: pos_layout.stride.into(),
+                vertex_stride: pos_binding.layout.stride.into(),
                 first_vertex: 0,
                 primitive_count: triangle_count,
                 index_data: self.indices.as_ref().map(|indices| {
@@ -227,13 +234,13 @@ impl Mesh {
     pub fn draw<'a>(
         &self,
         instances: Range<u32>,
-        layouts: &[VertexLayout],
+        infos: &[VertexLayout],
         encoder: &mut RenderPassEncoder<'_, 'a>,
         bump: &'a Bump,
     ) -> bool {
         let mut to_bind = BVec::with_capacity_in(self.bindings.len(), bump);
 
-        for layout in layouts {
+        for layout in infos {
             for binding in &*self.bindings {
                 if binding.layout == *layout {
                     to_bind.push((binding.buffer.clone(), binding.offset));
@@ -456,17 +463,6 @@ impl MeshData<'_> {
     }
 
     pub fn build_for_blas(
-        &self,
-        ctx: &mut Context,
-    ) -> Result<Mesh, OutOfMemory> {
-        self.build(
-            ctx,
-            BufferUsage::RAY_TRACING | BufferUsage::STORAGE,
-            BufferUsage::RAY_TRACING | BufferUsage::STORAGE,
-        )
-    }
-
-    pub fn build_for_dynamic_blas(
         &self,
         ctx: &mut Context,
     ) -> Result<Mesh, OutOfMemory> {
@@ -710,5 +706,55 @@ mod gm {
                 vertex_count,
             })
         }
+    }
+}
+
+/// Mesh transformed into specific pose.
+/// Contains only bindings affected by transformation -
+/// i.e. bingings that contain positions, normals and/or tangets
+pub struct PoseMesh {
+    bindings: Arc<[Binding]>,
+}
+
+impl PoseMesh {
+    /// Create new pose-mesh for mesh
+    pub fn new(
+        mesh: &Mesh,
+        device: &Device,
+        bump: &Bump,
+    ) -> Result<Self, OutOfMemory> {
+        let mut offset = 0;
+        let mut prebindings = BVec::with_capacity_in(4, bump);
+
+        for binding in mesh.bindings.iter() {
+            let animate = binding
+                .layout
+                .locations
+                .iter()
+                .any(|l| l.semantics.map_or(false, |s| s.animate()));
+
+            if animate {
+                prebindings.push((binding.layout.clone(), offset));
+                offset += binding.buffer.info().size;
+            }
+        }
+
+        let buffer = device.create_buffer(BufferInfo {
+            align: 255,
+            size: offset,
+            usage: BufferUsage::RAY_TRACING | BufferUsage::STORAGE,
+            memory: MemoryUsageFlags::empty(),
+        })?;
+
+        let bindings = prebindings
+            .into_iter()
+            .map(|(layout, offset)| Binding {
+                layout,
+                offset,
+                buffer: buffer.clone(),
+            })
+            .collect();
+
+        Ok(PoseMesh { bindings })
     }
 }

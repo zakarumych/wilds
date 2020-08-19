@@ -1,7 +1,10 @@
-use crate::resource::{Handle, ResourceTrait};
+use erupt::vk1_0;
 
 define_handle! {
-    pub struct Semaphore(SemaphoreInfo);
+    pub struct Semaphore {
+        pub info: SemaphoreInfo,
+        handle: vk1_0::Semaphore,
+    }
 }
 
 #[derive(Clone, Copy, Debug)]

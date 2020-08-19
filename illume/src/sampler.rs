@@ -1,5 +1,4 @@
-use crate::resource::{Handle, ResourceTrait};
-use ordered_float::OrderedFloat;
+use {erupt::vk1_0, ordered_float::OrderedFloat};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
@@ -104,5 +103,8 @@ impl Default for SamplerInfo {
 }
 
 define_handle! {
-    pub struct Sampler(SamplerInfo);
+    pub struct Sampler {
+        pub info: SamplerInfo,
+        handle: vk1_0::Sampler,
+    }
 }

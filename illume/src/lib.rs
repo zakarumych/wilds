@@ -1,11 +1,11 @@
-#![deny(non_snake_case)]
-#![deny(unreachable_patterns)]
-#![deny(unused_unsafe)]
-#![deny(missing_copy_implementations)]
-#![deny(missing_debug_implementations)]
-#![deny(unused_must_use)]
+// #![deny(non_snake_case)]
+// #![deny(unreachable_patterns)]
+// #![deny(unused_unsafe)]
+// #![deny(missing_copy_implementations)]
+// #![deny(missing_debug_implementations)]
+// #![deny(unused_must_use)]
 // #![deny(unused_variables)]
-#![allow(unused_imports)]
+// #![allow(unused_imports)]
 
 use std::{
     cmp::{Ord, Ordering, PartialOrd},
@@ -16,50 +16,124 @@ use std::{
 };
 
 macro_rules! define_handle {
-    ($(#[$meta:meta])* $vis:vis struct $handle:ident($handle_info:ident);) => {
-        $(#[$meta])*
-        #[derive(Clone, Hash, PartialEq, Eq)]
+    (
+        $(#[$meta:meta])*
+        pub struct $resource:ident {
+            pub info: $info:ty,
+            handle: $handle:ty,
+            $($fname:ident: $fty:ty,)*
+        }
+    ) => {
+        pub(crate) struct Inner {
+            info: $info,
+            owner: crate::device::WeakDevice,
+            index: usize,
+            handle: $handle,
+            $($fname: $fty,)*
+        }
+
+        impl ::std::fmt::Debug for Inner {
+            fn fmt(&self, fmt: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                if fmt.alternate() {
+                    fmt.debug_struct(stringify!($resource))
+                        .field("handle", &self.handle)
+                        .field("info", &self.info)
+                        .field("owner", &self.owner)
+                        $(
+                            .field(stringify!($fname), &self.$fname)
+                        )*
+                        .finish()
+                } else {
+                    write!(fmt, "{}({:p})", stringify!($resource), self.handle)
+                }
+            }
+        }
+
+        #[derive(Clone)]
         #[repr(transparent)]
-        $vis struct $handle {
-            handle: Handle<Self>,
+        $(#[$meta])*
+        pub struct $resource {
+            inner: std::sync::Arc<Inner>,
         }
 
-        impl std::fmt::Debug for $handle {
-            fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
-                std::fmt::Debug::fmt(&self.handle, fmt)
+        impl ::std::fmt::Debug for $resource {
+            fn fmt(&self, fmt: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                self.inner.fmt(fmt)
             }
         }
 
-        impl $handle {
-            #[doc("Returns `")]
-            #[doc($handle_info)]
-            #[doc("` that was used when resource was created.")]
-            #[doc = "This information cannot be modified during resource lifetime."]
-            $vis fn info(&self) -> &$handle_info {
-                self.handle.info()
+        impl std::cmp::PartialEq for $resource {
+            fn eq(&self, other: &Self) -> bool {
+                std::ptr::eq(&*self.inner, &*other.inner)
             }
         }
 
-        impl ResourceTrait for $handle {
-            type Info = $handle_info;
+        impl std::cmp::Eq for $resource {}
 
-            fn from_handle(handle: Handle<Self>) -> Self {
-                Self { handle }
+        impl std::hash::Hash for $resource {
+            fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+                std::ptr::hash(&*self.inner, state)
+            }
+        }
+
+        impl $resource {
+            pub(crate) fn make(
+                info: $info,
+                handle: $handle,
+                $($fname: $fty,)*
+                owner: crate::device::WeakDevice,
+                index: usize,
+            ) -> Self {
+                $resource {
+                    inner: std::sync::Arc::new(Inner {
+                        info,
+                        handle,
+                        $($fname,)*
+                        owner,
+                        index,
+                    })
+                }
             }
 
-            fn handle(&self) -> &Handle<Self> {
-                &self.handle
+            pub(crate) fn is_owner(&self, device: &crate::device::Device) -> bool {
+                self.inner.owner.is(device)
+            }
+
+            pub(crate) fn handle(&self, device: &crate::device::Device) -> $handle {
+                assert!(self.is_owner(device), "Wrong device");
+                self.inner.handle
+            }
+
+            $(
+                #[allow(dead_code)]
+                pub(crate) fn $fname(&self, device: &crate::device::Device) -> &$fty {
+                    assert!(self.is_owner(device), "Wrong device");
+                    &self.inner.$fname
+                }
+            )*
+
+            #[allow(dead_code)]
+            pub fn info(&self) -> &$info {
+                &self.inner.info
+            }
+
+            pub fn index(&self) -> usize {
+                self.inner.index
             }
         }
     };
 }
 
+mod accel;
+mod access;
 mod buffer;
-mod command;
+mod convert;
 mod descriptor;
 mod device;
+mod encode;
 mod fence;
 mod format;
+mod framebuffer;
 mod graphics;
 mod image;
 mod memory;
@@ -67,18 +141,18 @@ mod physical;
 mod pipeline;
 mod queue;
 mod render_pass;
-mod resource;
 mod sampler;
 mod semaphore;
 mod shader;
 mod stage;
 mod surface;
+mod view;
 
 pub use self::{
-    buffer::*, command::*, descriptor::*, device::*, fence::*, format::*,
-    graphics::*, image::*, memory::*, physical::*, pipeline::*, queue::*,
-    render_pass::*, resource::*, sampler::*, semaphore::*, shader::*, stage::*,
-    surface::*,
+    accel::*, buffer::*, descriptor::*, device::*, encode::*, fence::*,
+    format::*, framebuffer::*, graphics::*, image::*, memory::*, physical::*,
+    pipeline::*, queue::*, render_pass::*, sampler::*, semaphore::*, shader::*,
+    stage::*, surface::*, view::*,
 };
 
 /// Image size is defiend to `u32` which is standard for graphics API today.

@@ -5,7 +5,10 @@
 #define M_PI 3.1415926535897932384626433832795
 #define M_FI 1.61803398874989484820458683436563811772030917980576286213544862270526046281890244970720720418939113748475
 #define M_PL 1.32471795724474602596090885447809734073440405690173336453401505030282785124554759405469934798178728032991
-#define M_PX 1.22074408460576
+#define M_PX 1.2207440846057594753616853491088319144324890862486352142882444530497100085225914
+
+
+
 
 struct RecursiveRay {
     vec3 origin;
@@ -24,6 +27,7 @@ struct PrimaryHitPayload {
 
 struct DiffuseHitPayload {
     vec3 radiation;
+    uvec3 co;
 };
 
 struct Vertex {
@@ -54,6 +58,11 @@ struct DirLight {
     vec3 rad;
 };
 
+struct PointLight {
+    vec3 pos;
+    vec3 rad;
+};
+
 layout(binding = 0, set = 0) uniform accelerationStructureEXT tlas;
 // layout(binding = 1, set = 0) buffer BlueNoise { vec4 blue_noise[262144]; };
 layout(binding = 2, set = 0, scalar) buffer Indices { uint i[]; } indices[];
@@ -65,8 +74,11 @@ layout(binding = 0, set = 1, std140) uniform Globals {
     Camera cam;
     DirLight dirlight;
     vec3 skylight;
-    float pad;
+    uint plights;
     uint frame;
+    uint shadow_rays;
+    uint diffuse_rays;
 } globals;
 
 layout(binding = 1, set = 1, scalar) buffer Scene { Instance instances[]; };
+layout(binding = 2, set = 1, std140) buffer PointLights { PointLight plight[]; };

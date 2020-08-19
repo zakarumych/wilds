@@ -1,6 +1,7 @@
 use ultraviolet::Vec3;
 
 #[derive(Clone, Copy, Debug)]
+#[repr(transparent)]
 pub struct PointLight {
     pub radiance: [f32; 3],
 }
@@ -12,6 +13,7 @@ pub struct DirectionalLight {
 }
 
 #[derive(Clone, Copy, Debug)]
+#[repr(transparent)]
 pub struct SkyLight {
     pub radiance: [f32; 3],
 }

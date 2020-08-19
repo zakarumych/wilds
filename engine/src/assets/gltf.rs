@@ -829,31 +829,31 @@ fn load_indices(
 
             let start = output.len();
 
-            #[cfg(target_endian = "little")]
-            {
-                if stride == size_of::<u16>() {
-                    // Just copy bytes for packed indices
-                    // if endianess is the same.
-                    output.extend_from_slice(unsafe {
-                        std::slice::from_raw_parts(
-                            bytes.as_ptr() as *const _,
-                            bytes.len(),
-                        )
-                    });
-                    return Ok(IndicesAux::U16(start..output.len()));
-                }
-            }
+            // #[cfg(target_endian = "little")]
+            // {
+            //     if stride == size_of::<u16>() {
+            //         // Just copy bytes for packed indices
+            //         // if endianess is the same.
+            //         output.extend_from_slice(unsafe {
+            //             std::slice::from_raw_parts(
+            //                 bytes.as_ptr() as *const _,
+            //                 bytes.len(),
+            //             )
+            //         });
+            //         return Ok(IndicesAux::U16(start..output.len()));
+            //     }
+            // }
 
             let mut count = 0;
             for index in u16::from_bytes_iter::<LittleEndian>(bytes, stride)
                 .take(accessor.count())
             {
-                output.extend(index.to_ne_bytes().iter().copied());
+                output.extend((index as u32).to_ne_bytes().iter().copied());
                 count += 1;
             }
             assert_eq!(accessor.count(), count);
 
-            Ok(IndicesAux::U16(start..output.len()))
+            Ok(IndicesAux::U32(start..output.len()))
         }
         gltf::accessor::DataType::U32 => {
             if size_of::<u32>() != accessor.size() {

@@ -1,8 +1,4 @@
-use erupt::{
-    extensions::{khr_ray_tracing as vkrt, khr_surface::PresentModeKHR},
-    vk1_0, vk1_2,
-};
-use illume::{
+use crate::{
     out_of_host_memory, AccelerationStructureFlags,
     AccelerationStructureGeometryInfo, AccelerationStructureLevel, AspectFlags,
     AttachmentLoadOp, AttachmentStoreOp, BlendFactor, BlendOp, BorderColor,
@@ -17,17 +13,21 @@ use illume::{
     Samples, ShaderStage, ShaderStageFlags, StencilOp, VertexInputRate,
     Viewport,
 };
+use erupt::{
+    extensions::{khr_ray_tracing as vkrt, khr_surface::PresentModeKHR},
+    vk1_0, vk1_2,
+};
 use std::num::NonZeroU64;
 
-pub(super) trait ToErupt<T> {
+pub(crate) trait ToErupt<T> {
     fn to_erupt(self) -> T;
 }
 
-pub(super) trait FromErupt<T> {
+pub(crate) trait FromErupt<T> {
     fn from_erupt(value: T) -> Self;
 }
 
-pub(super) fn from_erupt<T, U: FromErupt<T>>(value: T) -> U {
+pub(crate) fn from_erupt<T, U: FromErupt<T>>(value: T) -> U {
     U::from_erupt(value)
 }
 
@@ -583,7 +583,7 @@ impl ToErupt<PresentModeKHR> for PresentMode {
     }
 }
 
-pub(super) fn oom_error_from_erupt(err: vk1_0::Result) -> OutOfMemory {
+pub(crate) fn oom_error_from_erupt(err: vk1_0::Result) -> OutOfMemory {
     match err {
         vk1_0::Result::ERROR_OUT_OF_HOST_MEMORY => out_of_host_memory(),
         vk1_0::Result::ERROR_OUT_OF_DEVICE_MEMORY => OutOfMemory,
@@ -1084,7 +1084,7 @@ impl ToErupt<vk1_0::SampleCountFlagBits> for Samples {
     }
 }
 
-pub(super) fn memory_usage_to_tvma(
+pub(crate) fn memory_usage_to_tvma(
     usage: MemoryUsageFlags,
 ) -> tvma::UsageFlags {
     tvma::UsageFlags::from_bits_truncate(usage.bits())

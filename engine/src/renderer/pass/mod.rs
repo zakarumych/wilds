@@ -1,6 +1,7 @@
 pub mod atrous;
 pub mod combine;
 pub mod gauss_filter;
+pub mod pose;
 pub mod rt_prepass;
 
 pub use self::{
