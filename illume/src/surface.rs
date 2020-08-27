@@ -1,18 +1,10 @@
-mod swapchain;
-
-pub use self::swapchain::*;
-
-use crate::{
-    assert_error, format::Format, image::ImageUsage, out_of_host_memory,
-    Extent2d, OutOfMemory,
-};
-use erupt::{extensions::khr_surface::SurfaceKHR, vk1_0};
-use raw_window_handle::RawWindowHandle;
-use std::{
-    error::Error,
-    fmt::Debug,
-    ops::RangeInclusive,
-    sync::atomic::{AtomicBool, Ordering},
+pub use crate::backend::Surface;
+use {
+    crate::{
+        assert_error, format::Format, image::ImageUsage, Extent2d, OutOfMemory,
+    },
+    raw_window_handle::RawWindowHandle,
+    std::{error::Error, fmt::Debug, ops::RangeInclusive},
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -43,8 +35,9 @@ pub enum SurfaceError {
     #[error("Surface is already used")]
     AlreadyUsed,
 
+    #[cfg(feature = "vulkan")]
     #[error("Function returned unexpected error code: {result}")]
-    UnexpectedVulkanResult { result: vk1_0::Result },
+    UnexpectedVulkanError { result: erupt::vk1_0::Result },
 }
 
 #[allow(dead_code)]
@@ -131,10 +124,11 @@ pub enum CreateSurfaceError {
         source: Option<Box<dyn Error + Send + Sync>>,
     },
 
+    #[cfg(feature = "vulkan")]
     #[error("Function returned unexpected error code: {result}")]
-    UnexpectedVulkanResult {
+    UnexpectedVulkanError {
         window: RawWindowHandleKind,
-        result: vk1_0::Result,
+        result: erupt::vk1_0::Result,
     },
 }
 
@@ -159,61 +153,6 @@ pub struct SurfaceCapabilities {
     pub formats: Vec<Format>,
 }
 
-#[derive(Debug)]
-pub(crate) struct Inner {
-    pub handle: SurfaceKHR,
-    pub used: AtomicBool,
-    pub info: SurfaceInfo,
-}
-
-#[derive(Clone, Debug)]
-#[repr(transparent)]
-pub struct Surface {
-    inner: std::sync::Arc<Inner>,
-}
-
-impl std::cmp::PartialEq for Surface {
-    fn eq(&self, other: &Self) -> bool {
-        std::ptr::eq(&*self.inner, &*other.inner)
-    }
-}
-
-impl std::cmp::Eq for Surface {}
-
-impl std::hash::Hash for Surface {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        std::ptr::hash(&*self.inner, state)
-    }
-}
-
-impl Surface {
-    pub(crate) fn make(
-        handle: SurfaceKHR,
-        used: AtomicBool,
-        info: SurfaceInfo,
-    ) -> Self {
-        Surface {
-            inner: std::sync::Arc::new(Inner { handle, used, info }),
-        }
-    }
-
-    pub(crate) fn handle(&self) -> SurfaceKHR {
-        self.inner.handle
-    }
-
-    pub(crate) fn mark_used(&self) -> Result<(), SurfaceError> {
-        if self.inner.used.fetch_or(true, Ordering::SeqCst) {
-            return Err(SurfaceError::AlreadyUsed);
-        } else {
-            Ok(())
-        }
-    }
-
-    pub fn info(&self) -> &SurfaceInfo {
-        &self.inner.info
-    }
-}
-
 #[derive(Clone, Copy, Debug)]
 pub struct SurfaceInfo {
     pub window: RawWindowHandle,
@@ -221,16 +160,3 @@ pub struct SurfaceInfo {
 
 unsafe impl Send for SurfaceInfo {}
 unsafe impl Sync for SurfaceInfo {}
-
-pub(crate) fn surface_error_from_erupt(err: vk1_0::Result) -> SurfaceError {
-    match err {
-        vk1_0::Result::ERROR_OUT_OF_HOST_MEMORY => out_of_host_memory(),
-        vk1_0::Result::ERROR_OUT_OF_DEVICE_MEMORY => {
-            SurfaceError::OutOfMemory {
-                source: OutOfMemory,
-            }
-        }
-        vk1_0::Result::ERROR_SURFACE_LOST_KHR => SurfaceError::SurfaceLost,
-        _ => SurfaceError::UnexpectedVulkanResult { result: err },
-    }
-}

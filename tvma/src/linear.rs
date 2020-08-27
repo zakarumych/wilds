@@ -1,9 +1,6 @@
 use {
     crate::align_up,
-    erupt::{
-        vk1_0::{self, Vk10DeviceLoaderExt as _},
-        vk1_1, DeviceLoader,
-    },
+    erupt::{vk1_0, vk1_1, DeviceLoader, ExtendableFrom as _},
     std::{convert::TryFrom as _, num::NonZeroU64, ptr::NonNull},
 };
 
@@ -226,13 +223,13 @@ impl LinearAllocator {
     ) -> Option<Chunk> {
         tracing::trace!("Allocating new chunk");
         let mut alloc_info = vk1_0::MemoryAllocateInfo::default()
-            .builder()
+            .into_builder()
             .allocation_size(chunk_size)
             .memory_type_index(self.memory_type);
         let mut flags = vk1_1::MemoryAllocateFlagsInfo::default()
-            .builder()
+            .into_builder()
             .flags(vk1_1::MemoryAllocateFlags::DEVICE_ADDRESS);
-        flags.extend(&mut *alloc_info);
+        alloc_info = alloc_info.extend_from(&mut flags);
 
         match device.allocate_memory(&alloc_info, None, None).result() {
             Ok(memory) => {
@@ -252,20 +249,20 @@ impl LinearAllocator {
                             memory,
                             0,
                             chunk_size,
-                            vk1_0::MemoryMapFlags::empty(),
+                            Some(vk1_0::MemoryMapFlags::empty()),
                             &mut ptr,
                         )
                         .result()
                         .map_err(|err| match err {
                             vk1_0::Result::ERROR_MEMORY_MAP_FAILED
                             | vk1_0::Result::ERROR_OUT_OF_HOST_MEMORY => {
-                                device.free_memory(memory, None);
+                                device.free_memory(Some(memory), None);
                                 std::alloc::handle_alloc_error(
                                     std::alloc::Layout::new::<()>(),
                                 )
                             }
                             _ => {
-                                device.free_memory(memory, None);
+                                device.free_memory(Some(memory), None);
                             }
                         })
                         .ok()?;
@@ -308,7 +305,7 @@ impl LinearAllocator {
         if chunk.ptr.is_some() {
             device.unmap_memory(vk1_0::DeviceMemory(chunk.memory.get()));
         }
-        device.free_memory(vk1_0::DeviceMemory(chunk.memory.get()), None);
+        device.free_memory(Some(vk1_0::DeviceMemory(chunk.memory.get())), None);
     }
 }
 

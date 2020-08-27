@@ -8,17 +8,13 @@ use erupt::{
     extensions::{
         ext_debug_report::{
             DebugReportCallbackCreateInfoEXT, DebugReportFlagsEXT,
-            DebugReportObjectTypeEXT, ExtDebugReportInstanceLoaderExt as _,
-            EXT_DEBUG_REPORT_EXTENSION_NAME,
+            DebugReportObjectTypeEXT, EXT_DEBUG_REPORT_EXTENSION_NAME,
         },
         ext_debug_utils::EXT_DEBUG_UTILS_EXTENSION_NAME,
         khr_surface::KHR_SURFACE_EXTENSION_NAME,
     },
-    make_version,
-    utils::loading::{DefaultCoreLoader, LibraryError},
-    vk1_0::{self, Vk10CoreLoaderExt as _, Vk10InstanceLoaderExt as _},
-    // vk1_1::{self, Vk11CoreLoaderExt as _, Vk11InstanceLoaderExt as _},
-    InstanceLoader,
+    utils::loading::{DefaultEntryLoader, EntryLoaderError},
+    vk1_0, InstanceLoader, LoaderError,
 };
 use once_cell::sync::OnceCell;
 use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
@@ -57,8 +53,7 @@ use erupt::extensions::khr_android_surface::{
 
 #[cfg(target_os = "windows")]
 use erupt::extensions::khr_win32_surface::{
-    KhrWin32SurfaceInstanceLoaderExt as _, Win32SurfaceCreateInfoKHR,
-    KHR_WIN32_SURFACE_EXTENSION_NAME,
+    Win32SurfaceCreateInfoKHR, KHR_WIN32_SURFACE_EXTENSION_NAME,
 };
 
 #[cfg(any(target_os = "ios", target_os = "macos"))]
@@ -70,7 +65,7 @@ use erupt::extensions::ext_metal_surface::{
 pub struct Graphics {
     pub(crate) instance: InstanceLoader,
     pub(crate) version: u32,
-    _core: DefaultCoreLoader,
+    _entry: DefaultEntryLoader,
 }
 
 static GLOBAL_GRAPHICS: OnceCell<Graphics> = OnceCell::new();
@@ -91,19 +86,16 @@ impl Debug for Graphics {
 #[derive(Debug, thiserror::Error)]
 pub enum InitError {
     #[error("{source}")]
-    LibraryError {
+    EntryLoaderError {
         #[from]
-        source: LibraryError,
+        source: EntryLoaderError,
     },
 
-    #[error("Failed to load core functions from vulkan library")]
-    CoreFunctionLoadFailed,
-
-    #[error("Failed to load advertized extension ({extension}) functions")]
-    ExtensionLoadFailed { extension: &'static str },
+    #[error("Failed to load functions from vulkan library")]
+    FunctionLoadFailed,
 
     #[error("{source}")]
-    Vulkan {
+    VulkanError {
         #[from]
         source: vk1_0::Result,
     },
@@ -122,16 +114,12 @@ impl Graphics {
     fn new() -> Result<Self, InitError> {
         tracing::trace!("Init erupt graphisc implementation");
 
-        let mut core = DefaultCoreLoader::new()?;
-        core.load_vk1_0().ok_or(InitError::CoreFunctionLoadFailed)?;
+        let entry = DefaultEntryLoader::new()?;
 
-        // Try to load Vulkan 1.1 functions.
-        let _ = core.load_vk1_1();
-
-        let version = core.instance_version();
+        let version = entry.instance_version();
 
         let layer_properties =
-            unsafe { core.enumerate_instance_layer_properties(None) }
+            unsafe { entry.enumerate_instance_layer_properties(None) }
                 .result()?;
 
         let mut enable_layers = SmallVec::<[_; 1]>::new();
@@ -195,9 +183,10 @@ impl Graphics {
             // VK_LAYER_LUNARG_screenshot\0") });
         }
 
-        let extension_properties =
-            unsafe { core.enumerate_instance_extension_properties(None, None) }
-                .result()?;
+        let extension_properties = unsafe {
+            entry.enumerate_instance_extension_properties(None, None)
+        }
+        .result()?;
 
         let mut enable_exts = SmallVec::<[_; 10]>::new();
 
@@ -215,59 +204,16 @@ impl Graphics {
             }
         };
 
-        let mut debug_utils_ext = false;
-        let mut debug_report_ext = false;
-
         if cfg!(debug_assertions) {
             // Enable debug utils and report extensions in debug build.
-            debug_utils_ext = push_ext(EXT_DEBUG_UTILS_EXTENSION_NAME);
-            debug_report_ext = push_ext(EXT_DEBUG_REPORT_EXTENSION_NAME);
+            push_ext(EXT_DEBUG_UTILS_EXTENSION_NAME);
+            push_ext(EXT_DEBUG_REPORT_EXTENSION_NAME);
         }
 
-        let mut surface = false;
-
-        #[cfg(any(
-            target_os = "linux",
-            target_os = "dragonfly",
-            target_os = "freebsd",
-            target_os = "netbsd",
-            target_os = "openbsd",
-        ))]
-        let mut xlib_surface = false;
-
-        #[cfg(any(
-            target_os = "linux",
-            target_os = "dragonfly",
-            target_os = "freebsd",
-            target_os = "netbsd",
-            target_os = "openbsd",
-        ))]
-        let mut xcb_surface = false;
-
-        #[cfg(any(
-            target_os = "linux",
-            target_os = "dragonfly",
-            target_os = "freebsd",
-            target_os = "netbsd",
-            target_os = "openbsd",
-        ))]
-        let mut wayland_surface = false;
-
-        #[cfg(target_os = "android")]
-        let mut android_surface = false;
-
-        #[cfg(target_os = "windows")]
-        let mut win32_surface = false;
-
-        #[cfg(any(target_os = "ios", target_os = "macos"))]
-        let mut metal_surface = false;
-
         if push_ext(KHR_SURFACE_EXTENSION_NAME) {
-            surface = true;
-
             #[cfg(target_os = "android")]
             {
-                android_surface = push_ext(KHR_ANDROID_SURFACE_EXTENSION_NAME);
+                push_ext(KHR_ANDROID_SURFACE_EXTENSION_NAME);
             }
 
             #[cfg(any(
@@ -278,80 +224,59 @@ impl Graphics {
                 target_os = "openbsd",
             ))]
             {
-                xlib_surface = push_ext(KHR_XLIB_SURFACE_EXTENSION_NAME);
-                xcb_surface = push_ext(KHR_XCB_SURFACE_EXTENSION_NAME);
-                wayland_surface = push_ext(KHR_WAYLAND_SURFACE_EXTENSION_NAME);
+                push_ext(KHR_XLIB_SURFACE_EXTENSION_NAME);
+                push_ext(KHR_XCB_SURFACE_EXTENSION_NAME);
+                push_ext(KHR_WAYLAND_SURFACE_EXTENSION_NAME);
             }
 
             #[cfg(target_os = "windows")]
             {
-                win32_surface = push_ext(KHR_WIN32_SURFACE_EXTENSION_NAME);
+                push_ext(KHR_WIN32_SURFACE_EXTENSION_NAME);
             }
 
             #[cfg(any(target_os = "ios", target_os = "macos"))]
             {
-                metal_surface = push_ext(EXT_METAL_SURFACE_EXTENSION_NAME);
+                push_ext(EXT_METAL_SURFACE_EXTENSION_NAME);
             }
         }
 
-        let instance = unsafe {
-            core.create_instance(
-                &vk1_0::InstanceCreateInfo::default()
-                    .builder()
-                    .application_info(
-                        &vk1_0::ApplicationInfo::default()
-                            .builder()
-                            .engine_name(
-                                CStr::from_bytes_with_nul(b"Purr\0").unwrap(),
-                            )
-                            .engine_version(1)
-                            .application_name(
-                                CStr::from_bytes_with_nul(b"PurrApp\0")
-                                    .unwrap(),
-                            )
-                            .application_version(1)
-                            .api_version(version),
-                    )
-                    .enabled_layer_names(&enable_layers)
-                    .enabled_extension_names(&enable_exts),
-                None,
-                None,
-            )
-        }
-        .result()?;
+        let result = InstanceLoader::new(
+            &entry,
+            &vk1_0::InstanceCreateInfo::default()
+                .into_builder()
+                .application_info(
+                    &vk1_0::ApplicationInfo::default()
+                        .into_builder()
+                        .engine_name(
+                            CStr::from_bytes_with_nul(b"Illume\0").unwrap(),
+                        )
+                        .engine_version(1)
+                        .application_name(
+                            CStr::from_bytes_with_nul(b"IllumeApp\0").unwrap(),
+                        )
+                        .application_version(1)
+                        .api_version(version),
+                )
+                .enabled_layer_names(&enable_layers)
+                .enabled_extension_names(&enable_exts),
+            None,
+        );
 
-        let mut instance = InstanceLoader::new(&core, instance)
-            .ok_or(InitError::CoreFunctionLoadFailed)?;
+        let instance = match result {
+            Err(LoaderError::SymbolNotAvailable) => {
+                return Err(InitError::FunctionLoadFailed);
+            }
+            Err(LoaderError::VulkanError(err)) => {
+                return Err(InitError::VulkanError { source: err });
+            }
+            Ok(ok) => ok,
+        };
 
-        instance
-            .load_vk1_0()
-            .ok_or(InitError::CoreFunctionLoadFailed)?;
-
-        if version >= make_version(1, 1, 0) {
-            instance
-                .load_vk1_1()
-                .ok_or(InitError::CoreFunctionLoadFailed)?;
-        }
-
-        if debug_utils_ext {
-            instance.load_ext_debug_utils().ok_or(
-                InitError::ExtensionLoadFailed {
-                    extension: "VK_EXT_debug_utils",
-                },
-            )?;
-        }
-
-        if debug_report_ext {
-            instance.load_ext_debug_report().ok_or(
-                InitError::ExtensionLoadFailed {
-                    extension: "VK_EXT_debug_report",
-                },
-            )?;
-
+        if instance.enabled.ext_debug_report {
             let _ = unsafe {
                 instance.create_debug_report_callback_ext(
                     &DebugReportCallbackCreateInfoEXT::default()
-                        .builder()
+                        .into_builder()
                         .flags(DebugReportFlagsEXT::all())
                         .pfn_callback(Some(debug_report_callback)),
                     None,
@@ -361,104 +286,12 @@ impl Graphics {
             .result()?;
         }
 
-        if surface {
-            instance.load_khr_surface().ok_or(
-                InitError::ExtensionLoadFailed {
-                    extension: "VK_KHR_surface",
-                },
-            )?;
-
-            #[cfg(any(
-                target_os = "linux",
-                target_os = "dragonfly",
-                target_os = "freebsd",
-                target_os = "netbsd",
-                target_os = "openbsd",
-            ))]
-            {
-                if xlib_surface {
-                    instance.load_khr_xlib_surface().ok_or(
-                        InitError::ExtensionLoadFailed {
-                            extension: "VK_KHR_xlib_surface",
-                        },
-                    )?;
-                }
-            }
-
-            #[cfg(any(
-                target_os = "linux",
-                target_os = "dragonfly",
-                target_os = "freebsd",
-                target_os = "netbsd",
-                target_os = "openbsd",
-            ))]
-            {
-                if xcb_surface {
-                    instance.load_khr_xcb_surface().ok_or(
-                        InitError::ExtensionLoadFailed {
-                            extension: "VK_KHR_xcb_surface",
-                        },
-                    )?;
-                }
-            }
-
-            #[cfg(any(
-                target_os = "linux",
-                target_os = "dragonfly",
-                target_os = "freebsd",
-                target_os = "netbsd",
-                target_os = "openbsd",
-            ))]
-            {
-                if wayland_surface {
-                    instance.load_khr_wayland_surface().ok_or(
-                        InitError::ExtensionLoadFailed {
-                            extension: "VK_KHR_wayland_surface",
-                        },
-                    )?;
-                }
-            }
-
-            #[cfg(target_os = "android")]
-            {
-                if android_surface {
-                    instance.load_khr_android_surface().ok_or(
-                        InitError::ExtensionLoadFailed {
-                            extension: "VK_KHR_android_surface",
-                        },
-                    )?;
-                }
-            }
-
-            #[cfg(target_os = "windows")]
-            {
-                if win32_surface {
-                    instance.load_khr_win32_surface().ok_or(
-                        InitError::ExtensionLoadFailed {
-                            extension: "VK_KHR_win32_surface",
-                        },
-                    )?;
-                }
-            }
-
-            #[cfg(any(target_os = "ios", target_os = "macos"))]
-            {
-                if metal_surface {
-                    instance.load_ext_metal_surface().ok_or(
-                        InitError::ExtensionLoadFailed {
-                            extension: "VK_EXT_metal_surface",
-                        },
-                    )?;
-                }
-            }
-        }
-
         tracing::trace!("Instance created");
 
         let graphics = Graphics {
             instance,
-            _core: core,
             version,
+            _entry: entry,
         };
 
         Ok(graphics)
@@ -483,7 +316,7 @@ impl Graphics {
                     source: OutOfMemory,
                 }
             }
-            _ => EnumerateDeviceError::UnexpectedVulkanResult { result: err },
+            _ => EnumerateDeviceError::UnexpectedVulkanError { result: err },
         })?;
 
         tracing::trace!("Physical devices {:?}", devices);
@@ -549,7 +382,7 @@ impl Graphics {
 
             #[cfg(target_os = "windows")]
             RawWindowHandle::Windows(handle) => {
-                if self.instance.khr_win32_surface.is_none() {
+                if !self.instance.enabled.khr_win32_surface {
                     return Err(CreateSurfaceError::UnsupportedWindow {
                         window: RawWindowHandleKind::Windows,
                         source: Some(Box::new(
@@ -574,7 +407,7 @@ impl Graphics {
                     vk1_0::Result::ERROR_OUT_OF_DEVICE_MEMORY => {
                         OutOfMemory.into()
                     }
-                    _ => CreateSurfaceError::UnexpectedVulkanResult {
+                    _ => CreateSurfaceError::UnexpectedVulkanError {
                         window: RawWindowHandleKind::Windows,
                         result: err,
                     },
@@ -589,7 +422,7 @@ impl Graphics {
                 target_os = "openbsd"
             ))]
             RawWindowHandle::Xcb(handle) => {
-                if self.instance.khr_xcb_surface.is_none() {
+                if !self.instance.enabled.khr_xcb_surface {
                     return Err(CreateSurfaceError::UnsupportedWindow {
                         window: RawWindowHandleKind::Xcb,
                         source: Some(Box::new(
@@ -611,7 +444,7 @@ impl Graphics {
                 target_os = "openbsd"
             ))]
             RawWindowHandle::Xlib(handle) => {
-                if self.instance.khr_xlib_surface.is_none() {
+                if !self.instance.enabled.khr_xlib_surface {
                     return Err(CreateSurfaceError::UnsupportedWindow {
                         window: RawWindowHandleKind::Xlib,
                         source: Some(Box::new(

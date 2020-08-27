@@ -1,22 +1,11 @@
 mod layout;
 
-pub use self::layout::*;
+pub use {self::layout::*, crate::backend::DescriptorSet};
 
 use crate::{
     accel::AccelerationStructure, buffer::Buffer, image::Layout,
     sampler::Sampler, view::ImageView,
 };
-use erupt::vk1_0;
-
-define_handle! {
-    /// Set of descriptors with specific layout.
-    pub struct DescriptorSet {
-        pub info: DescriptorSetInfo,
-        handle: vk1_0::DescriptorSet,
-        pool: vk1_0::DescriptorPool,
-        pool_index: usize,
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct DescriptorSetInfo {

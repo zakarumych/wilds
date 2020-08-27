@@ -1,15 +1,19 @@
-use super::PipelineLayout;
-use crate::{
-    format::Format,
-    render_pass::RenderPass,
-    sampler::CompareOp,
-    shader::{FragmentShader, VertexShader},
-    Rect2d,
+use {
+    super::PipelineLayout,
+    crate::{
+        format::Format,
+        render_pass::RenderPass,
+        sampler::CompareOp,
+        shader::{FragmentShader, VertexShader},
+        Rect2d,
+    },
+    ordered_float::OrderedFloat,
 };
-use erupt::vk1_0;
-use ordered_float::OrderedFloat;
 
-pub use self::State::{Dynamic, Static};
+pub use {
+    self::State::{Dynamic, Static},
+    crate::backend::GraphicsPipeline,
+};
 
 /// Wrapper for pipeline states that can be either static or dynamic.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -48,14 +52,6 @@ impl<T> From<T> for State<T> {
 pub struct Bounds {
     pub offset: OrderedFloat<f32>,
     pub size: OrderedFloat<f32>,
-}
-
-define_handle! {
-    /// Resource that describes whole graphics pipeline state.
-    pub struct GraphicsPipeline {
-        pub info: GraphicsPipelineInfo,
-        handle: vk1_0::Pipeline,
-    }
 }
 
 /// Graphics pipeline state definition.

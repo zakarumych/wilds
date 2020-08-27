@@ -2,20 +2,12 @@ mod compute;
 mod graphics;
 mod ray_tracing;
 
-pub use self::{compute::*, graphics::*, ray_tracing::*};
-
-use {
-    crate::{descriptor::DescriptorSetLayout, shader::ShaderStageFlags},
-    erupt::vk1_0,
+pub use {
+    self::{compute::*, graphics::*, ray_tracing::*},
+    crate::backend::PipelineLayout,
 };
 
-define_handle! {
-    /// Resource that describes layout of a pipeline.
-    pub struct PipelineLayout {
-        pub info: PipelineLayoutInfo,
-        handle: vk1_0::PipelineLayout,
-    }
-}
+use crate::{descriptor::DescriptorSetLayout, shader::ShaderStageFlags};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PushConstant {

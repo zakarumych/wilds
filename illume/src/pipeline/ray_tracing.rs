@@ -1,14 +1,5 @@
+pub use crate::backend::RayTracingPipeline;
 use crate::{buffer::StridedBufferRegion, shader::Shader, PipelineLayout};
-use erupt::vk1_0;
-
-define_handle! {
-    /// Resource that describes whole ray-tracing pipeline state.
-    pub struct RayTracingPipeline {
-        pub info: RayTracingPipelineInfo,
-        handle: vk1_0::Pipeline,
-        group_handlers: Box<[u8]>,
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct RayTracingPipelineInfo {

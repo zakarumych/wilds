@@ -18,21 +18,21 @@ use std::{
 macro_rules! define_handle {
     (
         $(#[$meta:meta])*
-        pub struct $resource:ident {
+        pub struct $resource:ident : $inner:ident {
             pub info: $info:ty,
+            pub owner: $owner:ty,
             handle: $handle:ty,
             $($fname:ident: $fty:ty,)*
         }
     ) => {
-        pub(crate) struct Inner {
+        pub struct $inner {
             info: $info,
-            owner: crate::device::WeakDevice,
-            index: usize,
+            owner: $owner,
             handle: $handle,
             $($fname: $fty,)*
         }
 
-        impl ::std::fmt::Debug for Inner {
+        impl ::std::fmt::Debug for $inner {
             fn fmt(&self, fmt: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
                 if fmt.alternate() {
                     fmt.debug_struct(stringify!($resource))
@@ -53,7 +53,7 @@ macro_rules! define_handle {
         #[repr(transparent)]
         $(#[$meta])*
         pub struct $resource {
-            inner: std::sync::Arc<Inner>,
+            inner: std::sync::Arc<$inner>,
         }
 
         impl ::std::fmt::Debug for $resource {
@@ -79,62 +79,57 @@ macro_rules! define_handle {
         impl $resource {
             pub(crate) fn make(
                 info: $info,
+                owner: $owner,
                 handle: $handle,
                 $($fname: $fty,)*
-                owner: crate::device::WeakDevice,
-                index: usize,
             ) -> Self {
                 $resource {
-                    inner: std::sync::Arc::new(Inner {
+                    inner: std::sync::Arc::new($inner {
                         info,
+                        owner,
                         handle,
                         $($fname,)*
-                        owner,
-                        index,
                     })
                 }
             }
 
-            pub(crate) fn is_owner(&self, device: &crate::device::Device) -> bool {
-                self.inner.owner.is(device)
-            }
-
-            pub(crate) fn handle(&self, device: &crate::device::Device) -> $handle {
-                assert!(self.is_owner(device), "Wrong device");
+            pub(crate) fn handle(&self, owner: &impl PartialEq<$owner>) -> $handle {
+                assert!(self.is_owned_by(owner), "Wrong owner");
                 self.inner.handle
             }
 
             $(
                 #[allow(dead_code)]
-                pub(crate) fn $fname(&self, device: &crate::device::Device) -> &$fty {
-                    assert!(self.is_owner(device), "Wrong device");
+                pub(crate) fn $fname(&self, owner: &impl PartialEq<$owner>) -> &$fty {
+                    assert!(self.is_owned_by(owner), "Wrong owner");
                     &self.inner.$fname
                 }
             )*
 
-            #[allow(dead_code)]
             pub fn info(&self) -> &$info {
                 &self.inner.info
             }
 
-            pub fn index(&self) -> usize {
-                self.inner.index
+            pub fn owner(&self) -> &$owner {
+                &self.inner.owner
+            }
+
+            pub fn is_owned_by(&self, owner: &impl PartialEq<$owner>) -> bool {
+                *owner == *self.owner()
             }
         }
     };
 }
 
+pub mod backend;
+
 mod accel;
-mod access;
 mod buffer;
-mod convert;
 mod descriptor;
-mod device;
 mod encode;
 mod fence;
 mod format;
 mod framebuffer;
-mod graphics;
 mod image;
 mod memory;
 mod physical;
@@ -146,13 +141,31 @@ mod semaphore;
 mod shader;
 mod stage;
 mod surface;
+mod swapchain;
 mod view;
 
 pub use self::{
-    accel::*, buffer::*, descriptor::*, device::*, encode::*, fence::*,
-    format::*, framebuffer::*, graphics::*, image::*, memory::*, physical::*,
-    pipeline::*, queue::*, render_pass::*, sampler::*, semaphore::*, shader::*,
-    stage::*, surface::*, view::*,
+    accel::*,
+    backend::{Device, Graphics},
+    buffer::*,
+    descriptor::*,
+    encode::*,
+    fence::*,
+    format::*,
+    framebuffer::*,
+    image::*,
+    memory::*,
+    physical::*,
+    pipeline::*,
+    queue::*,
+    render_pass::*,
+    sampler::*,
+    semaphore::*,
+    shader::*,
+    stage::*,
+    surface::*,
+    swapchain::*,
+    view::*,
 };
 
 /// Image size is defiend to `u32` which is standard for graphics API today.
@@ -334,6 +347,74 @@ impl IndexType {
             IndexType::U32 => 4,
         }
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum CreateDeviceError<E: Error + 'static> {
+    #[error("{source}")]
+    OutOfMemory {
+        #[from]
+        source: OutOfMemory,
+    },
+
+    #[error("Non-existed families are requested")]
+    BadFamiliesRequested,
+
+    #[error("{source}")]
+    CannotFindRequeredQueues { source: E },
+
+    /// Implementation specific error.
+    #[error("Failed to load functions")]
+    FunctionLoadFailed,
+
+    #[cfg(feature = "vulkan")]
+    #[error("Function returned unexpected error code: {result}")]
+    UnexpectedVulkanError { result: erupt::vk1_0::Result },
+}
+
+/// Possible error which can be returned from `create_buffer_*`.
+#[derive(Debug, thiserror::Error)]
+pub enum CreateBufferError {
+    #[error("{source}")]
+    OutOfMemory {
+        #[from]
+        source: OutOfMemory,
+    },
+
+    #[error("Buffer usage {usage:?} is unsupported")]
+    UnsupportedUsage { usage: BufferUsage },
+}
+
+/// Possible error which can be returned from `create_image_*)`.
+#[derive(Debug, thiserror::Error)]
+pub enum CreateImageError {
+    #[error("{source}")]
+    OutOfMemory {
+        #[from]
+        source: OutOfMemory,
+    },
+
+    #[error("Combination paramters `{info:?}` is unsupported")]
+    Unsupported { info: ImageInfo },
+}
+
+/// Possible error that may occur during memory mapping.
+#[derive(Clone, Copy, Debug, thiserror::Error)]
+pub enum MappingError {
+    /// Device memory is exhausted.
+    #[error("{source}")]
+    OutOfMemory {
+        #[from]
+        source: OutOfMemory,
+    },
+
+    /// Memory is not host-visible.
+    #[error("Memory is not host-visible")]
+    NonHostVisible,
+
+    /// Mapping requests exceeds block size.
+    #[error("Memory map request out of memory block bounds")]
+    OutOfBounds,
 }
 
 #[doc(hidden)]

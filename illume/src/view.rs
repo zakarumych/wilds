@@ -1,14 +1,5 @@
-use {
-    crate::image::{Image, ImageExtent, ImageSubresourceRange},
-    erupt::vk1_0,
-};
-
-define_handle! {
-    pub struct ImageView {
-        pub info: ImageViewInfo,
-        handle: vk1_0::ImageView,
-    }
-}
+pub use crate::backend::ImageView;
+use crate::image::{Image, ImageExtent, ImageSubresourceRange};
 
 /// Kind of image view.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]

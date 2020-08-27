@@ -1120,7 +1120,7 @@ impl ToErupt<vkrt::AccelerationStructureCreateGeometryTypeInfoKHR>
     fn to_erupt(self) -> vkrt::AccelerationStructureCreateGeometryTypeInfoKHR {
         let builder =
             vkrt::AccelerationStructureCreateGeometryTypeInfoKHR::default()
-                .builder();
+                .into_builder();
 
         *match self {
             AccelerationStructureGeometryInfo::AABBs {
