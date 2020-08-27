@@ -25,8 +25,8 @@ pub enum Semantics {
     Tangent3d,
     UV,
     Color,
-    Joint,
-    Weigth,
+    Joints,
+    Weights,
 }
 
 impl Semantics {
@@ -111,6 +111,60 @@ impl FromBytes for u32 {
         E::read_u32(bytes)
     }
 }
+
+impl FromBytes for f32 {
+    fn from_bytes<E: ByteOrder>(bytes: &[u8]) -> Self {
+        E::read_f32(bytes)
+    }
+}
+
+// impl FromBytes for Vec2 {
+//     fn from_bytes<E: ByteOrder>(bytes: &[u8]) -> Self {
+//         let mut v = [0.0; 2];
+//         E::read_f32_into(bytes, &mut v);
+//         Vec2::from(v)
+//     }
+// }
+
+// impl FromBytes for Vec3 {
+//     fn from_bytes<E: ByteOrder>(bytes: &[u8]) -> Self {
+//         let mut v = [0.0; 3];
+//         E::read_f32_into(bytes, &mut v);
+//         Vec3::from(v)
+//     }
+// }
+
+// impl FromBytes for Vec4 {
+//     fn from_bytes<E: ByteOrder>(bytes: &[u8]) -> Self {
+//         let mut v = [0.0; 4];
+//         E::read_f32_into(bytes, &mut v);
+//         Vec4::from(v)
+//     }
+// }
+
+// impl FromBytes for Mat2 {
+//     fn from_bytes<E: ByteOrder>(bytes: &[u8]) -> Self {
+//         let mut v = [0.0; 4];
+//         E::read_f32_into(bytes, &mut v);
+//         Mat2::from(v)
+//     }
+// }
+
+// impl FromBytes for Mat3 {
+//     fn from_bytes<E: ByteOrder>(bytes: &[u8]) -> Self {
+//         let mut v = [0.0; 9];
+//         E::read_f32_into(bytes, &mut v);
+//         Mat3::from(v)
+//     }
+// }
+
+// impl FromBytes for Mat4 {
+//     fn from_bytes<E: ByteOrder>(bytes: &[u8]) -> Self {
+//         let mut v = [0.0; 16];
+//         E::read_f32_into(bytes, &mut v);
+//         Mat4::from(v)
+//     }
+// }
 
 /// Trait for vertex layouts.
 pub trait VertexType: FromBytes + Pod {
@@ -258,6 +312,58 @@ impl VertexType for UV {
         semantics: Some(Semantics::UV),
     }];
     const NAME: &'static str = "UV";
+    const RATE: VertexInputRate = VertexInputRate::Vertex;
+}
+
+/// Attribute for texture coordinates.
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+#[repr(transparent)]
+pub struct Joints(pub [u32; 4]);
+
+unsafe impl Zeroable for Joints {}
+unsafe impl Pod for Joints {}
+
+impl FromBytes for Joints {
+    fn from_bytes<E: ByteOrder>(bytes: &[u8]) -> Self {
+        let mut joints = [0; 4];
+        E::read_u32_into(bytes, &mut joints);
+        Joints(joints)
+    }
+}
+
+impl VertexType for Joints {
+    const LOCATIONS: &'static [VertexLocation] = &[VertexLocation {
+        format: Format::RGBA32Uint,
+        offset: 0,
+        semantics: Some(Semantics::Joints),
+    }];
+    const NAME: &'static str = "Joints";
+    const RATE: VertexInputRate = VertexInputRate::Vertex;
+}
+
+/// Attribute for texture coordinates.
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+#[repr(transparent)]
+pub struct Weights(pub [f32; 4]);
+
+unsafe impl Zeroable for Weights {}
+unsafe impl Pod for Weights {}
+
+impl FromBytes for Weights {
+    fn from_bytes<E: ByteOrder>(bytes: &[u8]) -> Self {
+        let mut weights = [0.0; 4];
+        E::read_f32_into(bytes, &mut weights);
+        Weights(weights)
+    }
+}
+
+impl VertexType for Weights {
+    const LOCATIONS: &'static [VertexLocation] = &[VertexLocation {
+        format: Format::RGBA32Sfloat,
+        offset: 0,
+        semantics: Some(Semantics::Weights),
+    }];
+    const NAME: &'static str = "Weights";
     const RATE: VertexInputRate = VertexInputRate::Vertex;
 }
 
@@ -620,6 +726,52 @@ impl VertexType for PositionNormal3dColor {
         },
     ];
     const NAME: &'static str = "PositionNormal3dColor";
+    const RATE: VertexInputRate = VertexInputRate::Vertex;
+}
+
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+#[repr(C)]
+pub struct Skin {
+    pub joints: Joints,
+    pub weights: Weights,
+}
+
+unsafe impl Zeroable for Skin {}
+unsafe impl Pod for Skin {}
+
+impl FromBytes for Skin {
+    fn from_bytes<E: ByteOrder>(bytes: &[u8]) -> Self {
+        let mut array = [0; 4];
+        E::read_u32_into(bytes, &mut array);
+
+        let joints = Joints(array);
+
+        let bytes = &bytes[size_of_val(&array)..];
+
+        let mut array = [0.0; 4];
+        E::read_f32_into(bytes, &mut array);
+
+        let [x, y, z, w] = array;
+        let weights = Weights([x, y, z, w]);
+
+        Skin { joints, weights }
+    }
+}
+
+impl VertexType for Skin {
+    const LOCATIONS: &'static [VertexLocation] = &[
+        VertexLocation {
+            format: Format::RGBA32Uint,
+            offset: 0,
+            semantics: Some(Semantics::Joints),
+        },
+        VertexLocation {
+            format: Format::RGBA32Sfloat,
+            offset: size_of::<Joints>() as u32,
+            semantics: Some(Semantics::Weights),
+        },
+    ];
+    const NAME: &'static str = "Skin";
     const RATE: VertexInputRate = VertexInputRate::Vertex;
 }
 

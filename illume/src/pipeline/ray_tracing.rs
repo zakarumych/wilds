@@ -1,7 +1,4 @@
-use crate::{
-    accel::AccelerationStructure, buffer::StridedBufferRegion, format::Format,
-    shader::Shader, DeviceAddress, IndexType, PipelineLayout,
-};
+use crate::{buffer::StridedBufferRegion, shader::Shader, PipelineLayout};
 use erupt::vk1_0;
 
 define_handle! {

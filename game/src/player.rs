@@ -1,7 +1,6 @@
 use {
     hecs::Entity,
     std::collections::HashMap,
-    ultraviolet::Vec2,
     wilds::engine::{System, SystemContext},
     winit::{
         dpi::PhysicalSize,
@@ -81,7 +80,7 @@ impl Default for ActionMap {
 /// Takes input events
 /// and controls player's character.
 pub struct Player {
-    cursor_pos: Vec2,
+    cursor_pos: [f64; 2],
     window_size: PhysicalSize<u32>,
     window_id: WindowId,
     action_map: ActionMap,
@@ -99,7 +98,7 @@ impl Player {
         action_map: ActionMap,
     ) -> Self {
         Player {
-            cursor_pos: Vec2::new(0.5, 0.5),
+            cursor_pos: [0.5; 2],
             action_map,
             controls,
             window_size: window.inner_size(),
@@ -118,11 +117,10 @@ impl Player {
                         None
                     }
                     &WindowEvent::CursorMoved { position, .. } => {
-                        self.cursor_pos = Vec2::new(
-                            (position.x / self.window_size.width as f64) as f32,
-                            (position.y / self.window_size.height as f64)
-                                as f32,
-                        );
+                        self.cursor_pos = [
+                            (position.x / self.window_size.width as f64),
+                            (position.y / self.window_size.height as f64),
+                        ];
                         None
                     }
                     &WindowEvent::MouseWheel {

@@ -1,34 +1,31 @@
 use {
-    super::Pass,
+    super::{Pass, SparseDescriptors},
     crate::{
+        animate::Pose,
         light::{DirectionalLight, PointLight, SkyLight},
         renderer::{
-            Context, Mesh, PositionNormalTangent3dUV, Renderable, Texture,
+            ray_tracing_transform_matrix_from_nalgebra, Context, Mesh,
+            PoseMesh, PositionNormalTangent3dUV, Renderable, Texture,
             VertexType,
         },
+        scene::Global3,
     },
     bumpalo::{collections::Vec as BVec, Bump},
     bytemuck::{Pod, Zeroable},
     color_eyre::Report,
     eyre::ensure,
-    fastbitset::BitSet,
     hecs::World,
     illume::*,
-    std::{
-        collections::hash_map::{Entry, HashMap},
-        convert::TryFrom as _,
-        hash::Hash,
-        mem::size_of,
-    },
-    ultraviolet::{Isometry3, Mat4, Vec3},
+    nalgebra as na,
+    std::{collections::HashMap, convert::TryFrom as _, mem::size_of},
 };
 
 const MAX_INSTANCE_COUNT: u16 = 1024;
 
 pub struct Input<'a> {
     pub extent: Extent2d,
-    pub camera_transform: Mat4,
-    pub camera_projection: Mat4,
+    pub camera_global: Global3,
+    pub camera_projection: na::Projective3<f32>,
     pub blases: &'a HashMap<Mesh, AccelerationStructure>,
 }
 
@@ -39,53 +36,6 @@ pub struct Output {
     pub emissive: Image,
     pub direct: Image,
     pub diffuse: Image,
-}
-
-struct SparseDescriptors<T> {
-    resources: HashMap<T, u32>,
-    bitset: BitSet,
-    next: u32,
-}
-
-impl<T> SparseDescriptors<T>
-where
-    T: Hash + Eq,
-{
-    fn new() -> Self {
-        SparseDescriptors {
-            resources: HashMap::new(),
-            bitset: BitSet::new(),
-            next: 0,
-        }
-    }
-
-    fn index(&mut self, resource: T) -> (u32, bool) {
-        match self.resources.entry(resource) {
-            Entry::Occupied(entry) => (*entry.get(), false),
-            Entry::Vacant(entry) => {
-                if let Some(index) = self.bitset.find_set() {
-                    self.bitset.unset(index);
-                    (*entry.insert(index as u32), true)
-                } else {
-                    self.next += 1;
-                    (*entry.insert(self.next - 1), true)
-                }
-            }
-        }
-    }
-
-    fn _remove(&mut self, resource: &T) -> Option<u32> {
-        if let Some(value) = self.resources.remove(resource) {
-            if value == self.next - 1 {
-                self.next -= 1;
-            } else {
-                self.bitset.set(value as usize);
-            }
-            Some(value)
-        } else {
-            None
-        }
-    }
 }
 
 pub struct RtPrepass {
@@ -114,12 +64,13 @@ pub struct RtPrepass {
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 struct ShaderInstance {
-    transform: Mat4,
+    transform: na::Matrix4<f32>,
     mesh: u32,
     albedo_sampler: u32,
     albedo_factor: [f32; 4],
     normal_sampler: u32,
     normal_factor: f32,
+    anim: u32,
 }
 
 unsafe impl Zeroable for ShaderInstance {}
@@ -145,7 +96,7 @@ impl RtPrepass {
     ) -> Result<Self, Report> {
         // Create pipeline.
         let set_layout = ctx.create_descriptor_set_layout(DescriptorSetLayoutInfo {
-                flags: DescriptorSetLayoutFlags::UPDATE_AFTER_BIND_POOL,
+                flags: DescriptorSetLayoutFlags::empty(),
                 bindings: vec![
                     // TLAS.
                     DescriptorSetLayoutBinding {
@@ -270,6 +221,14 @@ impl RtPrepass {
                         stages: ShaderStageFlags::CLOSEST_HIT,
                         flags: DescriptorBindingFlags::empty(),
                     },
+                    // Animated vertices
+                    DescriptorSetLayoutBinding {
+                        binding: 3,
+                        ty: DescriptorType::StorageBuffer,
+                        count: 1024,
+                        stages: ShaderStageFlags::CLOSEST_HIT,
+                        flags: DescriptorBindingFlags::PARTIALLY_BOUND,
+                    },
                 ],
             },
         )?;
@@ -277,6 +236,7 @@ impl RtPrepass {
         let pipeline_layout =
             ctx.create_pipeline_layout(PipelineLayoutInfo {
                 sets: vec![set_layout.clone(), per_frame_set_layout.clone()],
+                push_constants: Vec::new(),
             })?;
 
         let primary_rgen = RaygenShader::with_main(
@@ -630,9 +590,7 @@ impl<'a> Pass<'a> for RtPrepass {
         world: &mut World,
         bump: &Bump,
     ) -> Result<Output, Report> {
-        // let mut reg = Region::new();
-
-        let fid = (frame % 2) as u32;
+        let findex = (frame & 1) as u32;
 
         assert_eq!(self.output_albedo_image.info().extent, input.extent.into());
 
@@ -644,39 +602,50 @@ impl<'a> Pass<'a> for RtPrepass {
         //   and having a good quality top-level acceleration structure can have
         // a significant payoff   (bad quality has a higher cost further
         // up in the tree).
-        let mut instances: BVec<ShaderInstance> = BVec::new_in(bump);
-        let mut acc_instances: BVec<AccelerationStructureInstance> =
-            BVec::new_in(bump);
+        let mut instances = BVec::new_in(bump);
+        let mut acc_instances = BVec::new_in(bump);
+        let mut anim_vertices_descriptors = BVec::new_in(bump);
 
-        // tracing::info!("Bumps:\n{:#?}", reg.change_and_reset());
+        let mut writes = BVec::new_in(bump);
 
-        let mut writes = BVec::with_capacity_in(3, bump);
+        let mut encoder = ctx.queue.create_encoder()?;
 
-        let mut query = world.query::<(&Renderable, &Isometry3)>();
-        for (entity, (renderable, iso)) in query.iter() {
+        let mut query = world.query::<(
+            &Renderable,
+            &Global3,
+            Option<&Pose>,
+            Option<&PoseMesh>,
+        )>();
+
+        for (entity, (renderable, global, pose, pose_mesh)) in query.iter() {
             if let Some(blas) = input.blases.get(&renderable.mesh) {
                 let blas_address =
                     ctx.get_acceleration_structure_device_address(blas);
 
-                let m = match renderable.transform {
-                    Some(t) => iso.into_homogeneous_matrix() * t,
-                    None => iso.into_homogeneous_matrix(),
-                };
+                // let m = match renderable.transform {
+                //     Some(t) => global.to_homogeneous() * t,
+                //     None => global.to_homogeneous(),
+                // };
 
-                acc_instances.push(
-                    AccelerationStructureInstance::new(blas_address)
-                        .with_transform(m.into()),
-                );
+                let m = global.to_homogeneous();
 
-                let (mesh_index, new) =
+                let (mut mesh_index, new) =
                     self.meshes.index(renderable.mesh.clone());
                 if new {
-                    let binding = &renderable.mesh.bindings()[0];
+                    let vectors = renderable
+                        .mesh
+                        .bindings()
+                        .iter()
+                        .find(|binding| {
+                            binding.layout
+                                == PositionNormalTangent3dUV::layout()
+                        })
+                        .unwrap();
 
-                    assert_eq!(
-                        binding.layout,
-                        PositionNormalTangent3dUV::layout()
-                    );
+                    let vectors_buffer = vectors.buffer.clone();
+                    let vectors_offset = vectors.offset;
+                    let vectors_size: u64 = vectors.layout.stride as u64
+                        * renderable.mesh.vertex_count() as u64;
 
                     let indices = renderable.mesh.indices().unwrap();
                     let indices_buffer = indices.buffer.clone();
@@ -684,42 +653,86 @@ impl<'a> Pass<'a> for RtPrepass {
                     let indices_size: u64 = indices.index_type.size() as u64
                         * renderable.mesh.count() as u64;
 
-                    let vertices_buffer = binding.buffer.clone();
-                    let vertices_offset = binding.offset;
-                    let vertices_size: u64 = binding.layout.stride as u64
-                        * renderable.mesh.vertex_count() as u64;
-
+                    assert_eq!(vectors_offset & 15, 0);
                     assert_eq!(indices_offset & 15, 0);
-                    assert_eq!(vertices_offset & 15, 0);
 
-                    let indices_descriptors =
-                        Descriptors::StorageBuffer(bump.alloc([(
-                            indices_buffer,
-                            indices_offset,
-                            indices_size,
-                        )]));
+                    // FIXME: Leak
+                    let indices_desc = Descriptors::StorageBuffer(bump.alloc(
+                        [(indices_buffer, indices_offset, indices_size)],
+                    ));
 
-                    let vertices_descriptors =
-                        Descriptors::StorageBuffer(bump.alloc([(
-                            vertices_buffer,
-                            vertices_offset,
-                            vertices_size,
-                        )]));
+                    let vectors_desc = Descriptors::StorageBuffer(bump.alloc(
+                        [(vectors_buffer, vectors_offset, vectors_size)],
+                    ));
 
                     writes.push(WriteDescriptorSet {
                         set: &self.set,
                         binding: 2,
                         element: mesh_index,
-                        descriptors: indices_descriptors,
+                        descriptors: indices_desc,
                     });
 
                     writes.push(WriteDescriptorSet {
                         set: &self.set,
                         binding: 3,
                         element: mesh_index,
-                        descriptors: vertices_descriptors,
+                        descriptors: vectors_desc,
                     });
                 }
+
+                let anim = if let (Some(_), Some(pose_mesh)) = (pose, pose_mesh)
+                {
+                    let vectors = pose_mesh
+                        .bindings()
+                        .iter()
+                        .find(|binding| {
+                            binding.layout
+                                == PositionNormalTangent3dUV::layout()
+                        })
+                        .unwrap();
+
+                    let vectors_buffer = vectors.buffer.clone();
+                    let vectors_offset = vectors.offset;
+                    let vectors_size: u64 = vectors.layout.stride as u64
+                        * renderable.mesh.vertex_count() as u64;
+
+                    mesh_index = anim_vertices_descriptors.len() as u32;
+
+                    anim_vertices_descriptors.push((
+                        vectors_buffer,
+                        vectors_offset,
+                        vectors_size,
+                    ));
+
+                    let blas = renderable.mesh.build_pose_triangles_blas(
+                        pose_mesh,
+                        &mut encoder,
+                        &ctx.device,
+                        bump,
+                    )?;
+
+                    // FIXME: blas leak
+                    let blas_address = ctx
+                        .device
+                        .get_acceleration_structure_device_address(&blas);
+
+                    acc_instances.push(
+                        AccelerationStructureInstance::new(blas_address)
+                            .with_transform(
+                                ray_tracing_transform_matrix_from_nalgebra(&m),
+                            ),
+                    );
+
+                    true
+                } else {
+                    acc_instances.push(
+                        AccelerationStructureInstance::new(blas_address)
+                            .with_transform(
+                                ray_tracing_transform_matrix_from_nalgebra(&m),
+                            ),
+                    );
+                    false
+                };
 
                 let albedo_index = if let Some(albedo) =
                     &renderable.material.albedo
@@ -789,6 +802,7 @@ impl<'a> Pass<'a> for RtPrepass {
                         .material
                         .normal_factor
                         .into_inner(),
+                    anim: anim as u32,
                 });
             } else {
                 tracing::error!("Missing BLAS for mesh @ {:?}", entity);
@@ -798,6 +812,17 @@ impl<'a> Pass<'a> for RtPrepass {
             //     "Prepass. Per object:\n{:#?}",
             //     reg.change_and_reset()
             // );
+        }
+
+        if !anim_vertices_descriptors.is_empty() {
+            writes.push(WriteDescriptorSet {
+                set: &self.per_frame_sets[findex as usize],
+                binding: 3,
+                element: 0,
+                descriptors: Descriptors::StorageBuffer(
+                    &anim_vertices_descriptors,
+                ),
+            });
         }
 
         ctx.update_descriptor_sets(&writes, &[]);
@@ -813,8 +838,6 @@ impl<'a> Pass<'a> for RtPrepass {
 
         ensure!(u32::try_from(instances.len()).is_ok(), "Too many instances");
 
-        let mut encoder = ctx.queue.create_encoder()?;
-
         // Sync BLAS and TLAS builds.
         encoder.pipeline_barrier(
             PipelineStageFlags::ACCELERATION_STRUCTURE_BUILD,
@@ -823,24 +846,24 @@ impl<'a> Pass<'a> for RtPrepass {
 
         ctx.write_memory(
             &self.globals_and_instances,
-            acc_instances_offset(fid),
+            acc_instances_offset(findex),
             &acc_instances,
-        );
+        )?;
 
         ctx.write_memory(
             &self.globals_and_instances,
-            instances_offset(fid),
+            instances_offset(findex),
             &instances,
-        );
+        )?;
 
         let mut pointlights: BVec<ShaderPointLight> =
             BVec::with_capacity_in(32, bump);
         pointlights.extend(
             world
-                .query::<(&PointLight, &Isometry3)>()
+                .query::<(&PointLight, &Global3)>()
                 .iter()
-                .map(|(_, (pl, iso))| ShaderPointLight {
-                    position: iso.translation.into(),
+                .map(|(_, (pl, global))| ShaderPointLight {
+                    position: global.iso.translation.vector.into(),
                     radiance: pl.radiance,
                     _pad0: 0.0,
                     _pad1: 0.0,
@@ -850,9 +873,9 @@ impl<'a> Pass<'a> for RtPrepass {
 
         ctx.write_memory(
             &self.globals_and_instances,
-            pointlight_offset(fid),
+            pointlight_offset(findex),
             &pointlights,
-        );
+        )?;
 
         let infos = bump.alloc([AccelerationStructureBuildGeometryInfo {
             src: None,
@@ -863,7 +886,7 @@ impl<'a> Pass<'a> for RtPrepass {
                     data: ctx
                         .get_buffer_device_address(&self.globals_and_instances)
                         .unwrap()
-                        .offset(acc_instances_offset(fid)),
+                        .offset(acc_instances_offset(findex)),
                     primitive_count: instances.len() as u32,
                 },
             ]),
@@ -877,14 +900,14 @@ impl<'a> Pass<'a> for RtPrepass {
             .iter()
             .next()
             .map(|(_, dl)| GlobalsDirLight {
-                rad: Vec3::from(dl.radiance),
-                dir: dl.direction,
+                rad: dl.radiance,
+                dir: dl.direction.into(),
                 _pad0: 0.0,
                 _pad1: 0.0,
             })
             .unwrap_or(GlobalsDirLight {
-                rad: Vec3::zero(),
-                dir: Vec3::zero(),
+                rad: [0.0; 3],
+                dir: [0.0; 3],
                 _pad0: 0.0,
                 _pad1: 0.0,
             });
@@ -893,30 +916,31 @@ impl<'a> Pass<'a> for RtPrepass {
             .query::<&SkyLight>()
             .iter()
             .next()
-            .map(|(_, sl)| Vec3::from(sl.radiance))
+            .map(|(_, sl)| sl.radiance)
             .unwrap_or_default();
 
         let globals = Globals {
             camera: GlobalsCamera {
-                view: input.camera_transform,
-                iview: input.camera_transform.inversed(),
-                proj: input.camera_projection,
-                iproj: input.camera_projection.inversed(),
+                view: input.camera_global.to_homogeneous(),
+                // iview: input.camera_global.inverse().to_homogeneous(),
+                iview: na::Matrix4::identity(),
+                proj: input.camera_projection.to_homogeneous(),
+                iproj: input.camera_projection.inverse().to_homogeneous(),
             },
             dirlight,
             skylight,
             plights: pointlights.len() as u32,
             // frame: frame as u32,
             frame: 0,
-            shadow_rays: 8,
-            diffuse_rays: 8,
+            shadow_rays: 1,
+            diffuse_rays: 1,
         };
 
         ctx.write_memory(
             &self.globals_and_instances,
-            globals_offset(fid),
+            globals_offset(findex),
             std::slice::from_ref(&globals),
-        );
+        )?;
 
         encoder.bind_ray_tracing_pipeline(&self.pipeline);
 
@@ -925,7 +949,7 @@ impl<'a> Pass<'a> for RtPrepass {
             0,
             bump.alloc([
                 self.set.clone(),
-                self.per_frame_sets[fid as usize].clone(),
+                self.per_frame_sets[findex as usize].clone(),
             ]),
             &[],
         );
@@ -1031,10 +1055,10 @@ impl<'a> Pass<'a> for RtPrepass {
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
 struct GlobalsCamera {
-    view: Mat4,
-    proj: Mat4,
-    iview: Mat4,
-    iproj: Mat4,
+    view: na::Matrix4<f32>,
+    proj: na::Matrix4<f32>,
+    iview: na::Matrix4<f32>,
+    iproj: na::Matrix4<f32>,
 }
 
 unsafe impl Zeroable for GlobalsCamera {}
@@ -1043,9 +1067,9 @@ unsafe impl Pod for GlobalsCamera {}
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
 struct GlobalsDirLight {
-    dir: Vec3,
+    dir: [f32; 3],
     _pad0: f32,
-    rad: Vec3,
+    rad: [f32; 3],
     _pad1: f32,
 }
 
@@ -1057,7 +1081,7 @@ unsafe impl Pod for GlobalsDirLight {}
 struct Globals {
     camera: GlobalsCamera,
     dirlight: GlobalsDirLight,
-    skylight: Vec3,
+    skylight: [f32; 3],
     plights: u32,
     frame: u32,
     shadow_rays: u32,

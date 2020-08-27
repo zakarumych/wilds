@@ -32,7 +32,7 @@ unsafe impl Sync for Block {}
 enum BlockKind {
     Dedicated,
     Chunked {
-        index: usize,
+        index: u32,
         ptr: Option<NonNull<u8>>,
     },
     Linear {

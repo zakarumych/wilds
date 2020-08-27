@@ -10,19 +10,19 @@ pub use {
 
 use {
     self::pass::*,
-    crate::{camera::Camera, clocks::ClockIndex},
+    crate::{camera::Camera, clocks::ClockIndex, scene::Global3},
     bumpalo::{collections::Vec as BVec, Bump},
     bytemuck::Pod,
     color_eyre::Report,
     eyre::eyre,
     hecs::World,
+    nalgebra as na,
     std::{
         collections::hash_map::{Entry, HashMap},
         convert::TryFrom as _,
         ops::{Deref, DerefMut},
     },
     type_map::TypeMap,
-    ultraviolet::{Isometry3, Mat4},
     winit::window::Window,
 };
 
@@ -35,10 +35,11 @@ pub enum Error {
     },
 }
 
+#[derive(Clone, Debug)]
 pub struct Renderable {
     pub mesh: Mesh,
     pub material: Material,
-    pub transform: Option<Mat4>,
+    // pub transform: Option<na::Matrix4<f32>>,
 }
 
 pub struct Context {
@@ -54,7 +55,7 @@ impl Context {
         buffer: &Buffer,
         offset: u64,
         data: &[T],
-    ) -> Result<(), OutOfMemory>
+    ) -> Result<(), MappingError>
     where
         T: Pod,
     {
@@ -63,7 +64,7 @@ impl Context {
                 | MemoryUsageFlags::UPLOAD
                 | MemoryUsageFlags::DOWNLOAD,
         ) {
-            self.device.write_memory(buffer, offset, data);
+            self.device.write_memory(buffer, offset, data)?;
             Ok(())
         } else {
             let staging = self.device.create_buffer_static(
@@ -132,6 +133,7 @@ impl Context {
     where
         T: Pod,
     {
+        assert!(arith_ge(info.size, data.len()));
         if info.memory.intersects(
             MemoryUsageFlags::HOST_ACCESS
                 | MemoryUsageFlags::UPLOAD
@@ -141,7 +143,13 @@ impl Context {
         } else {
             info.usage |= BufferUsage::TRANSFER_DST;
             let buffer = self.device.create_buffer(info)?;
-            self.upload_buffer(&buffer, 0, data)?;
+            match self.upload_buffer(&buffer, 0, data) {
+                Ok(()) => {}
+                Err(MappingError::OutOfMemory { .. }) => {
+                    return Err(OutOfMemory)
+                }
+                _ => unreachable!(),
+            }
             Ok(buffer)
         }
     }
@@ -316,6 +324,7 @@ pub struct Renderer {
     blases: HashMap<Mesh, AccelerationStructure>,
 
     swapchain: Swapchain,
+    pose: PosePass,
     rt_prepass: RtPrepass,
     diffuse_filter: ATrousFilter,
     direct_filter: ATrousFilter,
@@ -411,14 +420,15 @@ impl Renderer {
             height: size.height,
         };
 
-        let rt_prepass = RtPrepass::new(window_extent, &mut context)?;
-
         let mut swapchain = context.create_swapchain(&mut surface)?;
         swapchain.configure(
             ImageUsage::COLOR_ATTACHMENT,
             format,
             PresentMode::Fifo,
         )?;
+
+        let pose = PosePass::new(&mut context)?;
+        let rt_prepass = RtPrepass::new(window_extent, &mut context)?;
 
         let combine = CombinePass::new(&mut context)?;
         let diffuse_filter = ATrousFilter::new(&mut context)?;
@@ -429,6 +439,7 @@ impl Renderer {
             frame: 0,
             blases: HashMap::new(),
             swapchain,
+            pose,
             rt_prepass,
             diffuse_filter,
             direct_filter,
@@ -454,14 +465,14 @@ impl Renderer {
 
         tracing::debug!("Rendering next frame");
 
-        let mut cameras = world.query::<(&Camera, &Isometry3)>();
+        let mut cameras = world.query::<(&Camera, &Global3)>();
         let camera = if let Some((_, camera)) = cameras.iter().next() {
             camera
         } else {
             tracing::warn!("No camera found");
             return Ok(());
         };
-        let camera_isometry = *camera.1;
+        let camera_global = *camera.1;
         let camera_projection = camera.0.projection();
         drop(cameras);
 
@@ -469,7 +480,7 @@ impl Renderer {
 
         // Create BLASes for new meshes.
         for (_, renderable) in
-            world.query::<&Renderable>().with::<Isometry3>().iter()
+            world.query::<&Renderable>().with::<Global3>().iter()
         {
             match self.blases.entry(renderable.mesh.clone()) {
                 Entry::Vacant(entry) => {
@@ -504,6 +515,17 @@ impl Renderer {
             self.device.reset_fences(&[fence])
         }
 
+        // self.pose.draw(
+        //     (),
+        //     self.frame,
+        //     &[],
+        //     &[],
+        //     None,
+        //     &mut self.context,
+        //     world,
+        //     bump,
+        // )?;
+
         let frame = self
             .swapchain
             .acquire_image()?
@@ -512,7 +534,7 @@ impl Renderer {
         let rt_prepass_output = self.rt_prepass.draw(
             rt_prepass::Input {
                 extent: frame.info().image.info().extent.into_2d(),
-                camera_transform: camera_isometry.into_homogeneous_matrix(),
+                camera_global,
                 camera_projection,
                 blases: &self.blases,
             },
@@ -622,4 +644,25 @@ struct ImageUpload {
     subresource: ImageSubresourceLayers,
     offset: Offset3d,
     extent: Extent3d,
+}
+
+fn ray_tracing_transform_matrix_from_nalgebra(
+    m: &na::Matrix4<f32>,
+) -> TransformMatrix {
+    let r = m.row(3);
+
+    let ok = r[0].abs() < std::f32::EPSILON
+        || r[1].abs() < std::f32::EPSILON
+        || r[2].abs() < std::f32::EPSILON
+        || (r[3] - 1.0).abs() < std::f32::EPSILON;
+
+    if !ok {
+        panic!("Matrix {} expected to have 0 0 0 1 bottom row");
+    }
+
+    let m = m.remove_row(3);
+
+    TransformMatrix {
+        matrix: m.transpose().into(),
+    }
 }

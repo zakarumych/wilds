@@ -1,0 +1,47 @@
+#version 450
+#extension GL_EXT_scalar_block_layout : enable
+#extension GL_EXT_nonuniform_qualifier : enable
+
+struct Vertex {
+    vec3 pos;
+    vec3 norm;
+    vec4 tangh;
+    vec2 uv;
+};
+
+struct Skin {
+    uvec4 joints;
+    vec4 weights;
+};
+
+// layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+layout(binding = 0, set = 0, scalar) buffer InVertices { Vertex v[]; } vinput[];
+layout(binding = 1, set = 0, std430) buffer Skins { Skin s[]; } sinput[];
+
+layout(binding = 0, set = 1, std430) buffer Joints { mat4 joints[]; };
+layout(binding = 1, set = 1, scalar) buffer OutVertices { Vertex v[]; } voutput[];
+
+layout(push_constant) uniform InputOutMesh {
+    uint joints_offset;
+    uint in_mesh;
+    uint out_mesh;
+};
+
+void main() {
+    uint vertex = gl_GlobalInvocationID.x;
+    Skin s = sinput[in_mesh].s[vertex];
+    Vertex v = vinput[in_mesh].v[vertex];
+    uvec4 j = s.joints;
+    vec4 w = s.weights;
+    mat4 tr = joints[joints_offset + j.x] * w.x + joints[joints_offset + j.y] * w.y + joints[joints_offset + j.z] * w.z + joints[joints_offset + j.w] * w.w;
+
+    Vertex o = {
+        (tr * vec4(v.pos, 1)).xyz,
+        (tr * vec4(v.norm, 0)).xyz,
+        vec4((tr * vec4(v.tangh.xyz, 0)).xyz, v.tangh.w),
+        v.uv,
+    };
+
+    voutput[out_mesh].v[vertex] = o;
+}

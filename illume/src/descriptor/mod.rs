@@ -39,7 +39,10 @@ impl WriteDescriptorSet<'_> {
             | Descriptors::UniformBufferDynamic(buffers)
             | Descriptors::StorageBufferDynamic(buffers) => {
                 for &(ref buffer, offset, size) in buffers {
-                    debug_assert_ne!(size, 0);
+                    debug_assert_ne!(
+                        size, 0,
+                        "Cannot write 0 sized buffer range into descriptor"
+                    );
                     debug_assert!(offset.checked_add(size).is_some());
                     debug_assert!(buffer.info().size >= offset + size);
                 }

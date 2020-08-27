@@ -1,5 +1,4 @@
 #extension GL_EXT_scalar_block_layout : enable
-#extension GL_EXT_shader_16bit_storage : enable
 #extension GL_ARB_gpu_shader_int64 : enable
 
 #define M_PI 3.1415926535897932384626433832795
@@ -44,6 +43,7 @@ struct Instance {
     vec4 albedo_factor;
     uint normals_sampler;
     float normals_factor;
+    uint anim;
 };
 
 struct Camera {
@@ -82,3 +82,4 @@ layout(binding = 0, set = 1, std140) uniform Globals {
 
 layout(binding = 1, set = 1, scalar) buffer Scene { Instance instances[]; };
 layout(binding = 2, set = 1, std140) buffer PointLights { PointLight plight[]; };
+layout(binding = 3, set = 1, scalar) buffer AnimVertices { Vertex v[]; } anim_vertices[];

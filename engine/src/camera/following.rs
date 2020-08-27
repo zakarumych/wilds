@@ -2,8 +2,8 @@ use {
     super::Camera,
     crate::engine::{System, SystemContext},
     hecs::Entity,
+    nalgebra as na,
     std::f32::consts::FRAC_PI_2,
-    ultraviolet::{Isometry3, Rotor3, Vec3},
     winit::event::{DeviceEvent, ElementState, Event, VirtualKeyCode},
 };
 
@@ -124,29 +124,34 @@ impl System for FollowingCameraSystem {
         let found = world
             .query::<&FollowingCamera>()
             .with::<Camera>()
-            .with::<Isometry3>()
+            .with::<na::Isometry3<f32>>()
             .iter()
             .next()
             .map(|(e, f)| (e, *f));
 
         if let Some((camera, following)) = found {
             let mut iso = world
-                .get::<Isometry3>(following.follows)
+                .get::<na::Isometry3<f32>>(following.follows)
                 .ok()
                 .as_deref()
                 .cloned()
-                .unwrap_or_default();
+                .unwrap_or_else(na::Isometry3::identity);
 
-            let rotation =
-                Rotor3::from_euler_angles(0.0, -self.pitch, self.yaw);
+            let rotation = na::UnitQuaternion::from_euler_angles(
+                0.0,
+                -self.pitch,
+                self.yaw,
+            );
+
             let translation =
-                (Vec3::unit_z() * self.distance).rotated_by(rotation);
-            iso.prepend_isometry(Isometry3 {
+                rotation.transform_vector(&na::Vector3::z_axis()).into();
+
+            iso *= na::Isometry3 {
                 rotation,
                 translation,
-            });
+            };
 
-            *world.get_mut::<Isometry3>(camera).unwrap() = iso;
+            *world.get_mut::<na::Isometry3<f32>>(camera).unwrap() = iso;
         }
     }
 }

@@ -483,9 +483,7 @@ impl Graphics {
                     source: OutOfMemory,
                 }
             }
-            _ => EnumerateDeviceError::Other {
-                source: Box::new(err),
-            },
+            _ => EnumerateDeviceError::UnexpectedVulkanResult { result: err },
         })?;
 
         tracing::trace!("Physical devices {:?}", devices);
@@ -576,9 +574,9 @@ impl Graphics {
                     vk1_0::Result::ERROR_OUT_OF_DEVICE_MEMORY => {
                         OutOfMemory.into()
                     }
-                    _ => CreateSurfaceError::Other {
+                    _ => CreateSurfaceError::UnexpectedVulkanResult {
                         window: RawWindowHandleKind::Windows,
-                        source: Box::new(err),
+                        result: err,
                     },
                 })?
             }

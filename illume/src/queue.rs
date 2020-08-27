@@ -249,11 +249,9 @@ pub enum CreateEncoderError {
         #[from]
         source: OutOfMemory,
     },
-    #[error("{source}")]
-    Other {
-        #[from]
-        source: Box<dyn Error + Send + Sync>,
-    },
+
+    #[error("Function returned unexpected error code: {result}")]
+    UnexpectedVulkanResult { result: vk1_0::Result },
 }
 
 impl Queue {
@@ -413,8 +411,6 @@ pub(crate) fn create_encoder_error_from_erupt(
                 source: OutOfMemory,
             }
         }
-        _ => CreateEncoderError::Other {
-            source: Box::new(err),
-        },
+        _ => CreateEncoderError::UnexpectedVulkanResult { result: err },
     }
 }
