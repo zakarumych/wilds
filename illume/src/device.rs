@@ -23,10 +23,10 @@ use crate::{
     out_of_host_memory,
     physical::{Features, Properties},
     pipeline::{
-        ColorBlend, GraphicsPipeline, GraphicsPipelineInfo, PipelineLayout,
-        PipelineLayoutInfo, RayTracingPipeline, RayTracingPipelineInfo,
-        RayTracingShaderGroupInfo, ShaderBindingTable, ShaderBindingTableInfo,
-        State,
+        ColorBlend, ComputePipeline, ComputePipelineInfo, GraphicsPipeline,
+        GraphicsPipelineInfo, PipelineLayout, PipelineLayoutInfo,
+        RayTracingPipeline, RayTracingPipelineInfo, RayTracingShaderGroupInfo,
+        ShaderBindingTable, ShaderBindingTableInfo, State,
     },
     render_pass::{RenderPass, RenderPassInfo},
     sampler::{Sampler, SamplerInfo},
@@ -41,17 +41,6 @@ use crate::{
 };
 use bumpalo::{collections::Vec as BVec, Bump};
 use bytemuck::Pod;
-use smallvec::SmallVec;
-use std::{
-    convert::{TryFrom as _, TryInto as _},
-    error::Error,
-    ffi::CString,
-    fmt::{self, Debug},
-    mem::{size_of_val, MaybeUninit},
-    ops::{Deref, Range},
-    sync::{Arc, Weak},
-};
-
 use erupt::{
     extensions::{
         khr_ray_tracing::{self as vkrt, KhrRayTracingDeviceLoaderExt as _},
@@ -62,9 +51,18 @@ use erupt::{
     vk1_2::{self, Vk12DeviceLoaderExt as _},
     DeviceLoader,
 };
-
 use parking_lot::Mutex;
 use slab::Slab;
+use smallvec::SmallVec;
+use std::{
+    convert::{TryFrom as _, TryInto as _},
+    error::Error,
+    ffi::CString,
+    fmt::{self, Debug},
+    mem::{size_of_val, MaybeUninit},
+    ops::Range,
+    sync::{Arc, Weak},
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CreateDeviceError<E: Error + 'static> {
@@ -102,13 +100,6 @@ pub enum CreateBufferError {
 
     #[error("Buffer usage {usage:?} is unsupported")]
     UnsupportedUsage { usage: BufferUsage },
-
-    /// Implementation specific error.
-    #[error("{source}")]
-    Other {
-        #[from]
-        source: Box<dyn Error + Send + Sync>,
-    },
 }
 
 /// Possible error which can be returned from `create_image_*)`.
@@ -122,13 +113,35 @@ pub enum CreateImageError {
 
     #[error("Combination paramters `{info:?}` is unsupported")]
     Unsupported { info: ImageInfo },
+}
 
-    /// Implementation specific error.
+/// Possible error that may occur during memory mapping.
+#[derive(Clone, Copy, Debug, thiserror::Error)]
+pub enum MappingError {
+    /// Device memory is exhausted.
     #[error("{source}")]
-    Other {
+    OutOfMemory {
         #[from]
-        source: Box<dyn Error + Send + Sync>,
+        source: OutOfMemory,
     },
+
+    /// Memory is not host-visible.
+    #[error("Memory is not host-visible")]
+    NonHostVisible,
+
+    /// Mapping requests exceeds block size.
+    #[error("Memory map request out of memory block bounds")]
+    OutOfBounds,
+}
+
+impl From<tvma::MappingError> for MappingError {
+    fn from(err: tvma::MappingError) -> Self {
+        match err {
+            tvma::MappingError::OutOfMemory { .. } => OutOfMemory.into(),
+            tvma::MappingError::NonHostVisible => MappingError::NonHostVisible,
+            tvma::MappingError::OutOfBounds => MappingError::OutOfBounds,
+        }
+    }
 }
 
 pub(crate) struct Inner {
@@ -230,89 +243,89 @@ impl Device {
         &self.inner.properties
     }
 
-    pub(crate) fn features(&self) -> &Features {
-        &self.inner.features
-    }
+    // pub(crate) fn features(&self) -> &Features {
+    //     &self.inner.features
+    // }
 
-    pub(crate) fn allocator(&self) -> &tvma::Allocator {
-        &self.inner.allocator
-    }
+    // pub(crate) fn allocator(&self) -> &tvma::Allocator {
+    //     &self.inner.allocator
+    // }
 
-    pub(crate) fn version(&self) -> u32 {
-        self.inner.version
-    }
+    // pub(crate) fn version(&self) -> u32 {
+    //     self.inner.version
+    // }
 
-    pub(crate) fn buffers(&self) -> &Mutex<Slab<vk1_0::Buffer>> {
-        &self.inner.buffers
-    }
+    // pub(crate) fn buffers(&self) -> &Mutex<Slab<vk1_0::Buffer>> {
+    //     &self.inner.buffers
+    // }
 
     // pub(crate) fn buffer_views(&self) -> &Mutex<Slab<vk1_0::BufferView>> {
     //     &self.inner.buffer_views
     // }
 
-    pub(crate) fn descriptor_pools(
-        &self,
-    ) -> &Mutex<Slab<vk1_0::DescriptorPool>> {
-        &self.inner.descriptor_pools
-    }
+    // pub(crate) fn descriptor_pools(
+    //     &self,
+    // ) -> &Mutex<Slab<vk1_0::DescriptorPool>> {
+    //     &self.inner.descriptor_pools
+    // }
 
-    pub(crate) fn descriptor_sets(&self) -> &Mutex<Slab<vk1_0::DescriptorSet>> {
-        &self.inner.descriptor_sets
-    }
+    // pub(crate) fn descriptor_sets(&self) ->
+    // &Mutex<Slab<vk1_0::DescriptorSet>> {     &self.inner.descriptor_sets
+    // }
 
-    pub(crate) fn descriptor_set_layouts(
-        &self,
-    ) -> &Mutex<Slab<vk1_0::DescriptorSetLayout>> {
-        &self.inner.descriptor_set_layouts
-    }
+    // pub(crate) fn descriptor_set_layouts(
+    //     &self,
+    // ) -> &Mutex<Slab<vk1_0::DescriptorSetLayout>> {
+    //     &self.inner.descriptor_set_layouts
+    // }
 
-    pub(crate) fn fences(&self) -> &Mutex<Slab<vk1_0::Fence>> {
-        &self.inner.fences
-    }
+    // pub(crate) fn fences(&self) -> &Mutex<Slab<vk1_0::Fence>> {
+    //     &self.inner.fences
+    // }
 
-    pub(crate) fn framebuffers(&self) -> &Mutex<Slab<vk1_0::Framebuffer>> {
-        &self.inner.framebuffers
-    }
+    // pub(crate) fn framebuffers(&self) -> &Mutex<Slab<vk1_0::Framebuffer>> {
+    //     &self.inner.framebuffers
+    // }
 
-    pub(crate) fn images(&self) -> &Mutex<Slab<vk1_0::Image>> {
-        &self.inner.images
-    }
+    // pub(crate) fn images(&self) -> &Mutex<Slab<vk1_0::Image>> {
+    //     &self.inner.images
+    // }
 
-    pub(crate) fn image_views(&self) -> &Mutex<Slab<vk1_0::ImageView>> {
-        &self.inner.image_views
-    }
+    // pub(crate) fn image_views(&self) -> &Mutex<Slab<vk1_0::ImageView>> {
+    //     &self.inner.image_views
+    // }
 
-    pub(crate) fn pipelines(&self) -> &Mutex<Slab<vk1_0::Pipeline>> {
-        &self.inner.pipelines
-    }
+    // pub(crate) fn pipelines(&self) -> &Mutex<Slab<vk1_0::Pipeline>> {
+    //     &self.inner.pipelines
+    // }
 
-    pub(crate) fn pipeline_layouts(
-        &self,
-    ) -> &Mutex<Slab<vk1_0::PipelineLayout>> {
-        &self.inner.pipeline_layouts
-    }
+    // pub(crate) fn pipeline_layouts(
+    //     &self,
+    // ) -> &Mutex<Slab<vk1_0::PipelineLayout>> {
+    //     &self.inner.pipeline_layouts
+    // }
 
-    pub(crate) fn render_passes(&self) -> &Mutex<Slab<vk1_0::RenderPass>> {
-        &self.inner.render_passes
-    }
+    // pub(crate) fn render_passes(&self) -> &Mutex<Slab<vk1_0::RenderPass>> {
+    //     &self.inner.render_passes
+    // }
 
-    pub(crate) fn semaphores(&self) -> &Mutex<Slab<vk1_0::Semaphore>> {
-        &self.inner.semaphores
-    }
+    // pub(crate) fn semaphores(&self) -> &Mutex<Slab<vk1_0::Semaphore>> {
+    //     &self.inner.semaphores
+    // }
 
-    pub(crate) fn shaders(&self) -> &Mutex<Slab<vk1_0::ShaderModule>> {
-        &self.inner.shaders
-    }
+    // pub(crate) fn shaders(&self) -> &Mutex<Slab<vk1_0::ShaderModule>> {
+    //     &self.inner.shaders
+    // }
 
-    pub(crate) fn acceleration_strucutres(
-        &self,
-    ) -> &Mutex<Slab<vkrt::AccelerationStructureKHR>> {
-        &self.inner.acceleration_strucutres
-    }
+    // pub(crate) fn acceleration_strucutres(
+    //     &self,
+    // ) -> &Mutex<Slab<vkrt::AccelerationStructureKHR>> {
+    //     &self.inner.acceleration_strucutres
+    // }
 
-    pub(crate) fn samplers(&self) -> &Mutex<Slab<vk1_0::Sampler>> {
-        &self.inner.samplers
-    }
+    // pub(crate) fn samplers(&self) -> &Mutex<Slab<vk1_0::Sampler>> {
+    //     &self.inner.samplers
+    // }
 
     pub(crate) fn swapchains(&self) -> &Mutex<Slab<vksw::SwapchainKHR>> {
         &self.inner.swapchains
@@ -961,12 +974,52 @@ impl Device {
         debug_assert_eq!(pipelines.len(), 1);
 
         let pipeline = pipelines[0];
-
         let index = self.inner.pipelines.lock().insert(pipeline);
 
         drop(shader_stages);
 
         Ok(GraphicsPipeline::make(
+            info,
+            pipeline,
+            self.downgrade(),
+            index,
+        ))
+    }
+
+    /// Creates compute pipeline.
+    #[tracing::instrument]
+    pub fn create_compute_pipeline(
+        &self,
+        info: ComputePipelineInfo,
+    ) -> Result<ComputePipeline, OutOfMemory> {
+        let shader_entry = entry_name_to_cstr(info.shader.entry());
+
+        let pipelines = unsafe {
+            self.inner.logical.create_compute_pipelines(
+                vk1_0::PipelineCache::null(),
+                &[vk1_0::ComputePipelineCreateInfo::default()
+                    .builder()
+                    .stage(
+                        vk1_0::PipelineShaderStageCreateInfo::default()
+                            .builder()
+                            .stage(vk1_0::ShaderStageFlagBits::COMPUTE)
+                            .module(info.shader.module().handle(self))
+                            .name(&shader_entry)
+                            .discard(),
+                    )
+                    .layout(info.layout.handle(self))],
+                None,
+            )
+        }
+        .result()
+        .map_err(|err| oom_error_from_erupt(err))?;
+
+        debug_assert_eq!(pipelines.len(), 1);
+
+        let pipeline = pipelines[0];
+        let index = self.inner.pipelines.lock().insert(pipeline);
+
+        Ok(ComputePipeline::make(
             info,
             pipeline,
             self.downgrade(),
@@ -1226,6 +1279,19 @@ impl Device {
                             .sets
                             .iter()
                             .map(|set| set.handle(self))
+                            .collect::<SmallVec<[_; 16]>>(),
+                    )
+                    .push_constant_ranges(
+                        &info
+                            .push_constants
+                            .iter()
+                            .map(|pc| {
+                                vk1_0::PushConstantRange::default()
+                                    .builder()
+                                    .stage_flags(pc.stages.to_erupt())
+                                    .offset(pc.offset)
+                                    .size(pc.size)
+                            })
                             .collect::<SmallVec<[_; 16]>>(),
                     ),
                 None,
@@ -2457,29 +2523,35 @@ impl Device {
         buffer: &Buffer,
         offset: u64,
         size: usize,
-    ) -> &mut [MaybeUninit<u8>] {
+    ) -> Result<&mut [MaybeUninit<u8>], MappingError> {
         // FIXME: Track mapped blocks
         let block = buffer.block(self);
 
-        unsafe {
-            let ptr = match block.map(&self.inner.logical, offset, size) {
-                Ok(ptr) => ptr,
-                Err(err) => {
-                    panic!("Failed to map memory block {:#?}: {}", block, err,);
-                }
-            };
+        Ok(unsafe {
+            let ptr = block.map(&self.inner.logical, offset, size)?;
             std::slice::from_raw_parts_mut(ptr.as_ptr() as _, size)
-        }
+        })
     }
 
-    fn unmap_memory(&self, buffer: &Buffer) {
-        let block = &buffer.block(self);
+    pub fn unmap_memory(&self, buffer: &Buffer) {
+        let block = buffer.block(self);
         unsafe { block.unmap(&self.inner.logical) }
     }
 
     #[tracing::instrument(skip(data))]
-    pub fn write_memory<T>(&self, buffer: &Buffer, offset: u64, data: &[T]) {
-        let memory = self.map_memory(buffer, offset, size_of_val(data));
+    pub fn write_memory<T>(
+        &self,
+        buffer: &Buffer,
+        offset: u64,
+        data: &[T],
+    ) -> Result<(), MappingError> {
+        // let size =
+        //     u64::try_from(data.len()).map_err(|_|
+        // MappingError::OutOfBounds)?; let end = offset
+        //     .checked_add(size)
+        //     .ok_or_else(|| MappingError::OutOfBounds)?;
+
+        let memory = self.map_memory(buffer, offset, size_of_val(data))?;
 
         unsafe {
             std::ptr::copy_nonoverlapping(
@@ -2488,6 +2560,9 @@ impl Device {
                 size_of_val(data),
             );
         }
+
+        self.unmap_memory(buffer);
+        Ok(())
     }
 }
 
@@ -2513,15 +2588,8 @@ pub enum CreateRenderPassError {
     )]
     DepthAttachmentReferenceOutOfBound { subpass: usize, attachment: usize },
 
-    /// Implementation specific error.
-    #[error("{source}")]
-    Other {
-        #[cfg(target_arch = "wasm32")]
-        source: Box<dyn Error + 'static>,
-
-        #[cfg(not(target_arch = "wasm32"))]
-        source: Box<dyn Error + Send + Sync + 'static>,
-    },
+    #[error("Function returned unexpected error code: {result}")]
+    UnexpectedVulkanResult { result: vk1_0::Result },
 }
 
 #[allow(dead_code)]
@@ -2575,8 +2643,6 @@ pub(crate) fn create_render_pass_error_from_erupt(
                 source: OutOfMemory,
             }
         }
-        _ => CreateRenderPassError::Other {
-            source: Box::new(err),
-        },
+        _ => CreateRenderPassError::UnexpectedVulkanResult { result: err },
     }
 }

@@ -11,7 +11,7 @@ edition = "2018"
 
 [dependencies]
 # Assets
-goods = { version = "0.5", features = ["fs", "tokio-spawn"], path = "../../goods" }
+goods = { version = "0.5", features = ["fs", "tokio-spawn", "data-url", "trace"], path = "../../goods" }
 gltf = "0.15"
 
 # Physics
@@ -19,19 +19,17 @@ ncollide3d = "0.23"
 nphysics3d = "0.16"
 
 # Graphics
-illume = { path = "../illume", features = ["ultraviolet", "serde-1", "shader-compiler"] }
+illume = { path = "../illume", features = ["serde-1", "shader-compiler"] }
 genmesh = { version = "0.6", optional = true }
 palette = { version = "0.5", default-features = false, features = ["std"] }
 image = { version = "0.23", features = ["png"] }
 png = "0.16"
-animate = { path = "../animate" }
 
 # ECS
 hecs = "0.2"
 
 # Linear algebra
 nalgebra = "0.21"
-ultraviolet = "0.4"
 
 # Windowing
 winit = "0.22" # "0.22.2"
@@ -55,10 +53,10 @@ ron = "0.6"
 
 # Tracing and profiling
 tracing = { version = "0.1", features = ["log"] }
-puffin = "0.2"
+# puffin = "0.2"
 
 # Support
-fastbitset = { path = "../fastbitset" }
+fastbitset = { path = "../fastbitset", features = ["boxed", "bump"] }
 cfg-if = "0.1"
 futures = "0.3"
 lazy_static = "1.4"
@@ -70,9 +68,16 @@ bitflags = "1.2"
 ahash = "0.4"
 type-map = "0.3"
 lru = "0.6"
+url = "2.1"
+rand = "0.7"
 
 # TEMP
-stats_alloc = "*"
+# stats_alloc = "*"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "0.2", features = ["macros", "rt-threaded", "blocking"] }
+
+
+[build-dependencies]
+eyre = "0.6"
+tracing = "0.1"

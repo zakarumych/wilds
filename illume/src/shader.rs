@@ -3,7 +3,6 @@ use {
     erupt::vk1_0,
     std::{
         convert::TryFrom,
-        error::Error,
         fmt::{self, Debug, Display},
     },
 };
@@ -268,13 +267,6 @@ pub enum CreateShaderModuleError {
 
     #[error("Shader language {language:?} is unsupported")]
     UnsupportedShaderLanguage { language: ShaderLanguage },
-
-    /// Implementation specific error.
-    #[error("{source}")]
-    Other {
-        #[from]
-        source: Box<dyn Error + Send + Sync>,
-    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -988,7 +980,7 @@ fn check_create_shader_module_error() {
 }
 
 #[cfg(feature = "shader-compiler")]
-mod shader_compiler {
+pub mod shader_compiler {
     use super::*;
 
     #[derive(Debug, thiserror::Error)]
@@ -1004,9 +996,6 @@ mod shader_compiler {
             #[from]
             source: shaderc::Error,
         },
-
-        #[error("Unsupported shader language {language}")]
-        Unsupported { language: ShaderLanguage },
     }
 
     pub fn compile_shader(

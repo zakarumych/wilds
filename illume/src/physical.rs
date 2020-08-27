@@ -24,9 +24,7 @@ use erupt::{
     vk1_2, DeviceLoader,
 };
 use smallvec::SmallVec;
-use std::{
-    collections::HashMap, convert::TryInto as _, error::Error, ffi::CStr,
-};
+use std::{collections::HashMap, convert::TryInto as _, ffi::CStr};
 
 #[derive(Clone, Debug)]
 pub(crate) struct Properties {
@@ -179,12 +177,8 @@ pub enum EnumerateDeviceError {
         source: OutOfMemory,
     },
 
-    /// Implementation specific error.
-    #[error("{source}")]
-    Other {
-        #[from]
-        source: Box<dyn Error + Send + Sync>,
-    },
+    #[error("Function returned unexpected error code: {result}")]
+    UnexpectedVulkanResult { result: vk1_0::Result },
 }
 
 /// Contains descriptive information about device.

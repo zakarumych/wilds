@@ -1,8 +1,11 @@
 use {
     super::Camera,
-    crate::engine::{System, SystemContext},
+    crate::{
+        engine::{System, SystemContext},
+        scene::Global3,
+    },
+    nalgebra as na,
     std::f32::consts::{FRAC_PI_2, PI},
-    ultraviolet::{Isometry3, Rotor3, Vec3},
     winit::event::{
         DeviceEvent, ElementState, Event, KeyboardInput, VirtualKeyCode,
     },
@@ -28,6 +31,7 @@ bitflags::bitflags! {
 pub struct FreeCameraSystem {
     pitch: f32,
     yaw: f32,
+    roll: f32,
     direction: Direction,
     pitch_factor: f32,
     yaw_factor: f32,
@@ -40,6 +44,7 @@ impl FreeCameraSystem {
         FreeCameraSystem {
             pitch: 0.0,
             yaw: 0.0,
+            roll: 0.0,
             direction: Direction::empty(),
             pitch_factor: 1.0,
             yaw_factor: 1.0,
@@ -65,11 +70,11 @@ impl System for FreeCameraSystem {
         let delta = ctx.clocks.delta.as_secs_f32();
         let mut query = ctx
             .world
-            .query::<&mut Isometry3>()
+            .query::<&mut Global3>()
             .with::<Camera>()
             .with::<FreeCamera>();
 
-        if let Some((_, iso)) = query.iter().next() {
+        if let Some((_, global)) = query.iter().next() {
             for event in ctx.input.read() {
                 match event {
                     Event::DeviceEvent { event, .. } => match event {
@@ -83,23 +88,24 @@ impl System for FreeCameraSystem {
                         &DeviceEvent::MouseMotion { delta: (x, y) }
                             if self.enabled =>
                         {
-                            self.pitch -= y as f32 * self.pitch_factor;
-                            self.yaw += x as f32 * self.yaw_factor;
+                            self.roll -= y as f32 * self.pitch_factor;
+                            self.pitch -= x as f32 * self.yaw_factor;
 
-                            self.pitch =
-                                self.pitch.min(FRAC_PI_2).max(-FRAC_PI_2);
+                            self.roll =
+                                self.roll.min(FRAC_PI_2).max(-FRAC_PI_2);
 
-                            if self.yaw < -PI {
-                                self.yaw -= (self.yaw / TAU).floor() * TAU;
+                            if self.pitch < -PI {
+                                self.pitch -= (self.pitch / TAU).floor() * TAU;
                             }
 
-                            if self.yaw > PI {
-                                self.yaw -= (self.yaw / TAU).ceil() * TAU;
+                            if self.pitch > PI {
+                                self.pitch -= (self.pitch / TAU).ceil() * TAU;
                             }
 
-                            iso.rotation = Rotor3::from_euler_angles(
-                                0.0, self.pitch, self.yaw,
-                            )
+                            global.iso.rotation =
+                                na::UnitQuaternion::from_euler_angles(
+                                    self.roll, self.pitch, self.yaw,
+                                )
                         }
                         DeviceEvent::Key(input) if self.enabled => {
                             let flag = match input.virtual_keycode {
@@ -129,7 +135,7 @@ impl System for FreeCameraSystem {
                 }
             }
 
-            let mut moving = Vec3::new(0.0, 0.0, 0.0);
+            let mut moving = na::Vector3::new(0.0, 0.0, 0.0);
             if self.direction.contains(Direction::FORWARD) {
                 moving[2] -= 1.0;
             }
@@ -151,7 +157,7 @@ impl System for FreeCameraSystem {
 
             moving *= self.speed * delta;
 
-            iso.prepend_translation(moving);
+            global.iso *= na::Translation::from(moving);
         }
     }
 }

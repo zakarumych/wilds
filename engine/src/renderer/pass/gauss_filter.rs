@@ -55,6 +55,7 @@ impl GaussFilter {
         let pipeline_layout =
             ctx.create_pipeline_layout(PipelineLayoutInfo {
                 sets: vec![set_layout.clone()],
+                push_constants: Vec::new(),
             })?;
 
         let vert = VertexShader::with_main(

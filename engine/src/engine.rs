@@ -1,15 +1,15 @@
 use {
     crate::{
-        assets::{Assets, Prefab},
+        assets::{AssetKey, Assets, Prefab},
         broker::EventBroker,
         clocks::{ClockIndex, Clocks},
         config::{AssetSource, Config},
     },
     bumpalo::Bump,
     cfg_if::cfg_if,
-    eyre::Report,
+    eyre::{Report, WrapErr as _},
     flume::{bounded, Receiver, Sender},
-    goods::Cache,
+    goods::{Asset, AssetDefaultFormat},
     hecs::{Entity, World},
     std::{
         cell::Cell,
@@ -69,37 +69,73 @@ pub struct Engine {
     fixed_schedule: Vec<Box<dyn System>>,
     shared: Rc<Shared>,
     runtime: TokioHandle,
-    recv_loaded_prefabs: Receiver<LoadedPrefab>,
-    send_loaded_prefabs: Sender<LoadedPrefab>,
+    recv_make_prefabs: Receiver<MakePrefab>,
+    send_make_prefabs: Sender<MakePrefab>,
     clocks: Clocks,
     fixed_step_delta: Duration,
 }
 
 impl Engine {
-    pub fn load_prefab<P: ?Sized, F>(&self, prefab: F, info: P::Info) -> Entity
+    /// Loads asset and enqueue it for spawning.
+    /// Retuns `Entity` that will be supplied to `spawn` method after asset is
+    /// loaded.
+    /// If asset loading fails that `Entity` will be despawned.
+    pub fn load_prefab<P>(&self, key: AssetKey, info: P::Info) -> Entity
     where
-        P: Prefab,
+        P: Prefab + AssetDefaultFormat<AssetKey> + Clone,
+    {
+        self.load_prefab_with_format(key, info, P::DefaultFormat::default())
+    }
+
+    /// Loads asset and enqueue it for spawning.
+    /// Retuns `Entity` that will be supplied to `spawn` method after asset is
+    /// loaded.
+    /// If asset loading fails that `Entity` will be despawned.
+    pub fn load_prefab_with_format<P, F>(
+        &self,
+        key: AssetKey,
+        info: P::Info,
+        format: F,
+    ) -> Entity
+    where
+        P: Prefab + Asset + Clone,
+        F: goods::Format<P, AssetKey>,
+    {
+        let handle = self.assets.load_with_format(key.clone(), format);
+        self.make_prefab(
+            async move {
+                handle.await.wrap_err_with(|| {
+                    format!("Failed to load prefab '{}'", key)
+                })
+            },
+            info,
+        )
+    }
+
+    pub fn make_prefab<P, F>(&self, prefab: F, info: P::Info) -> Entity
+    where
+        P: Prefab + Send + 'static,
         F: Future<Output = Result<P, Report>> + Send + 'static,
     {
         let entity = self.world.reserve_entity();
-        let send_loaded_prefabs = self.send_loaded_prefabs.clone();
+        let send_make_prefabs = self.send_make_prefabs.clone();
 
         self.runtime.spawn(async move {
             let loaded = match prefab.await {
-                Ok(prefab) => LoadedPrefab::spawn(prefab, info, entity),
-                Err(err) => LoadedPrefab::Error(err, entity),
+                Ok(prefab) => MakePrefab::spawn(prefab, info, entity),
+                Err(err) => MakePrefab::Error(err, entity),
             };
-            let _ = send_loaded_prefabs.send(loaded);
+            let _ = send_make_prefabs.send(loaded);
         });
 
         entity
     }
 
     fn build_prefabs(&mut self) {
-        for loaded in self.recv_loaded_prefabs.try_iter() {
+        for loaded in self.recv_make_prefabs.try_iter() {
             match loaded {
-                LoadedPrefab::Spawn(build) => build(&mut self.world),
-                LoadedPrefab::Error(err, entity) => {
+                MakePrefab::Spawn(build) => build(&mut self.world),
+                MakePrefab::Error(err, entity) => {
                     tracing::error!("Failed to load prefab: {}", err);
                     let _ = self.world.despawn(entity);
                 }
@@ -213,7 +249,7 @@ impl Engine {
         let registry = config
             .sources
             .iter()
-            .fold(goods::RegistryBuilder::new(), |builder, source| match source {
+            .fold(goods::RegistryBuilder::<AssetKey>::new(), |builder, source| match source {
                 AssetSource::FileSystem { path } => {
                     cfg_if! {
                         if #[cfg(target_arch = "wasm32")] {
@@ -233,7 +269,9 @@ impl Engine {
                 }
             });
 
-        let assets = Cache::new(
+        let registry = registry.with(goods::DataUrlSource);
+
+        let assets = Assets::new(
             registry.build(),
             goods::Tokio(runtime.handle().clone()),
         );
@@ -244,7 +282,7 @@ impl Engine {
             waiting_for_event: Cell::new(false),
         });
 
-        let (send_loaded_prefabs, recv_loaded_prefabs) = bounded(512);
+        let (send_make_prefabs, recv_make_prefabs) = bounded(512);
 
         let engine = Engine {
             assets,
@@ -254,8 +292,8 @@ impl Engine {
             resources: TypeMap::new(),
             input: EventBroker::new(),
             shared: shared.clone(),
-            recv_loaded_prefabs,
-            send_loaded_prefabs,
+            recv_make_prefabs,
+            send_make_prefabs,
             runtime: runtime.handle().clone(),
             fixed_step_delta: Duration::from_millis(10),
             clocks: Clocks::new(),
@@ -361,17 +399,17 @@ struct Shared {
     waiting_for_event: Cell<bool>,
 }
 
-enum LoadedPrefab {
+enum MakePrefab {
     Spawn(Box<dyn FnOnce(&mut World) + Send>),
     Error(Report, Entity),
 }
 
-impl LoadedPrefab {
+impl MakePrefab {
     fn spawn<P>(prefab: P, info: P::Info, entity: Entity) -> Self
     where
-        P: Prefab,
+        P: Prefab + Send + 'static,
     {
-        LoadedPrefab::Spawn(Box::new(move |world| {
+        MakePrefab::Spawn(Box::new(move |world| {
             prefab.spawn(info, world, entity)
         }))
     }

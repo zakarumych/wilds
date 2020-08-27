@@ -587,7 +587,7 @@ pub(crate) fn oom_error_from_erupt(err: vk1_0::Result) -> OutOfMemory {
     match err {
         vk1_0::Result::ERROR_OUT_OF_HOST_MEMORY => out_of_host_memory(),
         vk1_0::Result::ERROR_OUT_OF_DEVICE_MEMORY => OutOfMemory,
-        _ => unreachable!(),
+        _ => unreachable!("Error {} is unexpected", err),
     }
 }
 

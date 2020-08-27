@@ -23,3 +23,22 @@ glslangValidator -V atrous/atrous2h.frag -o atrous/atrous2h.frag.spv
 glslangValidator -V atrous/atrous0v.frag -o atrous/atrous0v.frag.spv
 glslangValidator -V atrous/atrous1v.frag -o atrous/atrous1v.frag.spv
 glslangValidator -V atrous/atrous2v.frag -o atrous/atrous2v.frag.spv
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

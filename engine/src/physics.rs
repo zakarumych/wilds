@@ -1,7 +1,7 @@
 use {
     crate::{
         engine::{System, SystemContext},
-        util::{iso_from_nalgebra, iso_to_nalgebra},
+        scene::Global3,
     },
     hecs::{Entity, World},
     nalgebra as na,
@@ -14,7 +14,6 @@ use {
     },
     parking_lot::Mutex,
     smallvec::{smallvec, SmallVec},
-    ultraviolet::Isometry3,
 };
 
 pub use nphysics3d::object::{
@@ -154,11 +153,11 @@ impl System for Physics {
             world.insert_one(entity, attached).unwrap();
         }
 
-        for (_, (iso, body)) in
-            world.query::<(&Isometry3, &mut RigidBody<f32>)>().iter()
+        for (_, (global, body)) in
+            world.query::<(&Global3, &mut RigidBody<f32>)>().iter()
         {
             // FIXME: Update position only if changed.
-            body.set_position(iso_to_nalgebra(iso));
+            body.set_position(global.iso);
         }
 
         let lock = lock.get_or_insert_with(|| COLLIDER_SET.lock());
@@ -179,11 +178,11 @@ impl System for Physics {
             &mut self.force_generator_set,
         );
 
-        for (_, (iso, body)) in
-            world.query::<(&mut Isometry3, &RigidBody<f32>)>().iter()
+        for (_, (global, body)) in
+            world.query::<(&mut Global3, &RigidBody<f32>)>().iter()
         {
             // FIXME: Update position only if changed.
-            *iso = iso_from_nalgebra(body.position());
+            global.iso = *body.position();
         }
     }
 }

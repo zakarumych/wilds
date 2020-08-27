@@ -4,7 +4,7 @@ use {
         vk1_0::{self, Vk10DeviceLoaderExt as _},
         vk1_1, DeviceLoader,
     },
-    fastbitset::BitSet,
+    fastbitset::BoxedBitSet,
     std::{
         cmp::{max, min},
         collections::HashMap,
@@ -78,21 +78,15 @@ fn mid_chunk_len(counter: u64) -> u64 {
 #[derive(Default)]
 struct Size {
     counter: u64,
-    unexhausted: BitSet,
+    unexhausted: BoxedBitSet,
     chunks: slab::Slab<Chunk>,
-
-    /// Largest chunk index returned from `chunks.insert(..)` + 1 or `0`
-    chunks_upper_bound: usize,
 }
 
 impl std::fmt::Debug for Size {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let alternate = fmt.alternate();
         let mut debug = fmt.debug_struct("Size");
-        debug
-            .field("counter", &self.counter)
-            .field("unexhausted", &self.unexhausted)
-            .field("chunks_upper_bound", &self.chunks_upper_bound);
+        debug.field("counter", &self.counter);
         if alternate {
             debug.field(
                 "chunks",
@@ -109,7 +103,7 @@ struct Chunk {
     offset: u64,
     size: u64,
     ptr: Option<NonNull<u8>>,
-    index: usize,
+    index: u32,
     blocks: u64,
 }
 
@@ -121,7 +115,7 @@ struct RawBlockAlloc {
     memory: NonZeroU64,
     offset: u64,
     ptr: Option<NonNull<u8>>,
-    index: usize,
+    index: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -129,7 +123,7 @@ struct RawBlockDealloc {
     memory: NonZeroU64,
     offset: u64,
     size: u64,
-    index: usize,
+    index: u32,
 }
 
 impl Chunk {
@@ -188,11 +182,14 @@ impl Size {
     #[tracing::instrument(skip(self))]
     unsafe fn alloc(&mut self, block_size: u64) -> Option<RawBlockAlloc> {
         let chunk_index = self.unexhausted.find_set()?;
-        let (mut raw_block, exhausted) =
-            self.chunks.get_mut(chunk_index).unwrap().alloc(block_size);
+        let (mut raw_block, exhausted) = self
+            .chunks
+            .get_mut(chunk_index as usize)
+            .unwrap()
+            .alloc(block_size);
 
         if exhausted {
-            self.unexhausted.unset_unchecked(chunk_index);
+            self.unexhausted.unset(chunk_index);
         }
         self.counter += 1;
         raw_block.index = chunk_index;
@@ -209,7 +206,10 @@ impl Size {
         let len = chunk_size / block_size;
         assert!(len <= MAX_CHUNK_LEN);
         assert!(len >= MIN_CHUNK_LEN);
-        assert!(self.chunks.len() < BitSet::MAX_SIZE, "Too many chunks");
+        assert!(
+            self.chunks.len() < BoxedBitSet::UPPER_BOUND as usize,
+            "Too many chunks"
+        );
 
         assert!(
             chunk_block.ptr.map_or(true, |ptr| {
@@ -228,17 +228,8 @@ impl Size {
                                                   * cleaner. */
         };
 
-        let index = self.chunks.insert(chunk);
-
-        if index == self.chunks_upper_bound {
-            // Add another bit.
-            self.chunks_upper_bound += 1;
-            self.unexhausted.add_unchecked(index);
-        } else {
-            // Set previously reset bit.
-            debug_assert!(index < self.chunks_upper_bound);
-            self.unexhausted.set_unchecked(index);
-        }
+        let index = self.chunks.insert(chunk) as u32;
+        self.unexhausted.set(index);
 
         RawBlockAlloc {
             index,
@@ -252,11 +243,11 @@ impl Size {
         raw_block: RawBlockDealloc,
     ) -> Option<RawBlockDealloc> {
         let index = raw_block.index;
-        debug_assert!(self.chunks.len() > index);
-        let chunk = self.chunks.get_unchecked_mut(index);
+        debug_assert!(self.chunks.len() > index as usize);
+        let chunk = self.chunks.get_unchecked_mut(index as usize);
         if chunk.dealloc(raw_block) {
-            self.unexhausted.unset_unchecked(index);
-            let chunk = self.chunks.remove(index);
+            self.unexhausted.unset(index);
+            let chunk = self.chunks.remove(index as usize);
             Some(RawBlockDealloc {
                 memory: chunk.memory,
                 offset: chunk.offset,
@@ -264,7 +255,7 @@ impl Size {
                 index: chunk.index,
             })
         } else {
-            self.unexhausted.set_unchecked(index);
+            self.unexhausted.set(index);
             None
         }
     }
@@ -589,5 +580,5 @@ pub struct ChunkedMemoryBlock {
     pub ptr: Option<NonNull<u8>>,
     pub flags: vk1_0::MemoryPropertyFlags,
     pub memory_type: u32,
-    pub index: usize,
+    pub index: u32,
 }

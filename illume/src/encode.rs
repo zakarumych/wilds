@@ -4,6 +4,7 @@ use crate::{
         AccelerationStructureLevel, IndexData,
     },
     access::supported_access,
+    arith_le,
     buffer::{Buffer, StridedBufferRegion},
     convert::{oom_error_from_erupt, ToErupt},
     descriptor::DescriptorSet,
@@ -14,7 +15,7 @@ use crate::{
         Image, ImageBlit, ImageMemoryBarrier, ImageSubresourceLayers, Layout,
     },
     pipeline::{
-        GraphicsPipeline, PipelineLayout, RayTracingPipeline,
+        ComputePipeline, GraphicsPipeline, PipelineLayout, RayTracingPipeline,
         ShaderBindingTable, Viewport,
     },
     queue::QueueCapabilityFlags,
@@ -24,9 +25,11 @@ use crate::{
         RENDERPASS_SMALLVEC_ATTACHMENTS,
     },
     sampler::Filter,
+    shader::ShaderStageFlags,
     stage::PipelineStageFlags,
     Extent3d, IndexType, Offset3d, OutOfMemory, Rect2d,
 };
+use bytemuck::{cast_slice, Pod};
 use erupt::{
     extensions::khr_ray_tracing::{
         self as vkrt, KhrRayTracingDeviceLoaderExt as _,
@@ -80,6 +83,10 @@ pub enum Command<'a> {
 
     BindGraphicsPipeline {
         pipeline: &'a GraphicsPipeline,
+    },
+
+    BindComputePipeline {
+        pipeline: &'a ComputePipeline,
     },
 
     BindRayTracingPipeline {
@@ -187,6 +194,19 @@ pub enum Command<'a> {
         dst: PipelineStageFlags,
         images: &'a [ImageMemoryBarrier<'a>],
     },
+
+    PushConstants {
+        layout: &'a PipelineLayout,
+        stages: ShaderStageFlags,
+        offset: u32,
+        data: &'a [u8],
+    },
+
+    Dispatch {
+        x: u32,
+        y: u32,
+        z: u32,
+    },
 }
 
 /// Basis for encoding capabilities.
@@ -218,11 +238,11 @@ impl<'a> EncoderCommon<'a> {
             .push(Command::BindGraphicsPipeline { pipeline })
     }
 
-    // pub fn bind_compute_pipeline(&mut self, pipeline: &'a ComputePipeline) {
-    //     assert!(self.capabilities.supports_compute());
-    //     self.commands
-    //         .push(Command::BindComputePipeline { pipeline })
-    // }
+    pub fn bind_compute_pipeline(&mut self, pipeline: &'a ComputePipeline) {
+        assert!(self.capabilities.supports_compute());
+        self.commands
+            .push(Command::BindComputePipeline { pipeline })
+    }
 
     pub fn bind_ray_tracing_pipeline(
         &mut self,
@@ -408,7 +428,9 @@ impl<'a> Encoder<'a> {
         buffer: &'a Buffer,
         offset: u64,
         data: &'a [T],
-    ) {
+    ) where
+        T: Pod,
+    {
         let data = unsafe {
             std::slice::from_raw_parts(
                 data.as_ptr() as *const u8,
@@ -551,9 +573,33 @@ impl<'a> Encoder<'a> {
         })
     }
 
+    pub fn push_constants<T>(
+        &mut self,
+        layout: &'a PipelineLayout,
+        stages: ShaderStageFlags,
+        offset: u32,
+        data: &'a [T],
+    ) where
+        T: Pod,
+    {
+        assert!(arith_le(data.len(), u32::max_value()));
+
+        self.commands.push(Command::PushConstants {
+            layout,
+            stages,
+            offset,
+            data: cast_slice(data),
+        });
+    }
+
+    pub fn dispatch(&mut self, x: u32, y: u32, z: u32) {
+        assert!(self.capabilities.supports_compute());
+
+        self.commands.push(Command::Dispatch { x, y, z });
+    }
+
     /// Flushes commands recorded into this encoder to the underlying command
     /// buffer.
-
     pub fn finish(mut self) -> CommandBuffer {
         self.command_buffer
             .write(&self.inner.commands)
@@ -683,8 +729,8 @@ impl CommandBuffer {
         let logical = &device.logical();
 
         for command in commands {
-            match command {
-                &Command::BeginRenderPass {
+            match *command {
+                Command::BeginRenderPass {
                     pass,
                     framebuffer,
                     clears,
@@ -742,16 +788,23 @@ impl CommandBuffer {
                 Command::EndRenderPass => unsafe {
                     logical.cmd_end_render_pass(self.handle)
                 },
-                &Command::BindGraphicsPipeline { pipeline } => unsafe {
+                Command::BindGraphicsPipeline { pipeline } => unsafe {
                     logical.cmd_bind_pipeline(
                         self.handle,
                         vk1_0::PipelineBindPoint::GRAPHICS,
                         pipeline.handle(&device),
                     )
                 },
+                Command::BindComputePipeline { pipeline } => unsafe {
+                    logical.cmd_bind_pipeline(
+                        self.handle,
+                        vk1_0::PipelineBindPoint::COMPUTE,
+                        pipeline.handle(&device),
+                    )
+                },
                 Command::Draw {
-                    vertices,
-                    instances,
+                    ref vertices,
+                    ref instances,
                 } => unsafe {
                     logical.cmd_draw(
                         self.handle,
@@ -762,16 +815,16 @@ impl CommandBuffer {
                     )
                 },
                 Command::DrawIndexed {
-                    indices,
+                    ref indices,
                     vertex_offset,
-                    instances,
+                    ref instances,
                 } => unsafe {
                     logical.cmd_draw_indexed(
                         self.handle,
                         indices.end - indices.start,
                         instances.end - instances.start,
                         indices.start,
-                        *vertex_offset,
+                        vertex_offset,
                         instances.start,
                     )
                 },
@@ -793,7 +846,7 @@ impl CommandBuffer {
                         &[scissor.to_erupt().builder()],
                     );
                 },
-                &Command::UpdateBuffer {
+                Command::UpdateBuffer {
                     buffer,
                     offset,
                     data,
@@ -821,12 +874,12 @@ impl CommandBuffer {
 
                     logical.cmd_bind_vertex_buffers(
                         self.handle,
-                        *first,
+                        first,
                         &buffers,
                         &offsets,
                     );
                 },
-                &Command::BuildAccelerationStructure { infos } => {
+                Command::BuildAccelerationStructure { infos } => {
                     assert!(device.logical().khr_ray_tracing.is_some());
 
                     // Vulkan specific checks.
@@ -986,7 +1039,7 @@ impl CommandBuffer {
                         )
                     }
                 }
-                &Command::BindIndexBuffer {
+                Command::BindIndexBuffer {
                     buffer,
                     offset,
                     index_type,
@@ -1002,7 +1055,7 @@ impl CommandBuffer {
                     );
                 },
 
-                &Command::BindRayTracingPipeline { pipeline } => unsafe {
+                Command::BindRayTracingPipeline { pipeline } => unsafe {
                     logical.cmd_bind_pipeline(
                         self.handle,
                         vk1_0::PipelineBindPoint::RAY_TRACING_KHR,
@@ -1010,7 +1063,7 @@ impl CommandBuffer {
                     )
                 },
 
-                &Command::BindGraphicsDescriptorSets {
+                Command::BindGraphicsDescriptorSets {
                     layout,
                     first_set,
                     sets,
@@ -1029,7 +1082,7 @@ impl CommandBuffer {
                     )
                 },
 
-                &Command::BindComputeDescriptorSets {
+                Command::BindComputeDescriptorSets {
                     layout,
                     first_set,
                     sets,
@@ -1048,7 +1101,7 @@ impl CommandBuffer {
                     )
                 },
 
-                &Command::BindRayTracingDescriptorSets {
+                Command::BindRayTracingDescriptorSets {
                     layout,
                     first_set,
                     sets,
@@ -1067,7 +1120,7 @@ impl CommandBuffer {
                     )
                 },
 
-                &Command::TraceRays {
+                Command::TraceRays {
                     shader_binding_table,
                     extent,
                 } => {
@@ -1111,7 +1164,7 @@ impl CommandBuffer {
                         )
                     }
                 }
-                &Command::CopyImage {
+                Command::CopyImage {
                     src_image,
                     src_layout,
                     dst_image,
@@ -1131,7 +1184,7 @@ impl CommandBuffer {
                     );
                 },
 
-                &Command::CopyBuffer {
+                Command::CopyBuffer {
                     src_buffer,
                     dst_buffer,
                     regions,
@@ -1146,7 +1199,7 @@ impl CommandBuffer {
                             .collect::<SmallVec<[_; 4]>>(),
                     );
                 },
-                &Command::CopyBufferImage {
+                Command::CopyBufferImage {
                     src_buffer,
                     dst_image,
                     dst_layout,
@@ -1164,7 +1217,7 @@ impl CommandBuffer {
                     );
                 },
 
-                &Command::BlitImage {
+                Command::BlitImage {
                     src_image,
                     src_layout,
                     dst_image,
@@ -1186,7 +1239,7 @@ impl CommandBuffer {
                     );
                 },
 
-                &Command::PipelineBarrier { src, dst, images } => unsafe {
+                Command::PipelineBarrier { src, dst, images } => unsafe {
                     logical.cmd_pipeline_barrier(
                         self.handle,
                         src.to_erupt(),
@@ -1235,6 +1288,24 @@ impl CommandBuffer {
                             })
                             .collect::<SmallVec<[_; 8]>>(),
                     )
+                },
+                Command::PushConstants {
+                    layout,
+                    stages,
+                    offset,
+                    data,
+                } => unsafe {
+                    logical.cmd_push_constants(
+                        self.handle,
+                        layout.handle(&device),
+                        stages.to_erupt(),
+                        offset,
+                        data.len() as u32,
+                        data.as_ptr() as *const _,
+                    )
+                },
+                Command::Dispatch { x, y, z } => unsafe {
+                    logical.cmd_dispatch(self.handle, x, y, z)
                 },
             }
         }

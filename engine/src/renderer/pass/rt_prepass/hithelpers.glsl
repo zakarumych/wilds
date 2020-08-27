@@ -8,7 +8,12 @@ uvec3 instance_triangle_indices() {
 
 Vertex instance_vertex(uint index) {
     uint mesh = instances[gl_InstanceID].mesh;
-    return vertices[mesh].v[index];
+    uint anim = instances[gl_InstanceID].anim;
+    if (anim > 0) {
+        return anim_vertices[mesh].v[index];
+    } else {
+        return vertices[mesh].v[index];
+    }
 }
 
 mat4 instance_transform() {

@@ -1,6 +1,6 @@
 use {
     super::{
-        vertex::{Semantics, VertexLayout, VertexType},
+        vertex::{Semantics, VertexLayout, VertexLocation, VertexType},
         Context,
     },
     bumpalo::{collections::Vec as BVec, Bump},
@@ -148,87 +148,58 @@ impl Mesh {
         bump: &'a Bump,
     ) -> Result<AccelerationStructure, OutOfMemory> {
         assert_eq!(self.topology, PrimitiveTopology::TriangleList);
-        assert_eq!(self.count % 3, 0);
-        let triangle_count = self.count / 3;
 
-        let (pos_binding, pos_location) = self
-            .bindings
+        let (pos_binding, pos_location) = self.bindings
             .iter()
             .filter_map(|binding| {
-                binding
-                    .layout
-                    .locations
+                binding.layout.locations
                     .iter()
                     .find(|&attr| attr.semantics == Some(Semantics::Position3d))
                     .map(move |location| (binding, location))
-            })
-            .next()
+                }
+            ).next()
             .expect("Cannot create acceleration structure for mesh without position attribute");
-        assert_eq!(pos_binding.layout.rate, VertexInputRate::Vertex);
 
-        let pos_address = device
-            .get_buffer_device_address(&pos_binding.buffer)
-            .unwrap()
-            .offset(pos_binding.offset)
-            .offset(pos_location.offset.into());
+        build_triangles_blas(
+            self.indices.as_ref(),
+            pos_binding,
+            pos_location,
+            self.count,
+            encoder,
+            device,
+            bump,
+        )
+    }
 
-        let blas = device.create_acceleration_structure(
-            AccelerationStructureInfo {
-                level: AccelerationStructureLevel::Bottom,
-                flags: AccelerationStructureFlags::PREFER_FAST_TRACE,
-                geometries: vec![
-                    AccelerationStructureGeometryInfo::Triangles {
-                        max_primitive_count: triangle_count,
-                        index_type: self
-                            .indices
-                            .as_ref()
-                            .map(|indices| indices.index_type),
-                        max_vertex_count: self.count,
-                        vertex_format: pos_location.format,
-                        allows_transforms: true,
-                    },
-                ],
-            },
-        )?;
+    pub fn build_pose_triangles_blas<'a>(
+        &self,
+        pose: &PoseMesh,
+        encoder: &mut Encoder<'a>,
+        device: &Device,
+        bump: &'a Bump,
+    ) -> Result<AccelerationStructure, OutOfMemory> {
+        assert_eq!(self.topology, PrimitiveTopology::TriangleList);
 
-        let blas_scratch = device
-            .allocate_acceleration_structure_build_scratch(&blas, false)?;
+        let (pos_binding, pos_location) = pose.bindings
+            .iter()
+            .filter_map(|binding| {
+                binding.layout.locations
+                    .iter()
+                    .find(|&attr| attr.semantics == Some(Semantics::Position3d))
+                    .map(move |location| (binding, location))
+                }
+            ).next()
+            .expect("Cannot create acceleration structure for mesh without position attribute");
 
-        let blas_scratch_address =
-            device.get_buffer_device_address(&blas_scratch).unwrap();
-
-        let geometries =
-            bump.alloc([AccelerationStructureGeometry::Triangles {
-                flags: GeometryFlags::empty(),
-                vertex_format: Format::RGB32Sfloat,
-                vertex_data: pos_address,
-                vertex_stride: pos_binding.layout.stride.into(),
-                first_vertex: 0,
-                primitive_count: triangle_count,
-                index_data: self.indices.as_ref().map(|indices| {
-                    let index_address = device
-                        .get_buffer_device_address(&indices.buffer)
-                        .unwrap()
-                        .offset(indices.offset);
-
-                    match indices.index_type {
-                        IndexType::U16 => IndexData::U16(index_address),
-                        IndexType::U32 => IndexData::U32(index_address),
-                    }
-                }),
-                transform_data: None,
-            }]);
-
-        let infos = bump.alloc([AccelerationStructureBuildGeometryInfo {
-            src: None,
-            dst: blas.clone(),
-            geometries,
-            scratch: blas_scratch_address,
-        }]);
-
-        encoder.build_acceleration_structure(infos);
-
-        Ok(blas)
+        build_triangles_blas(
+            self.indices.as_ref(),
+            pos_binding,
+            pos_location,
+            self.count,
+            encoder,
+            device,
+            bump,
+        )
     }
 
     pub fn draw<'a>(
@@ -712,6 +683,8 @@ mod gm {
 /// Mesh transformed into specific pose.
 /// Contains only bindings affected by transformation -
 /// i.e. bingings that contain positions, normals and/or tangets
+/// FIXME: Allow sharing pose mesh in animation groups.
+#[derive(Debug)]
 pub struct PoseMesh {
     bindings: Arc<[Binding]>,
 }
@@ -725,6 +698,7 @@ impl PoseMesh {
     ) -> Result<Self, OutOfMemory> {
         let mut offset = 0;
         let mut prebindings = BVec::with_capacity_in(4, bump);
+        let mut usage = BufferUsage::empty();
 
         for binding in mesh.bindings.iter() {
             let animate = binding
@@ -736,13 +710,14 @@ impl PoseMesh {
             if animate {
                 prebindings.push((binding.layout.clone(), offset));
                 offset += binding.buffer.info().size;
+                usage |= binding.buffer.info().usage;
             }
         }
 
         let buffer = device.create_buffer(BufferInfo {
             align: 255,
             size: offset,
-            usage: BufferUsage::RAY_TRACING | BufferUsage::STORAGE,
+            usage,
             memory: MemoryUsageFlags::empty(),
         })?;
 
@@ -757,4 +732,80 @@ impl PoseMesh {
 
         Ok(PoseMesh { bindings })
     }
+
+    pub fn bindings(&self) -> &[Binding] {
+        &*self.bindings
+    }
+}
+
+fn build_triangles_blas<'a>(
+    indices: Option<&Indices>,
+    binding: &Binding,
+    location: &VertexLocation,
+    count: u32,
+    encoder: &mut Encoder<'a>,
+    device: &Device,
+    bump: &'a Bump,
+) -> Result<AccelerationStructure, OutOfMemory> {
+    assert_eq!(count % 3, 0);
+    let triangle_count = count / 3;
+
+    assert_eq!(binding.layout.rate, VertexInputRate::Vertex);
+
+    let pos_address = device
+        .get_buffer_device_address(&binding.buffer)
+        .unwrap()
+        .offset(binding.offset)
+        .offset(location.offset.into());
+
+    let blas =
+        device.create_acceleration_structure(AccelerationStructureInfo {
+            level: AccelerationStructureLevel::Bottom,
+            flags: AccelerationStructureFlags::PREFER_FAST_TRACE,
+            geometries: vec![AccelerationStructureGeometryInfo::Triangles {
+                max_primitive_count: triangle_count,
+                index_type: indices.map(|indices| indices.index_type),
+                max_vertex_count: count,
+                vertex_format: location.format,
+                allows_transforms: true,
+            }],
+        })?;
+
+    let blas_scratch =
+        device.allocate_acceleration_structure_build_scratch(&blas, false)?;
+
+    let blas_scratch_address =
+        device.get_buffer_device_address(&blas_scratch).unwrap();
+
+    let geometries = bump.alloc([AccelerationStructureGeometry::Triangles {
+        flags: GeometryFlags::empty(),
+        vertex_format: Format::RGB32Sfloat,
+        vertex_data: pos_address,
+        vertex_stride: binding.layout.stride.into(),
+        first_vertex: 0,
+        primitive_count: triangle_count,
+        index_data: indices.map(|indices| {
+            let index_address = device
+                .get_buffer_device_address(&indices.buffer)
+                .unwrap()
+                .offset(indices.offset);
+
+            match indices.index_type {
+                IndexType::U16 => IndexData::U16(index_address),
+                IndexType::U32 => IndexData::U32(index_address),
+            }
+        }),
+        transform_data: None,
+    }]);
+
+    let infos = bump.alloc([AccelerationStructureBuildGeometryInfo {
+        src: None,
+        dst: blas.clone(),
+        geometries,
+        scratch: blas_scratch_address,
+    }]);
+
+    encoder.build_acceleration_structure(infos);
+
+    Ok(blas)
 }

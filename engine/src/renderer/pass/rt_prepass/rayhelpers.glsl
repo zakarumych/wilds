@@ -62,9 +62,9 @@ vec3 blue_rand(uvec4 co) {
     const double i4fi4 = 1 - i3fi4;
 
     const vec4 alpha = vec4(i1fi4, i2fi4, i3fi4, i4fi4);
-    float x = wave(0.5 + dot(co, alpha));
-    float y = wave(0.5 + dot(co, alpha.yzwx));
-    float z = wave(0.5 + dot(co, alpha.zwxy));
+    float x = wave(0.1 + dot(co, alpha));
+    float y = wave(0.2 + dot(co, alpha.yzwx));
+    float z = wave(0.3 + dot(co, alpha.wzyx));
 
     // // const double fi5 = 1.1347241384015194926054460545064728402796672263828014859251495516682368939998426;
     // // const double i1fi5 = fi5 * fi5 * fi5 * fi5 - 1;

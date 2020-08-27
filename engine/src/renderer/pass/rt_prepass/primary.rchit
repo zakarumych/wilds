@@ -30,14 +30,12 @@ void main()
     vec3 pos = v0.pos * barycentrics.x + v1.pos * barycentrics.y + v2.pos * barycentrics.z;
     vec2 uv = v0.uv * barycentrics.x + v1.uv * barycentrics.y + v2.uv * barycentrics.z;
 
+    vec3 worls_space_pos = (instance_transform() * vec4(pos, 1.0)).xyz;
     vec3 normal = normalize(v0.norm * barycentrics.x + v1.norm * barycentrics.y + v2.norm * barycentrics.z);
     vec4 tangh = v0.tangh * barycentrics.x + v1.tangh * barycentrics.y + v2.tangh * barycentrics.z;
     normal = local_normal(normal, tangh, uv);
-
+    normal *= gl_HitKindEXT == gl_HitKindFrontFacingTriangleEXT ? 1 : -1;
     vec3 world_space_normal = normalize((instance_transform() * vec4(normal, 0.0)).xyz);
-    world_space_normal *= -sign(dot(world_space_normal, gl_WorldRayDirectionEXT));
-
-    vec3 worls_space_pos = (instance_transform() * vec4(pos, 1.0)).xyz;
 
     prd.albedo = sample_albedo(uv);
     prd.normal = world_space_normal;
@@ -87,7 +85,7 @@ void main()
     dprd.co = prd.co;
     for (uint i = 0; i < diffuse_rays; ++i)
     {
-        dprd.co.w++;
+        dprd.co.z++;
         vec3 dir = blue_rand_hemisphere_cosine_dir(uvec4(prd.co, i + 1024), world_space_normal);
         traceRayEXT(tlas, 00, 0xff, 1, 0, 1, worls_space_pos, 0.001, dir, 1000.0, 2);
     }

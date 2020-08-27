@@ -10,7 +10,6 @@ use {
         transformation::ToTriMesh as _,
     },
     std::sync::Arc,
-    ultraviolet::Isometry3,
     wilds::{
         assets::Prefab,
         physics::{ColliderDesc, Colliders, RigidBodyDesc},
@@ -19,6 +18,7 @@ use {
             OutOfMemory, Position3d, PositionNormalTangent3dUV,
             PrimitiveTopology, Renderable, Tangent3d, UV,
         },
+        scene::Global3,
     },
 };
 
@@ -95,9 +95,9 @@ impl SyncAsset for PawnAsset {
 }
 
 impl Prefab for PawnAsset {
-    type Info = Isometry3;
+    type Info = na::Isometry3<f32>;
 
-    fn spawn(self, iso: Isometry3, world: &mut World, entity: Entity) {
+    fn spawn(self, iso: na::Isometry3<f32>, world: &mut World, entity: Entity) {
         let body = RigidBodyDesc::<f32>::new()
             .kinematic_rotations(na::Vector3::new(true, true, true))
             .build();
@@ -108,7 +108,7 @@ impl Prefab for PawnAsset {
                 Renderable {
                     mesh: self.mesh,
                     material: Material::color([0.7, 0.5, 0.3, 1.0]),
-                    transform: None,
+                    // transform: None,
                 },
                 body,
                 Colliders::from(
@@ -116,7 +116,7 @@ impl Prefab for PawnAsset {
                         .density(1.0)
                         .margin(0.01),
                 ),
-                iso,
+                Global3::from_iso(iso),
                 Pawn,
             ),
         );

@@ -6,25 +6,27 @@ use {
     bumpalo::Bump,
     color_eyre::Report,
     goods::RonFormat,
-    hecs::World,
+    hecs::{Entity, EntityBuilder, World},
+    nalgebra as na,
     std::{alloc::System, cmp::max, time::Duration},
-    ultraviolet::{Isometry3, Mat4, Rotor3, Vec3},
     wilds::{
-        alloc::Region,
-        assets::{
-            Gltf, GltfFormat, GltfNode, Prefab, TerrainAsset, TerrainFormat,
-        },
+        animate::Pose,
+        assets::{GltfAsset, GltfFormat, Prefab, TerrainAsset, TerrainFormat},
         camera::{
             following::{FollowingCamera, FollowingCameraSystem},
             free::{FreeCamera, FreeCameraSystem},
             Camera,
         },
         clocks::Clocks,
-        engine::Engine,
+        engine::{Engine, SystemContext},
         fps_counter::FpsCounter,
         light::{DirectionalLight, PointLight, SkyLight},
         physics::Physics,
-        renderer::{RenderConstants, Renderable, Renderer},
+        renderer::{
+            PoseMesh, RenderConstants, Renderable, Renderer, Skin,
+            VertexType as _,
+        },
+        scene::{Global3, Local3, SceneSystem},
     },
     winit::{
         dpi::PhysicalSize,
@@ -46,6 +48,7 @@ fn main() -> Result<(), Report> {
             .insert(wilds::physics::Constants { time_factor: 0.1 });
 
         // engine.add_system(Physics::new());
+        engine.add_system(SceneSystem);
 
         let window = engine.build_window(
             WindowBuilder::new().with_inner_size(PhysicalSize {
@@ -60,18 +63,18 @@ fn main() -> Result<(), Report> {
         let mut renderer = Renderer::new(&window)?;
         let mut clocks = Clocks::new();
 
-        let sunlight = Vec3::new(255.0, 207.0, 72.0)
+        let sunlight = na::Vector3::new(255.0, 207.0, 72.0)
             .map(|c| c / 255.0)
             .map(|c| c / (1.3 - c))
             .map(|c| c * 5.0);
-        let skylight = Vec3::new(117.0, 187.0, 253.0)
+        let skylight = na::Vector3::new(117.0, 187.0, 253.0)
             .map(|c| c / 255.0)
             .map(|c| c / (1.3 - c))
             .map(|c| c * 5.0);
 
         engine.world.spawn((
             DirectionalLight {
-                direction: Vec3::new(-30.0, -30.0, -30.0),
+                direction: na::Vector3::new(-30.0, -30.0, -30.0),
                 radiance: sunlight.into(),
             },
             SkyLight {
@@ -83,67 +86,70 @@ fn main() -> Result<(), Report> {
             PointLight {
                 radiance: [10.0, 10.0, 10.0],
             },
-            Isometry3::new(Vec3::new(0.0, 0.0, 0.0), Rotor3::identity()),
-        ));
-
-        engine.add_system(|ctx: wilds::engine::SystemContext<'_>| {
-            let mut query =
-                ctx.world.query::<&mut Isometry3>().with::<PointLight>();
-
-            for (_, iso) in query.iter() {
-                iso.translation.x =
-                    (ctx.clocks.step - ctx.clocks.start).as_secs_f32().sin();
-                iso.translation.y = 5.0
-                    + 3.0
-                        * (ctx.clocks.step - ctx.clocks.start)
-                            .as_secs_f32()
-                            .cos();
-            }
-        });
-
-        let mut gltf_opt = Some(engine.assets.load_with_format(
-            "sponza/Sponza.gltf".to_owned(),
-            GltfFormat {
-                raster: false,
-                blas: true,
+            na::Isometry3 {
+                translation: na::Translation3::new(0.0, 0.0, 0.0),
+                rotation: na::UnitQuaternion::identity(),
             },
         ));
 
+        // engine.add_system(|ctx: wilds::engine::SystemContext<'_>| {
+        //     let mut query = ctx
+        //         .world
+        //         .query::<&mut na::Isometry3<f32>>()
+        //         .with::<PointLight>();
+
+        //     for (_, iso) in query.iter() {
+        //         iso.translation.x =
+        //             (ctx.clocks.step - ctx.clocks.start).as_secs_f32().sin();
+        //         iso.translation.y = 5.0
+        //             + 3.0
+        //                 * (ctx.clocks.step - ctx.clocks.start) .as_secs_f32()
+        //                   .cos();
+        //     }
+        // });
+
+        let scene = engine.load_prefab_with_format::<GltfAsset, _>(
+            "thor_and_the_midgard_serpent/scene.gltf".into(),
+            Global3::from_scale(0.01),
+            GltfFormat::for_raytracing(),
+        );
+
         // let _terrain = TerrainAsset::load(
         //     &engine,
-        //     "terrain/0001.png".to_owned(),
+        //     "terrain/0001.png".into(),
         //     TerrainFormat {
         //         raster: false,
         //         blas: true,
         //         factor: 3.0,
         //     },
-        //     Isometry3::identity(),
+        //     na::Isometry3::identity(),
         // );
 
         // let pawn = PawnAsset::load(
         //     &engine,
-        //     "pawn.ron".to_owned(),
+        //     "pawn.ron".into(),
         //     RonFormat,
-        //     Isometry3::new(Vec3::new(0.0, 5.0, 0.0), Rotor3::identity()),
+        //     na::Isometry3::translation(0.0, 5.0, 0.0),
         // );
 
         // let pawn2 = PawnAsset::load(
         //     &engine,
-        //     "pawn.ron".to_owned(),
+        //     "pawn.ron".into(),
         //     RonFormat,
-        //     Isometry3::new(Vec3::new(1.0, 10.0, 1.0), Rotor3::identity()),
+        //     na::Isometry3::translation(1.0, 10.0, 1.0),
         // );
 
         // engine.add_system(player::Player::new(&window, pawn));
 
         engine.world.spawn((
-            Camera::Perspective {
-                vertical_fov: std::f32::consts::PI / 3.0,
-                aspect_ratio: aspect,
-                z_near: 0.1,
-                z_far: 1000.0,
-            },
-            Isometry3::identity(),
+            Camera::Perspective(na::Perspective3::new(
+                aspect,
+                std::f32::consts::PI / 3.0,
+                0.1,
+                1000.0,
+            )),
+            // Camera::Matrix(na::Projective3::identity()),
+            Global3::identity(),
             // FollowingCamera { follows: pawn },
             FreeCamera,
         ));
@@ -160,28 +166,27 @@ fn main() -> Result<(), Report> {
                 .with_speed(3.0),
         );
 
+        // engine.add_system(|context: SystemContext<'_>| {
+        //     for (_, pose) in context.world.query::<&mut Pose>().iter() {
+        //         if let [_, mid, ..] = &mut *pose.matrices {
+        //             *mid = na::UnitQuaternion::from_euler_angles(
+        //                 1.0 * context.clocks.delta.as_secs_f32(),
+        //                 1.0 * context.clocks.delta.as_secs_f32(),
+        //                 1.0 * context.clocks.delta.as_secs_f32(),
+        //             )
+        //             .into_matrix()
+        //             .into_homogeneous()
+        //                 * *mid;
+        //         }
+        //     }
+        // });
+
         window.request_redraw();
 
         let mut fps_counter = FpsCounter::new(Duration::from_secs(5));
         let mut ticker = Duration::from_secs(0);
 
-        let mut reg = Region::new();
-
         loop {
-            if let Some(gltf) = &mut gltf_opt {
-                if let Some(gltf) = gltf.get() {
-                    tracing::info!("Scene loaded");
-                    load_gltf_scene(
-                        gltf,
-                        &mut engine.world,
-                        Isometry3::identity(),
-                        1.0,
-                    );
-
-                    gltf_opt = None;
-                }
-            }
-
             // Main game loop
             match engine.next().await {
                 Event::WindowEvent {
@@ -209,14 +214,14 @@ fn main() -> Result<(), Report> {
                             1.0 / fps_counter.average().as_secs_f32()
                         );
 
-                        let stats = reg.change_and_reset();
-                        tracing::info!(
-                            "Alloc {} ({} - {})",
-                            stats.bytes_allocated as isize
-                                - stats.bytes_deallocated as isize,
-                            stats.bytes_allocated,
-                            stats.bytes_deallocated
-                        );
+                        // let stats = reg.change_and_reset();
+                        // tracing::info!(
+                        //     "Alloc {} ({} - {})",
+                        //     stats.bytes_allocated as isize
+                        //         - stats.bytes_deallocated as isize,
+                        //     stats.bytes_allocated,
+                        //     stats.bytes_deallocated
+                        // );
                     }
                     ticker -= clock.delta;
 
@@ -254,48 +259,4 @@ fn main() -> Result<(), Report> {
 
         Ok(())
     })
-}
-
-pub fn load_gltf_scene(
-    gltf: &Gltf,
-    world: &mut World,
-    iso: Isometry3,
-    scale: f32,
-) {
-    let scene = gltf.scene.unwrap();
-
-    for &node in &*gltf.scenes[scene].nodes {
-        let node = &gltf.nodes[node];
-        load_gltf_node(gltf, node, iso, Mat4::from_scale(scale), world);
-    }
-}
-
-fn load_gltf_node(
-    gltf: &Gltf,
-    node: &GltfNode,
-    iso: Isometry3,
-    transform: Mat4,
-    world: &mut World,
-) {
-    let transform = transform * node.transform;
-
-    if let Some(mesh) = &node.mesh {
-        for (mesh, material) in Iterator::zip(
-            gltf.meshes[mesh.primitives.clone()].iter(),
-            mesh.materials.iter(),
-        ) {
-            world.spawn((
-                Renderable {
-                    mesh: mesh.clone(),
-                    material: material.clone(),
-                    transform: Some(transform),
-                },
-                iso,
-            ));
-        }
-    }
-
-    for &child in &*node.children {
-        load_gltf_node(gltf, &gltf.nodes[child], iso, transform, world);
-    }
 }

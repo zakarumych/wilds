@@ -43,14 +43,8 @@ pub enum SurfaceError {
     #[error("Surface is already used")]
     AlreadyUsed,
 
-    #[error("{source}")]
-    Other {
-        #[cfg(target_arch = "wasm32")]
-        source: Box<dyn Error + 'static>,
-
-        #[cfg(not(target_arch = "wasm32"))]
-        source: Box<dyn Error + Send + Sync + 'static>,
-    },
+    #[error("Function returned unexpected error code: {result}")]
+    UnexpectedVulkanResult { result: vk1_0::Result },
 }
 
 #[allow(dead_code)]
@@ -137,11 +131,10 @@ pub enum CreateSurfaceError {
         source: Option<Box<dyn Error + Send + Sync>>,
     },
 
-    #[error("{source}")]
-    Other {
+    #[error("Function returned unexpected error code: {result}")]
+    UnexpectedVulkanResult {
         window: RawWindowHandleKind,
-        #[source]
-        source: Box<dyn Error + Send + Sync>,
+        result: vk1_0::Result,
     },
 }
 
@@ -238,8 +231,6 @@ pub(crate) fn surface_error_from_erupt(err: vk1_0::Result) -> SurfaceError {
             }
         }
         vk1_0::Result::ERROR_SURFACE_LOST_KHR => SurfaceError::SurfaceLost,
-        _ => SurfaceError::Other {
-            source: Box::new(err),
-        },
+        _ => SurfaceError::UnexpectedVulkanResult { result: err },
     }
 }

@@ -1,5 +1,5 @@
 use {
-    super::{Assets, Prefab},
+    super::{AssetKey, Assets, Prefab},
     crate::{
         physics::{BodyStatus, Colliders, RigidBodyDesc},
         renderer::{
@@ -7,6 +7,7 @@ use {
             PositionNormalTangent3dUV, Renderable, Tangent3d, VertexType as _,
             UV,
         },
+        scene::Global3,
     },
     goods::{ready, Format, Ready, SyncAsset},
     hecs::{Entity, World},
@@ -17,12 +18,11 @@ use {
     image::{
         load_from_memory, DynamicImage, GenericImageView, ImageError, Pixel,
     },
-    nalgebra::{DMatrix, Dynamic, Vector3},
+    nalgebra as na,
     ncollide3d::shape::{HeightField, ShapeHandle},
     nphysics3d::object::ColliderDesc,
     num_traits::{bounds::Bounded, cast::ToPrimitive},
     std::{convert::TryFrom as _, sync::Arc},
-    ultraviolet::{Isometry3, Vec3},
 };
 
 pub fn create_terrain_shape(
@@ -30,9 +30,9 @@ pub fn create_terrain_shape(
     depth: u32,
     heightmap: impl Fn(u32, u32) -> f32,
 ) -> HeightField<f32> {
-    let mut matrix: DMatrix<f32> = DMatrix::zeros_generic(
-        Dynamic::new(depth as usize),
-        Dynamic::new(width as usize),
+    let mut matrix: na::DMatrix<f32> = na::DMatrix::zeros_generic(
+        na::Dynamic::new(depth as usize),
+        na::Dynamic::new(width as usize),
     );
 
     for x in 0..width {
@@ -41,7 +41,7 @@ pub fn create_terrain_shape(
         }
     }
 
-    HeightField::new(matrix, Vector3::new(width as f32, 1.0, depth as f32))
+    HeightField::new(matrix, na::Vector3::new(width as f32, 1.0, depth as f32))
 }
 
 pub fn create_terrain_mesh(
@@ -63,18 +63,23 @@ pub fn create_terrain_mesh(
                 let xf = x as f32 - xoff;
                 let zf = z as f32 - zoff;
 
-                let pos = Vec3::from([xf, heightmap(x, z), zf]);
-                let posx = Vec3::from([xf + 1.0, heightmap(x + 1, z), zf]);
-                let posy = Vec3::from([xf, heightmap(x, z + 1), zf + 1.0]);
-                let posxy =
-                    Vec3::from([xf + 1.0, heightmap(x + 1, z + 1), zf + 1.0]);
+                let pos = na::Vector3::from([xf, heightmap(x, z), zf]);
+                let posx =
+                    na::Vector3::from([xf + 1.0, heightmap(x + 1, z), zf]);
+                let posy =
+                    na::Vector3::from([xf, heightmap(x, z + 1), zf + 1.0]);
+                let posxy = na::Vector3::from([
+                    xf + 1.0,
+                    heightmap(x + 1, z + 1),
+                    zf + 1.0,
+                ]);
 
-                let n1 = (pos - posx).cross(posy - pos);
-                let n2 = (posy - posxy).cross(posxy - posx);
-                let n3 = (pos - posx).cross(posxy - posx);
-                let n4 = (posy - posxy).cross(posy - pos);
+                let n1 = (pos - posx).cross(&(posy - pos));
+                let n2 = (posy - posxy).cross(&(posxy - posx));
+                let n3 = (pos - posx).cross(&(posxy - posx));
+                let n4 = (posy - posxy).cross(&(posy - pos));
 
-                let normal = (n1 + n2 + n3 + n4).normalized();
+                let normal = (n1 + n2 + n3 + n4).normalize();
                 let tangent = Tangent3d([1.0, 0.0, 0.0, 1.0]);
 
                 data.extend_from_slice(bytemuck::cast_slice(&[
@@ -215,11 +220,16 @@ pub struct TerrainFormat {
     pub factor: f32,
 }
 
-impl Format<TerrainAsset, String> for TerrainFormat {
+impl Format<TerrainAsset, AssetKey> for TerrainFormat {
     type DecodeFuture = Ready<Result<TerrainRepr, ImageError>>;
     type Error = ImageError;
 
-    fn decode(self, bytes: Vec<u8>, _: &Assets) -> Self::DecodeFuture {
+    fn decode(
+        self,
+        _: AssetKey,
+        bytes: Vec<u8>,
+        _: &Assets,
+    ) -> Self::DecodeFuture {
         let mut buffer_usage = BufferUsage::empty();
         if self.raster {
             buffer_usage |= BufferUsage::VERTEX | BufferUsage::INDEX;
@@ -252,9 +262,9 @@ pub struct TerrainAsset {
 pub struct Terrain;
 
 impl Prefab for TerrainAsset {
-    type Info = Isometry3;
+    type Info = na::Isometry3<f32>;
 
-    fn spawn(self, iso: Isometry3, world: &mut World, entity: Entity) {
+    fn spawn(self, iso: na::Isometry3<f32>, world: &mut World, entity: Entity) {
         let rigid_body = RigidBodyDesc::<f32>::new()
             .status(BodyStatus::Static)
             .build();
@@ -265,14 +275,14 @@ impl Prefab for TerrainAsset {
                 Renderable {
                     mesh: self.mesh,
                     material: Material::color([0.3, 0.5, 0.7, 1.0]),
-                    transform: None,
+                    // transform: None,
                 },
                 rigid_body,
                 Colliders::from(
                     ColliderDesc::new(ShapeHandle::from_arc(self.shape))
                         .margin(0.01),
                 ),
-                iso,
+                Global3::from_iso(iso),
                 Terrain,
             ),
         );

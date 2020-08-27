@@ -16,21 +16,44 @@ pub struct Texture {
 pub struct Material {
     pub albedo: Option<Texture>,
     pub albedo_factor: [OrderedFloat<f32>; 4],
+    pub metallic_roughness: Option<Texture>,
+    pub metallic_factor: OrderedFloat<f32>,
+    pub roughness_factor: OrderedFloat<f32>,
+    pub emissive: Option<Texture>,
+    pub emissive_factor: [OrderedFloat<f32>; 3],
     pub normal: Option<Texture>,
-    pub normal_factor: OrderedFloat<f32>, /* normalInTangentSpace =
-                                           * vec3(sampledNormal.xy
-                                           * * normalScale,
-                                           * sampledNormal.z) */
+    pub normal_factor: OrderedFloat<f32>, /* normal_in_tangent_space =
+                                           * vec3(sampled_normal.xy
+                                           * * normal_factor,
+                                           * sampled_normal.z) */
+}
+
+impl Default for Material {
+    fn default() -> Self {
+        Material::new()
+    }
 }
 
 impl Material {
+    pub const fn new() -> Material {
+        Material {
+            albedo: None,
+            albedo_factor: [OrderedFloat(1.0); 4],
+            metallic_roughness: None,
+            metallic_factor: OrderedFloat(1.0),
+            roughness_factor: OrderedFloat(1.0),
+            emissive: None,
+            emissive_factor: [OrderedFloat(0.0); 3],
+            normal: None,
+            normal_factor: OrderedFloat(0.0),
+        }
+    }
+
     pub fn color(rgba: [f32; 4]) -> Self {
         let [r, g, b, a] = rgba;
         Material {
-            albedo: None,
             albedo_factor: [r.into(), g.into(), b.into(), a.into()],
-            normal: None,
-            normal_factor: 0.0.into(),
+            ..Material::new()
         }
     }
 }

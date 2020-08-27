@@ -5,7 +5,7 @@ authors = ["zakarum"]
 edition = "2018"
 
 [dependencies]
-fastbitset = { path = "../fastbitset" }
+fastbitset = { path = "../fastbitset", features = ["boxed"] }
 erupt = { version = "0.10", default-features = false }
 tinyvec = "0.3"
 parking_lot = "0.11"

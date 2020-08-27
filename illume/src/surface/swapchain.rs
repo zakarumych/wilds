@@ -187,9 +187,7 @@ impl Swapchain {
                 }
             }
             vk1_0::Result::ERROR_SURFACE_LOST_KHR => SurfaceError::SurfaceLost,
-            _ => SurfaceError::Other {
-                source: Box::new(err),
-            },
+            _ => SurfaceError::UnexpectedVulkanResult { result: err },
         })?;
 
         if !ImageUsage::from_erupt(caps.supported_usage_flags).contains(usage) {
@@ -379,7 +377,7 @@ impl Swapchain {
                     inner.handle,
                     !0, /* wait indefinitely. This is OK as we never try to
                          * acquire more images than there is in swaphain. */
-                    unsafe { wait.handle(&device) },
+                    wait.handle(&device),
                     vk1_0::Fence::null(),
                     None,
                 )

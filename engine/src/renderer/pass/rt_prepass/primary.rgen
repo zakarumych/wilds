@@ -20,7 +20,7 @@ void main()
     const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy);
     const vec2 inUV = pixelCenter/vec2(gl_LaunchSizeEXT.xy);
     vec2 d = inUV * 2.0 - 1.0;
-    vec4 proj  = globals.cam.iproj * vec4(d.x, d.y, 1, 1);
+    vec4 proj  = globals.cam.iproj * vec4(d.x, -d.y, -1, 1);
     vec4 target = globals.cam.view * vec4(normalize(proj.xyz), 1.0);
 
     // vec2 off = (blue_rand_circle(co + uvec3(13)) - 0.5);

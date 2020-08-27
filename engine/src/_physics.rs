@@ -24,7 +24,6 @@ use {
         },
         shape::{Shape, ShapeHandle},
     },
-    ultraviolet::{Isometry3, Vec3},
 };
 
 /// Body type defines how entity is handled by physics engine.
