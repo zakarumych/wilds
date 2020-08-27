@@ -6,10 +6,7 @@ use {
         linear::LinearMemoryBlock,
     },
     erupt::{
-        vk1_0::{
-            self, DeviceMemory, MemoryMapFlags, MemoryPropertyFlags,
-            Vk10DeviceLoaderExt as _,
-        },
+        vk1_0::{self, DeviceMemory, MemoryMapFlags, MemoryPropertyFlags},
         DeviceLoader,
     },
     std::{convert::TryFrom as _, fmt::Debug, num::NonZeroU64, ptr::NonNull},
@@ -104,7 +101,7 @@ impl Block {
                             DeviceMemory(self.memory.get()),
                             offset,
                             size,
-                            MemoryMapFlags::empty(),
+                            Some(MemoryMapFlags::empty()),
                             &mut ptr,
                         )
                         .result()

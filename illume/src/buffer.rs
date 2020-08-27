@@ -1,8 +1,5 @@
-use {
-    crate::{align_up, memory::MemoryUsageFlags, DeviceAddress},
-    erupt::vk1_0,
-    tvma::Block,
-};
+pub use crate::backend::Buffer;
+use crate::{align_up, memory::MemoryUsageFlags};
 
 bitflags::bitflags! {
     #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
@@ -21,15 +18,6 @@ bitflags::bitflags! {
         const TRANSFORM_FEEDBACK = 0x00000800;
         const TRANSFORM_FEEDBACK_COUNTER = 0x00001000;
         const SHADER_DEVICE_ADDRESS = 0x00020000;
-    }
-}
-
-define_handle! {
-    pub struct Buffer {
-        pub info: BufferInfo,
-        handle: vk1_0::Buffer,
-        address: Option<DeviceAddress>,
-        block: Block,
     }
 }
 

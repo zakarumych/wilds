@@ -1,28 +1,18 @@
-use crate::{
-    format::Format,
-    image::{Layout, Samples},
-    stage::PipelineStageFlags,
+pub use crate::backend::RenderPass;
+use {
+    crate::{
+        format::Format,
+        image::{Layout, Samples},
+        stage::PipelineStageFlags,
+    },
+    smallvec::SmallVec,
 };
-use erupt::vk1_0;
-use smallvec::SmallVec;
 
 /// Upper limit for smallvec array size for attachments.
 pub const RENDERPASS_SMALLVEC_ATTACHMENTS: usize = 8;
 
 /// Upper limit for smallvec array size for subpasses.
 pub const SMALLVEC_SUBPASSES: usize = 4;
-
-define_handle! {
-    /// Render pass represents collection of attachments,
-    /// subpasses, and dependencies between subpasses,
-    /// and describes how they are used over the course of the subpasses.
-    ///
-    /// This value is handle to a render pass resource.
-    pub struct RenderPass {
-        pub info: RenderPassInfo,
-        handle: vk1_0::RenderPass,
-    }
-}
 
 /// Defines render pass, its attachments and one implicit subpass.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]

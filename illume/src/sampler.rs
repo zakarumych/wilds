@@ -1,4 +1,5 @@
-use {erupt::vk1_0, ordered_float::OrderedFloat};
+pub use crate::backend::Sampler;
+use ordered_float::OrderedFloat;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
@@ -99,12 +100,5 @@ impl Default for SamplerInfo {
             border_color: BorderColor::FloatOpaqueBlack,
             unnormalized_coordinates: false,
         }
-    }
-}
-
-define_handle! {
-    pub struct Sampler {
-        pub info: SamplerInfo,
-        handle: vk1_0::Sampler,
     }
 }

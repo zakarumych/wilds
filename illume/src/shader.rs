@@ -1,6 +1,6 @@
+pub use crate::backend::ShaderModule;
 use {
     crate::{assert_error, OutOfMemory},
-    erupt::vk1_0,
     std::{
         convert::TryFrom,
         fmt::{self, Debug, Display},
@@ -25,14 +25,6 @@ bitflags::bitflags! {
 
         const ALL_GRAPHICS              = 0b011111;
         const ALL                       = !0;
-    }
-}
-
-define_handle! {
-    /// Resource that describes layout for descriptor sets.
-    pub struct ShaderModule {
-        pub info: ShaderModuleInfo,
-        handle: vk1_0::ShaderModule,
     }
 }
 

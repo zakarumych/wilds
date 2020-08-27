@@ -1,20 +1,12 @@
-pub use self::Samples::*;
-use crate::{
-    format::{AspectFlags, Format},
-    memory::MemoryUsageFlags,
-    Extent2d, Extent3d, ImageSize, Offset3d,
+pub use {self::Samples::*, crate::backend::Image};
+use {
+    crate::{
+        format::{AspectFlags, Format},
+        memory::MemoryUsageFlags,
+        Extent2d, Extent3d, ImageSize, Offset3d,
+    },
+    std::ops::Range,
 };
-use erupt::vk1_0;
-use std::ops::Range;
-use tvma::Block;
-
-define_handle! {
-    pub struct Image {
-        pub info: ImageInfo,
-        handle: vk1_0::Image,
-        block: Option<Block>,
-    }
-}
 
 bitflags::bitflags! {
     #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]

@@ -1,19 +1,21 @@
-use super::{surface_error_from_erupt, PresentMode, Surface, SurfaceError};
-use crate::{
+use super::{
     convert::{from_erupt, FromErupt as _, ToErupt as _},
     device::{Device, WeakDevice},
+    surface::{surface_error_from_erupt, Surface},
+};
+use crate::{
     format::Format,
     image::{Image, ImageInfo, ImageUsage, Samples},
     memory::MemoryUsageFlags,
     out_of_host_memory,
     semaphore::Semaphore,
+    surface::{PresentMode, SurfaceError},
     Extent2d, OutOfMemory,
 };
 use erupt::{
     extensions::{
-        khr_surface::{self as vks, KhrSurfaceInstanceLoaderExt as _},
-        khr_swapchain::SwapchainKHR,
-        khr_swapchain::{self as vksw, KhrSwapchainDeviceLoaderExt as _},
+        khr_surface as vks,
+        khr_swapchain::{self as vksw, SwapchainKHR},
     },
     vk1_0,
 };
@@ -23,11 +25,13 @@ use std::sync::{
 };
 
 define_handle! {
-    pub struct SwapchainImage {
+    pub struct SwapchainImage : SwapchainImageInner {
         pub info: SwapchainImageInfo,
+        pub owner: WeakDevice,
         handle: SwapchainKHR,
         supported_families: Arc<Vec<bool>>,
         counter: Weak<AtomicUsize>,
+        index: u32,
     }
 }
 
@@ -96,7 +100,7 @@ impl Swapchain {
         let handle = surface.handle();
 
         assert!(
-            device.graphics().instance.khr_surface.is_some(),
+            device.graphics().instance.enabled.khr_surface,
             "Should be enabled given that there is a Surface"
         );
 
@@ -161,11 +165,11 @@ impl Swapchain {
         let surface = self.surface.handle();
 
         assert!(
-            device.graphics().instance.khr_surface.is_some(),
+            device.graphics().instance.enabled.khr_surface,
             "Should be enabled given that there is a Swapchain"
         );
         assert!(
-            device.logical().khr_swapchain.is_some(),
+            device.logical().enabled.khr_swapchain,
             "Should be enabled given that there is a Swapchain"
         );
         let instance = &device.graphics().instance;
@@ -187,7 +191,7 @@ impl Swapchain {
                 }
             }
             vk1_0::Result::ERROR_SURFACE_LOST_KHR => SurfaceError::SurfaceLost,
-            _ => SurfaceError::UnexpectedVulkanResult { result: err },
+            _ => SurfaceError::UnexpectedVulkanError { result: err },
         })?;
 
         if !ImageUsage::from_erupt(caps.supported_usage_flags).contains(usage) {
@@ -254,7 +258,7 @@ impl Swapchain {
         let handle = unsafe {
             logical.create_swapchain_khr(
                 &vksw::SwapchainCreateInfoKHR::default()
-                    .builder()
+                    .into_builder()
                     .surface(surface)
                     .min_image_count(
                         3.min(caps.max_image_count).max(caps.min_image_count),
@@ -283,7 +287,7 @@ impl Swapchain {
                 .get_swapchain_images_khr(handle, None)
                 .result()
                 .map_err(|err| {
-                    logical.destroy_swapchain_khr(handle, None);
+                    logical.destroy_swapchain_khr(Some(handle), None);
                     surface_error_from_erupt(err)
                 })
         }?;
@@ -305,7 +309,7 @@ impl Swapchain {
             })
             .collect::<Result<Vec<_>, _>>()
             .map_err(|err| unsafe {
-                logical.destroy_swapchain_khr(handle, None);
+                logical.destroy_swapchain_khr(Some(handle), None);
 
                 SurfaceError::OutOfMemory { source: err }
             })?;
@@ -330,10 +334,10 @@ impl Swapchain {
                             usage,
                             memory: MemoryUsageFlags::empty(),
                         },
+                        self.device.clone(),
                         i,
                         None,
-                        self.device.clone(),
-                        !0,
+                        None,
                     ),
                     acquire: a,
                     acquire_index: 0,
@@ -359,7 +363,7 @@ impl Swapchain {
             .ok_or_else(|| SurfaceError::SurfaceLost)?;
 
         assert!(
-            device.logical().khr_swapchain.is_some(),
+            device.logical().enabled.khr_swapchain,
             "Should be enabled given that there is a Swapchain"
         );
 
@@ -377,8 +381,8 @@ impl Swapchain {
                     inner.handle,
                     !0, /* wait indefinitely. This is OK as we never try to
                          * acquire more images than there is in swaphain. */
-                    wait.handle(&device),
-                    vk1_0::Fence::null(),
+                    Some(wait.handle(&device)),
+                    None,
                     None,
                 )
             }
@@ -409,11 +413,11 @@ impl Swapchain {
                     wait,
                     signal,
                 },
+                self.device.clone(),
                 inner.handle,
                 self.supported_families.clone(),
                 Arc::downgrade(&inner.counter),
-                self.device.clone(),
-                index as usize,
+                index,
             )))
         } else {
             Ok(None)

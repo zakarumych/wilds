@@ -1,12 +1,5 @@
-use {super::PipelineLayout, crate::shader::ComputeShader, erupt::vk1_0};
-
-define_handle! {
-    /// Resource that describes whole compute pipeline state.
-    pub struct ComputePipeline {
-        pub info: ComputePipelineInfo,
-        handle: vk1_0::Pipeline,
-    }
-}
+pub use crate::backend::ComputePipeline;
+use {super::PipelineLayout, crate::shader::ComputeShader};
 
 /// Compute pipeline state definition.
 #[derive(Debug)]

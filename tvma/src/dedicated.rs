@@ -1,8 +1,5 @@
 use {
-    erupt::{
-        vk1_0::{self, Vk10DeviceLoaderExt as _},
-        vk1_1, DeviceLoader,
-    },
+    erupt::{vk1_0, vk1_1, DeviceLoader, ExtendableFrom as _},
     std::{
         fmt::Debug,
         num::NonZeroU64,
@@ -40,13 +37,13 @@ impl DedicatedAllocator {
         size: u64,
     ) -> Option<DedicatedMemoryBlock> {
         let mut alloc_info = vk1_0::MemoryAllocateInfo::default()
-            .builder()
+            .into_builder()
             .allocation_size(size)
             .memory_type_index(self.memory_type);
         let mut flags = vk1_1::MemoryAllocateFlagsInfo::default()
-            .builder()
+            .into_builder()
             .flags(vk1_1::MemoryAllocateFlags::DEVICE_ADDRESS);
-        flags.extend(&mut *alloc_info);
+        alloc_info = alloc_info.extend_from(&mut flags);
 
         match device.allocate_memory(&alloc_info, None, None).result() {
             Ok(memory) => {
@@ -75,7 +72,7 @@ impl DedicatedAllocator {
     ) {
         debug_assert_eq!(block.memory_type, self.memory_type);
         debug_assert_eq!(block.flags, self.flags);
-        device.free_memory(vk1_0::DeviceMemory(block.memory.get()), None)
+        device.free_memory(Some(vk1_0::DeviceMemory(block.memory.get())), None)
     }
 }
 

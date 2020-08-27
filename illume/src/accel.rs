@@ -1,18 +1,5 @@
-use {
-    crate::{format::Format, DeviceAddress, IndexType},
-    erupt::extensions::khr_ray_tracing as vkrt,
-    tvma::Block,
-};
-
-define_handle! {
-    /// Bottom-level acceleration structure.
-    pub struct AccelerationStructure {
-        pub info: AccelerationStructureInfo,
-        handle: vkrt::AccelerationStructureKHR,
-        address: DeviceAddress,
-        block: Block,
-    }
-}
+pub use crate::backend::AccelerationStructure;
+use crate::{format::Format, DeviceAddress, IndexType};
 
 bitflags::bitflags! {
     /// Bits which can be set in `AccelerationStructureInfo` specifying additional parameters for acceleration structure builds.
