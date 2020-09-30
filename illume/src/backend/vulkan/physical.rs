@@ -464,6 +464,7 @@ impl PhysicalDevice {
     ///
     /// Note. `QueuesQuery` may be implemented by user, this trait is not
     /// sealed.
+    #[tracing::instrument(skip(queues))]
     pub fn create_device<Q>(
         self,
         features: &[Feature],
@@ -565,7 +566,10 @@ impl PhysicalDevice {
                 "BufferDeviceAddress feature must be enabled when RayTracing feature is enabled"
             );
 
-            assert_ne!(self.features.rt.ray_tracing, 0);
+            assert_ne!(
+                self.features.rt.ray_tracing, 0,
+                "Attempt to enable unsupported feature `RayTracing`"
+            );
             features_rt.ray_tracing = 1;
             include_features_rt = true;
 
@@ -578,14 +582,17 @@ impl PhysicalDevice {
         }
 
         if requested_features.take(Feature::ScalarBlockLayout) {
-            assert_ne!(self.features.v12.scalar_block_layout, 0);
+            assert_ne!(
+                self.features.v12.scalar_block_layout, 0,
+                "Attempt to enable unsupported feature `ScalarBlockLayout`"
+            );
 
             features12.scalar_block_layout = 1;
             include_features12 = true;
         }
 
         if requested_features.take(Feature::RuntimeDescriptorArray) {
-            assert_ne!(self.features.v12.runtime_descriptor_array, 0);
+            assert_ne!(self.features.v12.runtime_descriptor_array, 0, "Attempt to enable unsupported feature `RuntimeDescriptorArray`");
 
             features12.runtime_descriptor_array = 1;
             include_features12 = true;
@@ -598,7 +605,8 @@ impl PhysicalDevice {
                 self.features
                     .v12
                     .descriptor_binding_uniform_buffer_update_after_bind,
-                0
+                0,
+                "Attempt to enable unsupported feature `DescriptorBindingUniformBufferUpdateAfterBind`"
             );
             features12.descriptor_binding_uniform_buffer_update_after_bind = 1;
             include_features12 = true;
@@ -610,7 +618,8 @@ impl PhysicalDevice {
                 self.features
                     .v12
                     .descriptor_binding_sampled_image_update_after_bind,
-                0
+                0,
+                "Attempt to enable unsupported feature `DescriptorBindingSampledImageUpdateAfterBind`"
             );
             features12.descriptor_binding_sampled_image_update_after_bind = 1;
             include_features12 = true;
@@ -622,7 +631,8 @@ impl PhysicalDevice {
                 self.features
                     .v12
                     .descriptor_binding_storage_image_update_after_bind,
-                0
+                0,
+                "Attempt to enable unsupported feature `DescriptorBindingStorageImageUpdateAfterBind`"
             );
             features12.descriptor_binding_storage_image_update_after_bind = 1;
             include_features12 = true;
@@ -634,7 +644,8 @@ impl PhysicalDevice {
                 self.features
                     .v12
                     .descriptor_binding_storage_buffer_update_after_bind,
-                0
+                0,
+                "Attempt to enable unsupported feature `DescriptorBindingStorageBufferUpdateAfterBind`"
             );
             features12.descriptor_binding_storage_buffer_update_after_bind = 1;
             include_features12 = true;
@@ -646,7 +657,8 @@ impl PhysicalDevice {
                 self.features
                     .v12
                     .descriptor_binding_uniform_texel_buffer_update_after_bind,
-                0
+                0,
+                "Attempt to enable unsupported feature `DescriptorBindingUniformTexelBufferUpdateAfterBind`"
             );
             features12
                 .descriptor_binding_uniform_texel_buffer_update_after_bind = 1;
@@ -659,7 +671,8 @@ impl PhysicalDevice {
                 self.features
                     .v12
                     .descriptor_binding_storage_texel_buffer_update_after_bind,
-                0
+                0,
+                "Attempt to enable unsupported feature `DescriptorBindingStorageTexelBufferUpdateAfterBind`"
             );
             features12
                 .descriptor_binding_storage_texel_buffer_update_after_bind = 1;
@@ -678,7 +691,7 @@ impl PhysicalDevice {
             include_features12 = true;
         }
         if requested_features.take(Feature::DescriptorBindingPartiallyBound) {
-            assert_ne!(self.features.v12.descriptor_binding_partially_bound, 0);
+            assert_ne!(self.features.v12.descriptor_binding_partially_bound, 0, "Attempt to enable unsupported feature `DescriptorBindingPartiallyBound`");
             features12.descriptor_binding_partially_bound = 1;
             include_features12 = true;
         }
