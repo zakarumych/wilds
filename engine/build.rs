@@ -26,6 +26,8 @@ fn main() -> Result<(), Report> {
 
         commands.push(
             Command::new("glslangValidator")
+                .arg("--target-env")
+                .arg("vulkan1.2")
                 .arg("-V")
                 .arg(&path)
                 .arg("-o")
