@@ -20,7 +20,7 @@ use {
     std::{collections::HashMap, convert::TryFrom as _, mem::size_of},
 };
 
-const MAX_INSTANCE_COUNT: u16 = 1024;
+const MAX_INSTANCE_COUNT: u16 = 1024 * 32;
 
 pub struct Input<'a> {
     pub extent: Extent2d,
@@ -92,7 +92,7 @@ impl RtPrepass {
     pub fn new(
         extent: Extent2d,
         ctx: &mut Context,
-        // blue_noise_buffer_64x64x64: Buffer,
+        blue_noise_buffer_256x256x128: Buffer,
     ) -> Result<Self, Report> {
         // Create pipeline.
         let set_layout = ctx.create_descriptor_set_layout(DescriptorSetLayoutInfo {
@@ -468,16 +468,16 @@ impl RtPrepass {
                         std::slice::from_ref(&tlas),
                     ),
                 },
-                // WriteDescriptorSet {
-                //     set: &set,
-                //     binding: 1,
-                //     element: 0,
-                //     descriptors: Descriptors::StorageBuffer(&[(
-                //         blue_noise_buffer_64x64x64.clone(),
-                //         0,
-                //         blue_noise_buffer_64x64x64.info().size,
-                //     )]),
-                // },
+                WriteDescriptorSet {
+                    set: &set,
+                    binding: 1,
+                    element: 0,
+                    descriptors: Descriptors::StorageBuffer(&[(
+                        blue_noise_buffer_256x256x128.clone(),
+                        0,
+                        blue_noise_buffer_256x256x128.info().size,
+                    )]),
+                },
                 WriteDescriptorSet {
                     set: &set,
                     binding: 6,
@@ -579,6 +579,9 @@ impl<'a> Pass<'a> for RtPrepass {
     type Input = Input<'a>;
     type Output = Output;
 
+    #[tracing::instrument(skip(
+        self, input, frame, wait, signal, fence, ctx, world, bump
+    ))]
     fn draw(
         &mut self,
         input: Input<'a>,
@@ -590,6 +593,8 @@ impl<'a> Pass<'a> for RtPrepass {
         world: &mut World,
         bump: &Bump,
     ) -> Result<Output, Report> {
+        tracing::trace!("RtPrepass::draw");
+
         let findex = (frame & 1) as u32;
 
         assert_eq!(self.output_albedo_image.info().extent, input.extent.into());
@@ -616,6 +621,8 @@ impl<'a> Pass<'a> for RtPrepass {
             Option<&Pose>,
             Option<&PoseMesh>,
         )>();
+
+        tracing::trace!("Query all renderable");
 
         for (entity, (renderable, global, pose, pose_mesh)) in query.iter() {
             if let Some(blas) = input.blases.get(&renderable.mesh) {
@@ -807,11 +814,6 @@ impl<'a> Pass<'a> for RtPrepass {
             } else {
                 tracing::error!("Missing BLAS for mesh @ {:?}", entity);
             }
-
-            // tracing::info!(
-            //     "Prepass. Per object:\n{:#?}",
-            //     reg.change_and_reset()
-            // );
         }
 
         if !anim_vertices_descriptors.is_empty() {
@@ -825,18 +827,25 @@ impl<'a> Pass<'a> for RtPrepass {
             });
         }
 
-        ctx.update_descriptor_sets(&writes, &[]);
-        drop(writes);
+        tracing::trace!("Update descriptors");
 
-        // tracing::info!("Prepass. Sets update:\n{:#?}",
-        // reg.change_and_reset());
+        ctx.update_descriptor_sets(&writes, &[]);
+
+        drop(writes);
 
         ensure!(
             instances.len() <= MAX_INSTANCE_COUNT.into(),
             "Too many instances"
         );
 
+        ensure!(
+            acc_instances.len() <= MAX_INSTANCE_COUNT.into(),
+            "Too many instances"
+        );
+
         ensure!(u32::try_from(instances.len()).is_ok(), "Too many instances");
+
+        tracing::trace!("Build TLAS");
 
         // Sync BLAS and TLAS builds.
         encoder.pipeline_barrier(
@@ -844,11 +853,33 @@ impl<'a> Pass<'a> for RtPrepass {
             PipelineStageFlags::ACCELERATION_STRUCTURE_BUILD,
         );
 
+        let infos = bump.alloc([AccelerationStructureBuildGeometryInfo {
+            src: None,
+            dst: self.tlas.clone(),
+            geometries: bump.alloc([
+                AccelerationStructureGeometry::Instances {
+                    flags: GeometryFlags::OPAQUE,
+                    data: ctx
+                        .get_buffer_device_address(&self.globals_and_instances)
+                        .unwrap()
+                        .offset(acc_instances_offset(findex)),
+                    primitive_count: instances.len() as u32,
+                },
+            ]),
+            scratch: ctx.get_buffer_device_address(&self.scratch).unwrap(),
+        }]);
+
+        encoder.build_acceleration_structure(infos);
+
+        tracing::trace!("Update Globals");
+
         ctx.write_memory(
             &self.globals_and_instances,
             acc_instances_offset(findex),
             &acc_instances,
         )?;
+
+        tracing::trace!("Update Globals");
 
         ctx.write_memory(
             &self.globals_and_instances,
@@ -871,29 +902,13 @@ impl<'a> Pass<'a> for RtPrepass {
                 .take(32),
         );
 
+        tracing::trace!("Update Globals");
+
         ctx.write_memory(
             &self.globals_and_instances,
             pointlight_offset(findex),
             &pointlights,
         )?;
-
-        let infos = bump.alloc([AccelerationStructureBuildGeometryInfo {
-            src: None,
-            dst: self.tlas.clone(),
-            geometries: bump.alloc([
-                AccelerationStructureGeometry::Instances {
-                    flags: GeometryFlags::OPAQUE,
-                    data: ctx
-                        .get_buffer_device_address(&self.globals_and_instances)
-                        .unwrap()
-                        .offset(acc_instances_offset(findex)),
-                    primitive_count: instances.len() as u32,
-                },
-            ]),
-            scratch: ctx.get_buffer_device_address(&self.scratch).unwrap(),
-        }]);
-
-        encoder.build_acceleration_structure(infos);
 
         let dirlight = world
             .query::<&DirectionalLight>()
@@ -932,15 +947,19 @@ impl<'a> Pass<'a> for RtPrepass {
             plights: pointlights.len() as u32,
             // frame: frame as u32,
             frame: 0,
-            shadow_rays: 1,
-            diffuse_rays: 1,
+            shadow_rays: 16,
+            diffuse_rays: 16,
         };
+
+        tracing::trace!("Update Globals");
 
         ctx.write_memory(
             &self.globals_and_instances,
             globals_offset(findex),
             std::slice::from_ref(&globals),
         )?;
+
+        tracing::trace!("Trace rays");
 
         encoder.bind_ray_tracing_pipeline(&self.pipeline);
 
@@ -1035,11 +1054,9 @@ impl<'a> Pass<'a> for RtPrepass {
 
         let cbuf = encoder.finish();
 
-        // tracing::info!("Prepass. Encoding:\n{:#?}", reg.change_and_reset());
+        tracing::trace!("Submitting");
 
         ctx.queue.submit(wait, cbuf, signal, fence);
-
-        // tracing::info!("Prepass. Submit:\n{:#?}", reg.change_and_reset());
 
         Ok(Output {
             albedo: self.output_albedo_image.clone(),
@@ -1104,7 +1121,7 @@ fn globals_end(frame: u32) -> u64 {
 }
 
 const fn instances_size() -> u64 {
-    size_of::<[ShaderInstance; 1024]>() as u64
+    size_of::<[ShaderInstance; MAX_INSTANCE_COUNT as usize]>() as u64
 }
 
 fn instances_offset(frame: u32) -> u64 {
@@ -1130,7 +1147,8 @@ fn pointlight_end(frame: u32) -> u64 {
 }
 
 const fn acc_instances_size() -> u64 {
-    size_of::<[AccelerationStructure; 1024]>() as u64
+    size_of::<[AccelerationStructureInstance; MAX_INSTANCE_COUNT as usize]>()
+        as u64
 }
 
 fn acc_instances_offset(frame: u32) -> u64 {

@@ -42,95 +42,83 @@ vec3 rand(uvec4 co) {
     return vec3(x, y, z);
 }
 
-vec3 blue_rand(uvec4 co) {
-    // return rand(co);
+// vec3 blue_rand(uvec4 co) {
+//     // return rand(co);
 
-    // const double fi3 = 1.2207440846057594753616853491088319144324890862486352142882444530497100085225914;
-    // const double i1fi3 = fi3 * fi3 - 1;
-    // const double i2fi3 = fi3 - i1fi3;
-    // const double i3fi3 = 1 - i2fi3;
+//     // const double fi3 = 1.2207440846057594753616853491088319144324890862486352142882444530497100085225914;
+//     // const double i1fi3 = fi3 * fi3 - 1;
+//     // const double i2fi3 = fi3 - i1fi3;
+//     // const double i3fi3 = 1 - i2fi3;
 
-    // const vec3 alpha = vec3(i1fi3, i2fi3, i3fi3);
-    // float x = wave(0.5 + dot(co, alpha));
-    // float y = wave(0.5 + dot(co, alpha.yzx));
-    // float z = wave(0.5 + dot(co, alpha.zxy));
+//     // const vec3 alpha = vec3(i1fi3, i2fi3, i3fi3);
+//     // float x = wave(0.5 + dot(co, alpha));
+//     // float y = wave(0.5 + dot(co, alpha.yzx));
+//     // float z = wave(0.5 + dot(co, alpha.zxy));
     
-    const double fi4 = 1.1673039782614186842560458998548421807205603715254890391400824492756519034295270;
-    const double i1fi4 = fi4 * fi4 * fi4 - 1;
-    const double i2fi4 = fi4 * fi4 - i1fi4;
-    const double i3fi4 = fi4 - i2fi4;
-    const double i4fi4 = 1 - i3fi4;
+//     const double fi4 = 1.1673039782614186842560458998548421807205603715254890391400824492756519034295270;
+//     const double i1fi4 = fi4 * fi4 * fi4 - 1;
+//     const double i2fi4 = fi4 * fi4 - i1fi4;
+//     const double i3fi4 = fi4 - i2fi4;
+//     const double i4fi4 = 1 - i3fi4;
 
-    const vec4 alpha = vec4(i1fi4, i2fi4, i3fi4, i4fi4);
-    float x = wave(0.1 + dot(co, alpha));
-    float y = wave(0.2 + dot(co, alpha.yzwx));
-    float z = wave(0.3 + dot(co, alpha.wzyx));
+//     const vec4 alpha = vec4(i1fi4, i2fi4, i3fi4, i4fi4);
+//     float x = wave(0.1 + dot(co, alpha));
+//     float y = wave(0.2 + dot(co, alpha.yzwx));
+//     float z = wave(0.3 + dot(co, alpha.wzyx));
 
-    // // const double fi5 = 1.1347241384015194926054460545064728402796672263828014859251495516682368939998426;
-    // // const double i1fi5 = fi5 * fi5 * fi5 * fi5 - 1;
-    // // const double i2fi5 = fi5 * fi5 * fi5 - i1fi5;
-    // // const double i3fi5 = fi5 * fi5 - i2fi5;
-    // // const double i4fi5 = fi5 - i3fi5;
-    // // const double i5fi5 = 1 - i4fi5;
+//     // // const double fi5 = 1.1347241384015194926054460545064728402796672263828014859251495516682368939998426;
+//     // // const double i1fi5 = fi5 * fi5 * fi5 * fi5 - 1;
+//     // // const double i2fi5 = fi5 * fi5 * fi5 - i1fi5;
+//     // // const double i3fi5 = fi5 * fi5 - i2fi5;
+//     // // const double i4fi5 = fi5 - i3fi5;
+//     // // const double i5fi5 = 1 - i4fi5;
 
-    // // const vec3 alpha = vec3(i1fi3, i1fi4, i1fi5);
-    // // const vec3 beta = vec3(i2fi3, i2fi4, i2fi5);
-    // // const vec3 gamma = vec3(i3fi3, i3fi4, i3fi5);
+//     // // const vec3 alpha = vec3(i1fi3, i1fi4, i1fi5);
+//     // // const vec3 beta = vec3(i2fi3, i2fi4, i2fi5);
+//     // // const vec3 gamma = vec3(i3fi3, i3fi4, i3fi5);
 
-    // // vec3 fco = vec3(co);
-    // // return wave(vec3(dot(fco, alpha), dot(fco, beta), dot(fco, gamma)));
+//     // // vec3 fco = vec3(co);
+//     // // return wave(vec3(dot(fco, alpha), dot(fco, beta), dot(fco, gamma)));
 
-    // // const vec3 alpha = vec3(1/M_PL, 1/M_PL/M_PL, 1/M_PL/M_PL/M_PL);
-    // // const vec3 beta = vec3(1/M_FI, 1/M_FI/M_FI, 1/M_FI/M_FI/M_FI);
-    // // const vec3 gamma = vec3(1/M_PX, 1/M_PX/M_PX, 1/M_PX/M_PX/M_PX);
-    // // float x = wave(0.5 + dot(co, alpha));
-    // // float y = wave(0.5 + dot(co, beta));
-    // // float z = wave(0.5 + dot(co, gamma));
+//     // // const vec3 alpha = vec3(1/M_PL, 1/M_PL/M_PL, 1/M_PL/M_PL/M_PL);
+//     // // const vec3 beta = vec3(1/M_FI, 1/M_FI/M_FI, 1/M_FI/M_FI/M_FI);
+//     // // const vec3 gamma = vec3(1/M_PX, 1/M_PX/M_PX, 1/M_PX/M_PX/M_PX);
+//     // // float x = wave(0.5 + dot(co, alpha));
+//     // // float y = wave(0.5 + dot(co, beta));
+//     // // float z = wave(0.5 + dot(co, gamma));
 
-    // // const vec3 alpha = vec3(0.819172513396164439699571188342427040348497832553712965667, 0.6287067210378086337748232573780154909680339260213870955039718150, 0.6180339887498948482045868343656381177203091798057628621354486227);
-    // // const vec3 beta = vec3(0.671043606703789208416815654036199702552744474771178058743, 0.8566748838545028748523248153124343698313999454937526255764128103, 0.3819660112501051517954131656343618822796908201942371378645513772);
-    // // const vec3 gamma = vec3(0.549700477901970266944869695072632211879744611477457155545, 0.7338918566271259904047331700024405296994329007761294712589367538, 0.2360679774997896964091736687312762354406183596115257242708972454);
-    // // float x = fract(0.5 + dot(co, alpha));
-    // // float y = fract(0.5 + dot(co, beta));
-    // // float z = fract(0.5 + dot(co, gamma));
+//     // // const vec3 alpha = vec3(0.819172513396164439699571188342427040348497832553712965667, 0.6287067210378086337748232573780154909680339260213870955039718150, 0.6180339887498948482045868343656381177203091798057628621354486227);
+//     // // const vec3 beta = vec3(0.671043606703789208416815654036199702552744474771178058743, 0.8566748838545028748523248153124343698313999454937526255764128103, 0.3819660112501051517954131656343618822796908201942371378645513772);
+//     // // const vec3 gamma = vec3(0.549700477901970266944869695072632211879744611477457155545, 0.7338918566271259904047331700024405296994329007761294712589367538, 0.2360679774997896964091736687312762354406183596115257242708972454);
+//     // // float x = fract(0.5 + dot(co, alpha));
+//     // // float y = fract(0.5 + dot(co, beta));
+//     // // float z = fract(0.5 + dot(co, gamma));
 
-    // // const vec3 alpha = vec3(1/fi_4, 1/fi_4/fi_4, 1/fi_4/fi_4/fi_4);
-    // // const vec3 beta = vec3(1/fi_4/fi_4, 1/fi_4/fi_4/fi_4, 1/fi_4/fi_4/fi_4/fi_4);
-    // // const vec3 gamma = vec3(1/fi_4/fi_4/fi_4, 1/fi_4/fi_4/fi_4/fi_4, 1/fi_4/fi_4/fi_4/fi_4/fi_4);
-    // // float x = wave(0.5 + dot(co, alpha));
-    // // float y = wave(0.5 + dot(co, beta));
-    // // float z = wave(0.5 + dot(co, gamma));
-    vec3 v = vec3(x, y, z);
+//     // // const vec3 alpha = vec3(1/fi_4, 1/fi_4/fi_4, 1/fi_4/fi_4/fi_4);
+//     // // const vec3 beta = vec3(1/fi_4/fi_4, 1/fi_4/fi_4/fi_4, 1/fi_4/fi_4/fi_4/fi_4);
+//     // // const vec3 gamma = vec3(1/fi_4/fi_4/fi_4, 1/fi_4/fi_4/fi_4/fi_4, 1/fi_4/fi_4/fi_4/fi_4/fi_4);
+//     // // float x = wave(0.5 + dot(co, alpha));
+//     // // float y = wave(0.5 + dot(co, beta));
+//     // // float z = wave(0.5 + dot(co, gamma));
+//     vec3 v = vec3(x, y, z);
 
-    return v;
-}
+//     return v;
+// }
 
 uint diff(uint a, uint b) {
     return max(a,b) - min(a,b);
 }
 
-// vec3 blue_rand(uvec4 co) {
-//     uint x = (co.z % 2 == 0 ? co.x : co.y) % 64;
-//     uint y = (co.z % 2 == 0 ? co.y : co.x) % 64;
+vec3 blue_rand(uvec4 co) {
+    uint x = co.x % 256;
+    uint y = co.y % 256;
+    uint z = (co.z + co.w) % 128;
 
-//     uint z = ((co.x / 64 + co.y / 64 + co.z) * 2654435761) % 64;
-//     uint index = x + y * 64 + z * 64 * 64;
-//     vec4 raw = blue_noise[index];
+    uint index = x + y * 256 + z * 256 * 256;
+    vec4 raw = blue_noise[index];
 
-//     if (co.z % 2 == 0)
-//         raw = raw.yxzw;
-
-//     if (co.z % 3 == 0)
-//         raw = raw.xzyw;
-
-//     if (co.z % 5 == 0)
-//         raw = raw.wyxz;
-
-//     if (co.z % 7 == 0)
-//         raw = raw.zwyx;
-
-//     return raw.xyz;
-// }
+    return raw.xyz;
+}
 
 vec2 blue_rand_circle(uvec4 co) {
     vec3 rand = blue_rand(co);

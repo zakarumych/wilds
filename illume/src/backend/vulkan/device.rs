@@ -281,7 +281,7 @@ impl Device {
                     tvma::Config {
                         dedicated_treshold_low: 4 * 1024 * 1024,
                         dedicated_treshold_high: 32 * 1024 * 1024,
-                        line_size: 32 * 1024 * 1024,
+                        line_size: 256 * 1024 * 1024,
                         min_chunk_block: 256,
                     },
                     &properties.memory,

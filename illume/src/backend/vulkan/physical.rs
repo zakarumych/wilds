@@ -58,8 +58,9 @@ unsafe impl Send for Features {}
 
 unsafe fn collect_propeties_and_features(
     physical: vk1_0::PhysicalDevice,
-    graphics: &Graphics,
 ) -> (Properties, Features) {
+    let graphics = Graphics::get_unchecked();
+
     let extension_properties = graphics
         .instance
         .enumerate_device_extension_properties(physical, None, None)
@@ -180,12 +181,8 @@ pub struct PhysicalDevice {
 }
 
 impl PhysicalDevice {
-    pub(crate) unsafe fn new(
-        physical: vk1_0::PhysicalDevice,
-        graphics: &Graphics,
-    ) -> Self {
-        let (properties, features) =
-            collect_propeties_and_features(physical, graphics);
+    pub(crate) unsafe fn new(physical: vk1_0::PhysicalDevice) -> Self {
+        let (properties, features) = collect_propeties_and_features(physical);
         tracing::info!("{:#?}", properties);
 
         PhysicalDevice {

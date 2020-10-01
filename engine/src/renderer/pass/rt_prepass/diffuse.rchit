@@ -13,6 +13,7 @@ layout(location = 1) rayPayloadEXT uint unshadows;
 hitAttributeEXT vec2 attribs;
 
 void main() {
+    const vec3 back = gl_WorldRayDirectionEXT * 0.001;
     const uint shadow_rays = 1;
     const uint diffuse_rays = 1;
 
@@ -51,7 +52,7 @@ void main() {
             for (uint i = 0; i < shadow_rays; ++i)
             {
                 vec3 r = normalize(blue_rand_sphere(uvec4(prd.co, i)) - globals.dirlight.dir);
-                traceRayEXT(tlas, shadow_ray_flags, 0xff, 0, 0, 2, worls_space_pos, 0.01, r, 1000.0, 1);
+                traceRayEXT(tlas, shadow_ray_flags, 0xff, 0, 0, 2, worls_space_pos - back, 0, r, 1000.0, 1);
             }
             radiation += globals.dirlight.rad * (ray_contribution * unshadows);
         }
@@ -73,7 +74,7 @@ void main() {
                 for (int i = 0; i < shadow_rays; ++i)
                 {
                     vec3 r = normalize(blue_rand_sphere(uvec4(prd.co, i + shadow_rays)) + tolight);
-                    traceRayEXT(tlas, shadow_ray_flags, 0xff, 0, 0, 2, worls_space_pos, 0.01, r, l, 1);
+                    traceRayEXT(tlas, shadow_ray_flags, 0xff, 0, 0, 2, worls_space_pos - back, 0, r, l, 1);
                 }
                 radiation += plight[i].rad * (ray_contribution * unshadows);
             }

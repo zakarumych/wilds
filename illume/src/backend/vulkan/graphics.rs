@@ -1,29 +1,34 @@
-use crate::{
-    out_of_host_memory,
-    physical::{EnumerateDeviceError, PhysicalDevice},
-    surface::{CreateSurfaceError, RawWindowHandleKind, Surface, SurfaceInfo},
-    OutOfMemory,
-};
-use erupt::{
-    extensions::{
-        ext_debug_report::{
-            DebugReportCallbackCreateInfoEXT, DebugReportFlagsEXT,
-            DebugReportObjectTypeEXT, EXT_DEBUG_REPORT_EXTENSION_NAME,
+use {
+    super::physical::PhysicalDevice,
+    crate::{
+        out_of_host_memory,
+        physical::EnumerateDeviceError,
+        surface::{
+            CreateSurfaceError, RawWindowHandleKind, Surface, SurfaceInfo,
         },
-        ext_debug_utils::EXT_DEBUG_UTILS_EXTENSION_NAME,
-        khr_surface::KHR_SURFACE_EXTENSION_NAME,
+        OutOfMemory,
     },
-    utils::loading::{DefaultEntryLoader, EntryLoaderError},
-    vk1_0, InstanceLoader, LoaderError,
-};
-use once_cell::sync::OnceCell;
-use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
-use smallvec::SmallVec;
-use std::{
-    ffi::{c_void, CStr},
-    fmt::{self, Debug},
-    os::raw::c_char,
-    sync::atomic::AtomicBool,
+    erupt::{
+        extensions::{
+            ext_debug_report::{
+                DebugReportCallbackCreateInfoEXT, DebugReportFlagsEXT,
+                DebugReportObjectTypeEXT, EXT_DEBUG_REPORT_EXTENSION_NAME,
+            },
+            ext_debug_utils::EXT_DEBUG_UTILS_EXTENSION_NAME,
+            khr_surface::KHR_SURFACE_EXTENSION_NAME,
+        },
+        utils::loading::{DefaultEntryLoader, EntryLoaderError},
+        vk1_0, InstanceLoader, LoaderError,
+    },
+    once_cell::sync::OnceCell,
+    raw_window_handle::{HasRawWindowHandle, RawWindowHandle},
+    smallvec::SmallVec,
+    std::{
+        ffi::{c_void, CStr},
+        fmt::{self, Debug},
+        os::raw::c_char,
+        sync::atomic::AtomicBool,
+    },
 };
 
 #[cfg(any(
@@ -35,20 +40,19 @@ use std::{
 ))]
 use erupt::extensions::{
     khr_wayland_surface::{
-        KhrWaylandSurfaceInstanceLoaderExt as _,
-        KHR_WAYLAND_SURFACE_EXTENSION_NAME,
+        WaylandSurfaceCreateInfoKHR, KHR_WAYLAND_SURFACE_EXTENSION_NAME,
     },
     khr_xcb_surface::{
-        KhrXcbSurfaceInstanceLoaderExt as _, KHR_XCB_SURFACE_EXTENSION_NAME,
+        XcbSurfaceCreateInfoKHR, KHR_XCB_SURFACE_EXTENSION_NAME,
     },
     khr_xlib_surface::{
-        KhrXlibSurfaceInstanceLoaderExt as _, KHR_XLIB_SURFACE_EXTENSION_NAME,
+        XlibSurfaceCreateInfoKHR, KHR_XLIB_SURFACE_EXTENSION_NAME,
     },
 };
 
 #[cfg(target_os = "android")]
 use erupt::extensions::khr_android_surface::{
-    KhrAndroidSurfaceInstanceLoaderExt as _, KHR_ANDROID_SURFACE_EXTENSION_NAME,
+    AndroidSurfaceCreateInfoKHR, KHR_ANDROID_SURFACE_EXTENSION_NAME,
 };
 
 #[cfg(target_os = "windows")]
@@ -58,7 +62,7 @@ use erupt::extensions::khr_win32_surface::{
 
 #[cfg(any(target_os = "ios", target_os = "macos"))]
 use erupt::extensions::ext_metal_surface::{
-    ExtMetalSurfaceInstanceLoaderExt as _, EXT_METAL_SURFACE_EXTENSION_NAME,
+    MetalSurfaceCreateInfoEXT, EXT_METAL_SURFACE_EXTENSION_NAME,
 };
 
 /// Root object of the erupt graphics system.
@@ -323,7 +327,7 @@ impl Graphics {
 
         Ok(devices
             .into_iter()
-            .map(|physical| unsafe { PhysicalDevice::new(physical, self) })
+            .map(|physical| unsafe { PhysicalDevice::new(physical) })
             .collect())
     }
 
@@ -336,26 +340,30 @@ impl Graphics {
         let surface = match window {
             #[cfg(target_os = "android")]
             RawWindowHandle::Android(handle) => {
-                let android_surface = self
-                    .android_surface_ext
-                    .as_ref()
-                    .ok_or_else(|| CreateSurfaceError::UnsupportedWindow {
+                if !self.instance.enabled.khr_android_surface {
+                    return Err(CreateSurfaceError::UnsupportedWindow {
                         window: RawWindowHandleKind::Android,
-                        source: Some(Box::new(
-                            RequiredExtensionIsNotAvailable {
-                                extension: AndroidSurface::name(),
-                            },
-                        )),
-                    })?;
+                        source: Box::new(RequiredExtensionIsNotAvailable {
+                            extension: "VK_KHR_android_surface",
+                        }),
+                    });
+                }
 
-                unimplemented!()
+                let result = self.instance.create_android_surface_khr(
+                    &AndroidSurfaceCreateInfoKHR {
+                        window: handle.a_native_window,
+                        ..AndroidSurfaceCreateInfoKHR::default()
+                    },
+                );
+
+                todo!()
             }
 
             #[cfg(target_os = "ios")]
-            RawWindowHandle::IOS(handle) => unimplemented!(),
+            RawWindowHandle::IOS(handle) => todo!(),
 
             #[cfg(target_os = "macos")]
-            RawWindowHandle::MacOS(handle) => unimplemented!(),
+            RawWindowHandle::MacOS(handle) => todo!(),
 
             #[cfg(any(
                 target_os = "linux",
@@ -364,21 +372,7 @@ impl Graphics {
                 target_os = "netbsd",
                 target_os = "openbsd"
             ))]
-            RawWindowHandle::Wayland(handle) => {
-                let wayland_surface = self
-                    .wayland_surface_ext
-                    .as_ref()
-                    .ok_or_else(|| CreateSurfaceError::UnsupportedWindow {
-                        window: RawWindowHandleKind::Wayland,
-                        source: Some(Box::new(
-                            RequiredExtensionIsNotAvailable {
-                                extension: WaylandSurface::name(),
-                            },
-                        )),
-                    })?;
-
-                unimplemented!()
-            }
+            RawWindowHandle::Wayland(handle) => todo!(),
 
             #[cfg(target_os = "windows")]
             RawWindowHandle::Windows(handle) => {
@@ -427,7 +421,7 @@ impl Graphics {
                         window: RawWindowHandleKind::Xcb,
                         source: Some(Box::new(
                             RequiredExtensionIsNotAvailable {
-                                extension: KHR_XCB_SURFACE_EXTENSION_NAME,
+                                extension: "VK_KHR_xcb_surface",
                             },
                         )),
                     });
@@ -449,13 +443,36 @@ impl Graphics {
                         window: RawWindowHandleKind::Xlib,
                         source: Some(Box::new(
                             RequiredExtensionIsNotAvailable {
-                                extension: KHR_XLIB_SURFACE_EXTENSION_NAME,
+                                extension: "VK_KHR_xlib_surface",
                             },
                         )),
                     });
                 }
 
-                unimplemented!()
+                unsafe {
+                    self.instance.create_xlib_surface_khr(
+                        &XlibSurfaceCreateInfoKHR {
+                            window: handle.window.into(),
+                            dpy: handle.display,
+                            ..XlibSurfaceCreateInfoKHR::default()
+                        },
+                        None,
+                        None,
+                    )
+                }
+                .result()
+                .map_err(|err| match err {
+                    vk1_0::Result::ERROR_OUT_OF_HOST_MEMORY => {
+                        out_of_host_memory()
+                    }
+                    vk1_0::Result::ERROR_OUT_OF_DEVICE_MEMORY => {
+                        OutOfMemory.into()
+                    }
+                    _ => CreateSurfaceError::UnexpectedVulkanError {
+                        window: RawWindowHandleKind::Windows,
+                        result: err,
+                    },
+                })?
             }
             _ => {
                 debug_assert_eq!(
@@ -479,7 +496,6 @@ impl Graphics {
 }
 
 #[derive(Debug)]
-
 struct RequiredExtensionIsNotAvailable {
     extension: &'static str,
 }

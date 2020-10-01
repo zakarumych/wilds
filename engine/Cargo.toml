@@ -15,8 +15,8 @@ goods = { version = "0.5", features = ["fs", "tokio-spawn", "data-url", "trace"]
 gltf = "0.15"
 
 # Physics
-ncollide3d = "0.23"
-nphysics3d = "0.16"
+ncollide3d = "=0.24"
+nphysics3d = "0.17"
 
 # Graphics
 illume = { path = "../illume", features = ["serde-1"] }
@@ -29,13 +29,13 @@ png = "0.16"
 hecs = "0.2"
 
 # Linear algebra
-nalgebra = "0.21"
+nalgebra = "=0.22"
 
 # Windowing
 winit = "0.22" # "0.22.2"
 
 # Low-Level
-bytemuck = "1.2"
+bytemuck = "1.4"
 byteorder = "1.3"
 bumpalo = { version = "3.4", features = ["collections"] }
 once_cell = "1.4"
@@ -60,7 +60,7 @@ fastbitset = { path = "../fastbitset", features = ["boxed", "bump"] }
 cfg-if = "0.1"
 futures = "0.3"
 lazy_static = "1.4"
-flume = { version = "0.7", features = ["async"] }
+flume = { version = "0.9", features = ["async"] }
 ordered-float = "2.0"
 num-traits = "0.2"
 smallvec = "1.4"
@@ -81,3 +81,5 @@ tokio = { version = "0.2", features = ["macros", "rt-threaded", "blocking"] }
 [build-dependencies]
 eyre = "0.6"
 tracing = "0.1"
+image = "0.23"
+bytemuck = "1.4"
