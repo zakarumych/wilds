@@ -14,7 +14,7 @@ pub struct Config {
 impl Config {
     pub async fn load_default() -> Result<Self, Report> {
         // Load from predefined file path for desktop platforms.
-        let path = std::env::var("FUN_CONFIG_PATH")
+        let path = std::env::var("WILDS_ENGINE_CONFIG_PATH")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("./cfg.ron"));
 
@@ -22,6 +22,7 @@ impl Config {
         Ok(config)
     }
 
+    #[cfg(not(target = "wasm32"))]
     pub async fn load(path: PathBuf) -> Result<Self, Report> {
         tokio::task::spawn_blocking(move || {
             let config = ron::de::from_reader(

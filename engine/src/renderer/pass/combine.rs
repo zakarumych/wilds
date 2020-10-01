@@ -165,6 +165,7 @@ impl<'a> Pass<'a> for CombinePass {
         _world: &mut World,
         bump: &Bump,
     ) -> Result<Output, Report> {
+        tracing::trace!("CombinePass::draw");
         let combined_info = input.combined.info();
         let extent = combined_info.extent.into_2d();
         let format = combined_info.format;

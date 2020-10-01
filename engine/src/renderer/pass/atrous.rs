@@ -244,6 +244,7 @@ impl<'a> Pass<'a> for ATrousFilter {
         _world: &mut World,
         bump: &Bump,
     ) -> Result<Output, Report> {
+        tracing::trace!("ATrousFilter::draw");
         let extent = input.normal_depth.info().extent.into_2d();
 
         let mut writes = BVec::with_capacity_in(4, bump);

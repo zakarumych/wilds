@@ -50,19 +50,19 @@ pub enum DeviceKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
 pub enum Feature {
-    SurfacePresentation,
     BufferDeviceAddress,
-    RayTracing,
-    ScalarBlockLayout,
-    RuntimeDescriptorArray,
-    DescriptorBindingUniformBufferUpdateAfterBind,
     DescriptorBindingSampledImageUpdateAfterBind,
     DescriptorBindingStorageImageUpdateAfterBind,
     DescriptorBindingStorageBufferUpdateAfterBind,
-    DescriptorBindingUniformTexelBufferUpdateAfterBind,
     DescriptorBindingStorageTexelBufferUpdateAfterBind,
+    DescriptorBindingUniformBufferUpdateAfterBind,
+    DescriptorBindingUniformTexelBufferUpdateAfterBind,
     DescriptorBindingUpdateUnusedWhilePending,
     DescriptorBindingPartiallyBound,
+    RayTracing,
+    RuntimeDescriptorArray,
+    ScalarBlockLayout,
+    SurfacePresentation,
 }
 
 #[allow(dead_code)]

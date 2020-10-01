@@ -59,18 +59,18 @@ fn main() -> Result<(), Report> {
 
         let aspect = 640.0 / 480.0;
 
-        let mut bump = Bump::with_capacity(1024 * 1024);
+        let mut bump = Bump::with_capacity(1024 * 1024 * 64);
         let mut renderer = Renderer::new(&window)?;
         let mut clocks = Clocks::new();
 
         let sunlight = na::Vector3::new(255.0, 207.0, 72.0)
             .map(|c| c / 255.0)
-            .map(|c| c / (1.3 - c))
-            .map(|c| c * 5.0);
+            .map(|c| c / (1.3 - c));
+        // .map(|c| c * 5.0);
         let skylight = na::Vector3::new(117.0, 187.0, 253.0)
             .map(|c| c / 255.0)
-            .map(|c| c / (1.3 - c))
-            .map(|c| c * 5.0);
+            .map(|c| c / (1.3 - c));
+        // .map(|c| c * 5.0);
 
         engine.world.spawn((
             DirectionalLight {
@@ -109,8 +109,8 @@ fn main() -> Result<(), Report> {
         // });
 
         let scene = engine.load_prefab_with_format::<GltfAsset, _>(
-            "thor_and_the_midgard_serpent/scene.gltf".into(),
-            Global3::from_scale(0.01),
+            "sponza2/sponza2.gltf".into(),
+            Global3::from_scale(1.0),
             GltfFormat::for_raytracing(),
         );
 

@@ -86,6 +86,7 @@ impl Block {
             u64::try_from(size).map_err(|_| MappingError::OutOfBounds)?;
 
         if offset.checked_add(size).map_or(true, |end| end > self.size) {
+            tracing::error!("Mapping out of bounds");
             return Err(MappingError::OutOfBounds);
         }
 

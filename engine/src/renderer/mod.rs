@@ -329,6 +329,8 @@ pub struct Renderer {
     diffuse_filter: ATrousFilter,
     direct_filter: ATrousFilter,
     combine: CombinePass,
+
+    blue_noise_buffer: Buffer,
 }
 
 impl Deref for Renderer {
@@ -428,7 +430,13 @@ impl Renderer {
         )?;
 
         let pose = PosePass::new(&mut context)?;
-        let rt_prepass = RtPrepass::new(window_extent, &mut context)?;
+
+        let blue_noise_buffer = load_blue_noise(&mut context)?;
+        let rt_prepass = RtPrepass::new(
+            window_extent,
+            &mut context,
+            blue_noise_buffer.clone(),
+        )?;
 
         let combine = CombinePass::new(&mut context)?;
         let diffuse_filter = ATrousFilter::new(&mut context)?;
@@ -445,6 +453,7 @@ impl Renderer {
             direct_filter,
             combine,
             context,
+            blue_noise_buffer,
         })
     }
 
@@ -502,6 +511,8 @@ impl Renderer {
                 Entry::Occupied(_entry) => {}
             };
         }
+
+        tracing::trace!("BLASes created");
 
         if let Some(encoder) = encoder {
             self.context
@@ -621,8 +632,11 @@ impl Renderer {
             )?;
         }
 
+        tracing::trace!("Presenting");
+
         self.queue.present(frame);
 
+        tracing::trace!("Frame {} finished", self.frame);
         self.frame += 1;
 
         Ok(())
@@ -665,4 +679,18 @@ fn ray_tracing_transform_matrix_from_nalgebra(
     TransformMatrix {
         matrix: m.transpose().into(),
     }
+}
+
+fn load_blue_noise(ctx: &mut Context) -> Result<Buffer, OutOfMemory> {
+    let blue_noise = include_bytes!("../../blue_noise/RGBAF32_256x256x128");
+
+    ctx.create_buffer_static(
+        BufferInfo {
+            size: blue_noise.len() as _,
+            align: 255,
+            usage: BufferUsage::STORAGE,
+            memory: MemoryUsageFlags::empty(),
+        },
+        &blue_noise[..],
+    )
 }

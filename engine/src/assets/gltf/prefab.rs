@@ -19,6 +19,7 @@ impl Prefab for GltfAsset {
 
     fn spawn(self, root: Global3, world: &mut World, entity: Entity) {
         if !world.contains(entity) {
+            tracing::warn!("Prefab loaded but entity is already despawned");
             return;
         }
 
@@ -28,8 +29,13 @@ impl Prefab for GltfAsset {
         };
 
         match scene.nodes().len() {
-            0 => world.despawn(entity).unwrap(),
+            0 => {
+                tracing::warn!("Gltf asset with 0 nodes loaded");
+                world.despawn(entity).unwrap()
+            }
             1 if node_transform_identity(&scene.nodes().next().unwrap()) => {
+                tracing::info!("Gltf asset with single node at origin");
+
                 let node = scene.nodes().next().unwrap();
 
                 let (iso, scale) = node_transform(&node);
@@ -62,6 +68,7 @@ impl Prefab for GltfAsset {
                 spawn_children(entity, &node, &self, world);
             }
             _ => {
+                tracing::info!("Gltf asset loaded");
                 let nodes = scene
                     .nodes()
                     .map(|node| {
@@ -91,15 +98,13 @@ fn spawn_node(
         .and_then(|m| asset.renderables.get(m.index()))
     {
         Some(renderables) => match renderables.len() {
+            0 => spawn_empty(base, &node, world),
             1 => spawn_renderable(base, &node, renderables[0].clone(), world),
             _ => {
                 let entity = spawn_empty(base, &node, world);
-                world.spawn_batch(
-                    renderables
-                        .iter()
-                        .cloned()
-                        .map(|r| (r, Local3::identity(entity))),
-                );
+                world.spawn_batch(renderables.iter().cloned().map(|r| {
+                    (r, Global3::identity(), Local3::identity(entity))
+                }));
                 entity
             }
         },
