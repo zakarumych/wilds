@@ -947,8 +947,8 @@ impl<'a> Pass<'a> for RtPrepass {
             plights: pointlights.len() as u32,
             // frame: frame as u32,
             frame: 0,
-            shadow_rays: 16,
-            diffuse_rays: 16,
+            shadow_rays: 4,
+            diffuse_rays: 4,
         };
 
         tracing::trace!("Update Globals");
