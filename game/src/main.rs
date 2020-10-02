@@ -59,7 +59,7 @@ fn main() -> Result<(), Report> {
 
         let aspect = 640.0 / 480.0;
 
-        let mut bump = Bump::with_capacity(1024 * 1024 * 64);
+        let mut bump = Bump::with_capacity(1024 * 1024);
         let mut renderer = Renderer::new(&window)?;
         let mut clocks = Clocks::new();
 
@@ -67,7 +67,8 @@ fn main() -> Result<(), Report> {
             .map(|c| c / 255.0)
             .map(|c| c / (1.3 - c));
         // .map(|c| c * 5.0);
-        let skylight = na::Vector3::new(117.0, 187.0, 253.0)
+
+        let skyradiance = na::Vector3::new(117.0, 187.0, 253.0)
             .map(|c| c / 255.0)
             .map(|c| c / (1.3 - c));
         // .map(|c| c * 5.0);
@@ -78,9 +79,30 @@ fn main() -> Result<(), Report> {
                 radiance: sunlight.into(),
             },
             SkyLight {
-                radiance: skylight.into(),
+                radiance: skyradiance.into(),
             },
         ));
+
+        engine.add_system(move |ctx: SystemContext<'_>| {
+            let elapsed = ctx.clocks.step - ctx.clocks.start;
+            let d = elapsed.as_secs_f32() / 10.0;
+            let mut query = ctx.world.query::<&mut DirectionalLight>();
+
+            for (_, dirlight) in query.iter() {
+                dirlight.direction = na::Vector3::new(
+                    d.sin() * 30.0,
+                    d.cos() * 25.0,
+                    d.cos() * 5.0,
+                );
+            }
+
+            let mut query = ctx.world.query::<&mut SkyLight>();
+
+            for (_, skylight) in query.iter() {
+                skylight.radiance =
+                    (skyradiance * (1.2 - d.cos()) / 2.2).into();
+            }
+        });
 
         engine.world.spawn((
             PointLight {
