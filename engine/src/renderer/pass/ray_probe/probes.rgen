@@ -1,0 +1,35 @@
+#version 460
+#extension GL_EXT_ray_tracing : require
+#extension GL_GOOGLE_include_directive : enable
+#extension GL_EXT_scalar_block_layout : enable
+
+#include "../common/sh.glsl"
+#include "descriptors.glsl"
+#include "../common/rand.glsl"
+
+layout(location = 0) rayPayloadEXT PrimaryHitPayload prd;
+
+layout(binding = 6, set = 0, rgba32f) uniform image2D output_albedo;
+layout(binding = 7, set = 0, rgba32f) uniform image2D output_normals_depth;
+layout(binding = 8, set = 0, rgba32f) uniform image2D output_emissive;
+layout(binding = 9, set = 0, rgba32f) uniform image2D output_direct;
+layout(binding = 10, set = 0, rgba32f) uniform image2D output_diffuse;
+
+void main()
+{
+    const uvec4 co = uvec4(gl_LaunchIDEXT, globals.frame * globals.diffuse_rays);
+    const uint index = gl_LaunchIDEXT.x + gl_LaunchIDEXT.y * gl_LaunchSizeEXT.x + gl_LaunchIDEXT.z * gl_LaunchSizeEXT.x * gl_LaunchSizeEXT.y;
+    const vec3 origin = globals.offset + globals.extent * vec3(gl_LaunchIDEXT) / vec3(gl_LaunchSizeEXT);
+
+    init_sherical_harmonics(probes[index].spherical_harmonics);
+
+    for (uint i = 0; i < globals.diffuse_rays; ++i)
+    {
+        vec3 dir = blue_rand_sphere(co + uvec4(0, 0, 0, i));
+        prd.result = vec3(0);
+        prd.cozw = uvec2(0, i);
+        traceRayEXT(tlas, 0, 0xff, 0, 0, 0, origin, 0.0, dir, 1000.0, 0);
+
+        add_sample_to_sherical_harmonics(dir, prd.result, probes[index].spherical_harmonics);
+    }
+}

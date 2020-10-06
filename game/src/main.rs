@@ -97,7 +97,7 @@ fn main() -> Result<(), Report> {
 
             for (_, skylight) in query.iter() {
                 skylight.radiance =
-                    (skyradiance * (1.005 - d.cos()) / 2.005).into();
+                    (skyradiance * (1.1 - d.cos()) / 2.1).into();
             }
         });
 
