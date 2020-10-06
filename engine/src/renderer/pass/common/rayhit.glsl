@@ -1,3 +1,4 @@
+#extension GL_EXT_nonuniform_qualifier : enable
 
 uvec3 instance_triangle_indices() {
     uint mesh = instances[gl_InstanceID].mesh;
@@ -14,10 +15,6 @@ Vertex instance_vertex(uint index) {
     } else {
         return vertices[mesh].v[index];
     }
-}
-
-mat4 instance_transform() {
-    return instances[gl_InstanceID].transform;
 }
 
 vec4 sample_albedo(vec2 uv) {

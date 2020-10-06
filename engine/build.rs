@@ -87,12 +87,15 @@ fn main() -> Result<(), Report> {
 }
 
 const SHADERS_TO_COMPILE: &'static [&'static str] = &[
+    "common/shadow.rmiss",
+    "rt_prepass/viewport.rgen",
     "rt_prepass/primary.rchit",
-    "rt_prepass/primary.rgen",
     "rt_prepass/primary.rmiss",
     "rt_prepass/diffuse.rchit",
     "rt_prepass/diffuse.rmiss",
-    "rt_prepass/shadow.rmiss",
+    "ray_probe/primary.rchit",
+    "ray_probe/probes.rgen",
+    "ray_probe/primary.rmiss",
     "combine/combine.vert",
     "combine/combine.frag",
     "gauss_filter/gauss_filter.vert",

@@ -2,11 +2,12 @@ pub mod atrous;
 pub mod combine;
 pub mod gauss_filter;
 pub mod pose;
+pub mod ray_probe;
 pub mod rt_prepass;
 
 pub use self::{
     atrous::ATrousFilter, combine::CombinePass, gauss_filter::GaussFilter,
-    pose::PosePass, rt_prepass::RtPrepass,
+    pose::PosePass, ray_probe::RayProbe, rt_prepass::RtPrepass,
 };
 
 use {
@@ -23,8 +24,8 @@ use {
 };
 
 pub trait Pass<'a> {
-    type Output;
     type Input;
+    type Output;
 
     fn draw(
         &mut self,

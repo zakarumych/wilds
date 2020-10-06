@@ -2,8 +2,9 @@
 #extension GL_EXT_ray_tracing : require
 #extension GL_GOOGLE_include_directive : enable
 #extension GL_EXT_scalar_block_layout : enable
-#include "raycommon.glsl"
-#include "rayhelpers.glsl"
+
+#include "descriptors.glsl"
+#include "../common/viewport.glsl"
 
 layout(location = 0) rayPayloadEXT PrimaryHitPayload prd;
 
@@ -13,21 +14,7 @@ layout(binding = 8, set = 0, rgba32f) uniform image2D output_emissive;
 layout(binding = 9, set = 0, rgba32f) uniform image2D output_direct;
 layout(binding = 10, set = 0, rgba32f) uniform image2D output_diffuse;
 
-void main()
-{
-    const uint shadow_ray_flags = gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsSkipClosestHitShaderEXT;
-    const uvec3 co = uvec3(gl_LaunchIDEXT.xy, globals.frame);
-    const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy);
-    const vec2 inUV = pixelCenter/vec2(gl_LaunchSizeEXT.xy);
-    vec2 d = inUV * 2.0 - 1.0;
-    vec4 proj  = globals.cam.iproj * vec4(d.x, -d.y, -1, 1);
-    vec4 target = globals.cam.view * vec4(normalize(proj.xyz), 1.0);
-
-    // vec2 off = (blue_rand_circle(co + uvec3(13)) - 0.5);
-    vec2 off = vec2(0, 0);
-    vec4 origin = globals.cam.view[3];
-
-    prd.co = co;
+void main() {
     prd.normal = vec3(0, 0, 0);
     prd.depth = -1;
     prd.albedo = vec4(0, 0, 0, 0);
@@ -35,7 +22,7 @@ void main()
     prd.direct = vec3(0, 0, 0);
     prd.diffuse = vec3(0, 0, 0);
 
-    traceRayEXT(tlas, 0, 0xff, 0, 0, 0, origin.xyz, 0.0, normalize((target - origin).xyz), 1000.0, 0);
+    traceViewportPixelRay();
 
     imageStore(output_albedo, ivec2(gl_LaunchIDEXT.xy), prd.albedo);
     imageStore(output_normals_depth, ivec2(gl_LaunchIDEXT.xy), vec4(prd.normal, prd.depth));

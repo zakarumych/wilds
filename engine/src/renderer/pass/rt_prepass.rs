@@ -242,7 +242,7 @@ impl RtPrepass {
         let primary_rgen = RaygenShader::with_main(
             ctx.create_shader_module(
                 Spirv::new(
-                    include_bytes!("rt_prepass/primary.rgen.spv").to_vec(),
+                    include_bytes!("rt_prepass/viewport.rgen.spv").to_vec(),
                 )
                 .into(),
             )?,
@@ -286,10 +286,8 @@ impl RtPrepass {
 
         let shadow_rmiss = MissShader::with_main(
             ctx.create_shader_module(
-                Spirv::new(
-                    include_bytes!("rt_prepass/shadow.rmiss.spv").to_vec(),
-                )
-                .into(),
+                Spirv::new(include_bytes!("common/shadow.rmiss.spv").to_vec())
+                    .into(),
             )?,
         );
 
@@ -947,8 +945,8 @@ impl<'a> Pass<'a> for RtPrepass {
             plights: pointlights.len() as u32,
             // frame: frame as u32,
             frame: 0,
-            shadow_rays: 16,
-            diffuse_rays: 16,
+            shadow_rays: 64,
+            diffuse_rays: 64,
         };
 
         tracing::trace!("Update Globals");
