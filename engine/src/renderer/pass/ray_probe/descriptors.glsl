@@ -45,12 +45,6 @@ layout(binding = 2, set = 0, scalar) buffer Indices { uint i[]; } indices[];
 layout(binding = 3, set = 0, scalar) buffer Vertices { Vertex v[]; } vertices[];
 layout(binding = 4, set = 0) uniform sampler2D albedo[];
 layout(binding = 5, set = 0) uniform sampler2D normal[];
-layout(binding = 6, set = 0) buffer Probes {
-    Probe probes[];
-};
-layout(binding = 7, set = 0) buffer ProbesLast {
-    Probe probes_last[];
-};
 
 layout(binding = 0, set = 1, std140) uniform Globals {
     DirLight dirlight;
@@ -66,3 +60,6 @@ layout(binding = 0, set = 1, std140) uniform Globals {
 layout(binding = 1, set = 1, scalar) buffer Scene { Instance instances[]; };
 layout(binding = 2, set = 1, std140) buffer PointLights { PointLight plight[]; };
 layout(binding = 3, set = 1, scalar) buffer AnimVertices { Vertex v[]; } anim_vertices[];
+layout(binding = 4, set = 1) buffer Probes {
+    Probe probes[];
+};

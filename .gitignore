@@ -1,2 +1,4 @@
 target
 Cargo.lock
+*.spv
+engine/blue_noise/RGBAF32_256x256x128

@@ -33,7 +33,7 @@ void query_probe(ivec3 probe, vec3 origin, vec3 normal, inout vec3 result, inout
     traceRayEXT(tlas, shadow_ray_flags, 0xff, 0, 0, 2, origin, 0, dir, dist, 1);
     if (unshadows > 0)
     {
-        result += evaluete_sherical_harmonics(normal, probes_last[probe_index].spherical_harmonics);
+        result += evaluete_sherical_harmonics(normal, probes[probe_index].spherical_harmonics);
         weight += 1.0 / dist_squared;
     }
 }

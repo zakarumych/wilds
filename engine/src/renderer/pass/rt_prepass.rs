@@ -945,8 +945,9 @@ impl<'a> Pass<'a> for RtPrepass {
             plights: pointlights.len() as u32,
             // frame: frame as u32,
             frame: 0,
-            shadow_rays: 64,
-            diffuse_rays: 64,
+            shadow_rays: 32,
+            diffuse_rays: 1,
+            pad: 0.0,
         };
 
         tracing::trace!("Update Globals");
@@ -1097,6 +1098,7 @@ struct Globals {
     camera: GlobalsCamera,
     dirlight: GlobalsDirLight,
     skylight: [f32; 3],
+    pad: f32,
     plights: u32,
     frame: u32,
     shadow_rays: u32,

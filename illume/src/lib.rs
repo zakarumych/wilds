@@ -562,3 +562,34 @@ pub fn align_up(align_mask: u64, value: u64) -> Option<u64> {
 pub fn align_down(align_mask: u64, value: u64) -> u64 {
     value & !align_mask
 }
+
+#[macro_export]
+macro_rules! descriptor_set_layout_bindings {
+    ($($ty:ident $(($count:expr))? $(@$binding:literal)? for $($stages:ident),+ $($(| $flags:ident)+)?),*) => {
+        {
+            let mut binding = 0;
+            vec![
+                $({
+                    $(binding = $binding + 1)?;
+                    $crate::DescriptorSetLayoutBinding {
+                        binding: binding - 1,
+                        ty: $crate::DescriptorType::$ty,
+                        count: 1 $(- 1 + $count)?,
+                        stages: $($crate::ShaderStageFlags::$stages)|+,
+                        flags: $crate::DescriptorBindingFlags::empty() $(| $crate::DescriptorBindingFlags::$flags)*,
+                    }
+                },)*
+            ]
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! descriptor_set_layout {
+    ($(|$flags:ident) *$($ty:ident $(($count:expr))? $(@$binding:literal)? for $($stages:ident)+ $($(| $bflags:ident)+)?),*) => {
+        $crate::DescriptorSetLayoutInfo {
+            flags: $crate::DescriptorSetLayoutFlags::empty() $(| $crate::DescriptorSetLayoutFlags::$flags)*,
+            bindings: descriptor_set_layout_bindings!($($ty $(@$binding)? $(* $count)? for $($stages)+ $($(| $bflags)+)?)*),
+        }
+    }
+}
