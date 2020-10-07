@@ -1,28 +1,25 @@
 use {
     eyre::{bail, Report},
-    std::{env, path::Path, process::Command},
+    std::{env, path::{Path, PathBuf}, process::Command, fs::read_dir},
 };
 
 fn main() -> Result<(), Report> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("src")
-        .join("renderer")
-        .join("pass");
+    // let mut commands = Vec::with_capacity(SHADERS_TO_COMPILE.len());
+    let mut commands = Vec::new();
 
-    let mut commands = Vec::with_capacity(SHADERS_TO_COMPILE.len());
-
-    for shader in SHADERS_TO_COMPILE.iter().copied() {
-        let path = root.join(shader);
+    // for shader in SHADERS_TO_COMPILE.iter().copied() {
+    for path in all_shaders()? {
+        // let path = root.join(shader);
         let ext = path.extension().unwrap();
         let spv = format!("{}.spv", ext.to_str().unwrap());
         let target = path.with_extension(spv);
 
-        // if target.exists() {
-        //     if target.metadata()?.modified()? >= path.metadata()?.modified()?
-        // {         // Skip unchanged
-        //         continue;
-        //     }
-        // }
+        if target.exists() {
+            if (|| Ok::<_, Report>(target.metadata()?.modified()? >= path.metadata()?.modified()?))().unwrap_or(false)
+        {         // Skip unchanged
+                continue;
+            }
+        }
 
         commands.push(
             Command::new("glslangValidator")
@@ -86,26 +83,59 @@ fn main() -> Result<(), Report> {
     Ok(())
 }
 
-const SHADERS_TO_COMPILE: &'static [&'static str] = &[
-    "common/shadow.rmiss",
-    "rt_prepass/viewport.rgen",
-    "rt_prepass/primary.rchit",
-    "rt_prepass/primary.rmiss",
-    "rt_prepass/diffuse.rchit",
-    "rt_prepass/diffuse.rmiss",
-    "ray_probe/primary.rchit",
-    "ray_probe/probes.rgen",
-    "ray_probe/primary.rmiss",
-    "combine/combine.vert",
-    "combine/combine.frag",
-    "gauss_filter/gauss_filter.vert",
-    "gauss_filter/gauss_filter.frag",
-    "atrous/atrous.vert",
-    "atrous/atrous0h.frag",
-    "atrous/atrous1h.frag",
-    "atrous/atrous2h.frag",
-    "atrous/atrous0v.frag",
-    "atrous/atrous1v.frag",
-    "atrous/atrous2v.frag",
-    "pose/pose.comp",
-];
+// const SHADERS_TO_COMPILE: &'static [&'static str] = &[
+//     "common/shadow.rmiss",
+//     "rt_prepass/viewport.rgen",
+//     "rt_prepass/primary.rchit",
+//     "rt_prepass/primary.rmiss",
+//     "rt_prepass/diffuse.rchit",
+//     "rt_prepass/diffuse.rmiss",
+//     "ray_probe/primary.rchit",
+//     "ray_probe/probes.rgen",
+//     "ray_probe/primary.rmiss",
+//     "combine/combine.vert",
+//     "combine/combine.frag",
+//     "gauss_filter/gauss_filter.vert",
+//     "gauss_filter/gauss_filter.frag",
+//     "atrous/atrous.vert",
+//     "atrous/atrous0h.frag",
+//     "atrous/atrous1h.frag",
+//     "atrous/atrous2h.frag",
+//     "atrous/atrous0v.frag",
+//     "atrous/atrous1v.frag",
+//     "atrous/atrous2v.frag",
+//     "pose/pose.comp",
+// ];
+
+
+fn all_shaders() -> Result<Vec<PathBuf>, Report> {
+    let mut result = Vec::new();
+    find_shaders(&Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("renderer")
+        .join("pass"), &mut result)?;
+
+    Ok(result)
+}
+
+fn find_shaders(root: &Path, paths: &mut Vec<PathBuf>) -> Result<(), Report> {
+
+    const SHADER_EXTENSIONS: [&'static str; 7] = ["vert", "frag", "comp", "rgen", "rmiss", "rchit", "rahit"];
+
+    for e in read_dir(&root)? {
+        let e = e?;
+        let ft = e.file_type()?;
+        let p = e.path();
+        if ft.is_file() {
+            if let Some(ext) = p.extension() {
+                if SHADER_EXTENSIONS.iter().any(|e| **e == *ext) {
+                    paths.push(p);
+                }
+            }
+        } else if ft.is_dir() {
+            find_shaders(&p, paths)?;
+        }
+    }
+
+    Ok(())
+}

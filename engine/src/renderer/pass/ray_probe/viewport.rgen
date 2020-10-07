@@ -3,16 +3,17 @@
 #extension GL_GOOGLE_include_directive : enable
 #extension GL_EXT_scalar_block_layout : enable
 
+#include "../common/sh.glsl"
 #include "descriptors.glsl"
 #include "../common/viewport.glsl"
 
 layout(location = 0) rayPayloadEXT PrimaryHitPayload prd;
 
-layout(binding = 6, set = 0, rgba8) uniform image2D output;
+layout(binding = 6, set = 0, rgba8) uniform image2D result;
 
 void main() {
-    prd.output = vec3(0);
-    prd.cozw = vec2(0, 0);
+    prd.result = vec3(0);
+    prd.cozw = uvec2(0, 0);
     traceViewportPixelRay();
-    imageStore(output, ivec2(gl_LaunchIDEXT.xy), prd.result);
+    imageStore(result, ivec2(gl_LaunchIDEXT.xy), vec4(prd.result, 0.));
 }
