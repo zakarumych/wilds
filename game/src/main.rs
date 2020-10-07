@@ -82,7 +82,7 @@ fn main() -> Result<(), Report> {
 
         engine.add_system(move |ctx: SystemContext<'_>| {
             let elapsed = ctx.clocks.step - ctx.clocks.start;
-            let d = elapsed.as_secs_f32() / 2.0;
+            let d = elapsed.as_secs_f32() / 20.0;
             let mut query = ctx.world.query::<&mut DirectionalLight>();
 
             for (_, dirlight) in query.iter() {
@@ -128,7 +128,7 @@ fn main() -> Result<(), Report> {
         // });
 
         let scene = engine.load_prefab_with_format::<GltfAsset, _>(
-            "sponza2/sponza2.gltf".into(),
+            "sponza/glTF/Sponza.gltf".into(),
             Global3::from_scale(1.0),
             GltfFormat::for_raytracing(),
         );

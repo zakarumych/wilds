@@ -28,11 +28,11 @@ void main() {
         for (int x = -w; x <= w; x += l) {
             vec2 xy = vec2(x, y);
             vec4 normal_depth = texture(normals_depth, gl_FragCoord.xy + xy);
-            float depth_factor = max(0, 1 - abs(normal_depth.w - depth));
-            if (depth_factor > 0.9) {
+            float depth_factor = min(normal_depth.w/depth, depth/normal_depth.w);
+            if (depth_factor > 0.8) {
                 float normal_factor = dot(normal, normal_depth.xyz);
-                if (normal_factor > 0.9) {
-                    float f = 1 / (1 + dot(xy, xy));
+                if (normal_factor > 0.8) {
+                    float f = 1 / (5 + dot(xy, xy));
                     sum += f;
                     filtered += f * texture(unfiltered, gl_FragCoord.xy + xy).rgb;
                 }

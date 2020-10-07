@@ -67,6 +67,7 @@ layout(binding = 0, set = 1, std140) uniform Globals {
     Camera cam;
     DirLight dirlight;
     vec3 skylight;
+    float pad0;
     uint plights;
     uint frame;
     uint shadow_rays;
