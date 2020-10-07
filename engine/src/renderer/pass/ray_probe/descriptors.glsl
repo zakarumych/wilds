@@ -39,6 +39,14 @@ struct Probe {
     SphericalHarmonicsRgb spherical_harmonics;
 };
 
+
+struct Camera {
+    mat4 view;
+    mat4 proj;
+    mat4 iview;
+    mat4 iproj;
+};
+
 layout(binding = 0, set = 0) uniform accelerationStructureEXT tlas;
 layout(binding = 1, set = 0) buffer BlueNoise { vec4 blue_noise[256*256*128]; };
 layout(binding = 2, set = 0, scalar) buffer Indices { uint i[]; } indices[];
@@ -47,6 +55,7 @@ layout(binding = 4, set = 0) uniform sampler2D albedo[];
 layout(binding = 5, set = 0) uniform sampler2D normal[];
 
 layout(binding = 0, set = 1, std140) uniform Globals {
+    Camera cam;
     DirLight dirlight;
     vec3 skylight;
     uint plights;
