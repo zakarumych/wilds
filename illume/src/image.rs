@@ -177,6 +177,62 @@ impl ImageExtent {
     }
 }
 
+impl PartialEq<Extent2d> for ImageExtent {
+    fn eq(&self, rhs: &Extent2d) -> bool {
+        match self {
+            ImageExtent::D2 { width, height } => {
+                *width == rhs.width && *height == rhs.height
+            }
+            _ => false,
+        }
+    }
+}
+
+impl PartialEq<Extent3d> for ImageExtent {
+    fn eq(&self, rhs: &Extent3d) -> bool {
+        match self {
+            ImageExtent::D3 {
+                width,
+                height,
+                depth,
+            } => {
+                *width == rhs.width
+                    && *height == rhs.height
+                    && *depth == rhs.depth
+            }
+            _ => false,
+        }
+    }
+}
+
+impl PartialEq<ImageExtent> for Extent2d {
+    fn eq(&self, rhs: &ImageExtent) -> bool {
+        match rhs {
+            ImageExtent::D2 { width, height } => {
+                self.width == *width && self.height == *height
+            }
+            _ => false,
+        }
+    }
+}
+
+impl PartialEq<ImageExtent> for Extent3d {
+    fn eq(&self, rhs: &ImageExtent) -> bool {
+        match rhs {
+            ImageExtent::D3 {
+                width,
+                height,
+                depth,
+            } => {
+                self.width == *width
+                    && self.height == *height
+                    && self.depth == *depth
+            }
+            _ => false,
+        }
+    }
+}
+
 /// Number of samples for an image.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]

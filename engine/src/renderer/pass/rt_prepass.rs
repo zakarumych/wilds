@@ -9,6 +9,7 @@ use {
             VertexType,
         },
         scene::Global3,
+        util::BumpaloCellList,
     },
     bumpalo::{collections::Vec as BVec, Bump},
     bytemuck::{Pod, Zeroable},
@@ -239,7 +240,7 @@ impl RtPrepass {
                 push_constants: Vec::new(),
             })?;
 
-        let primary_rgen = RaygenShader::with_main(
+        let viewport_rgen = RaygenShader::with_main(
             ctx.create_shader_module(
                 Spirv::new(
                     include_bytes!("rt_prepass/viewport.rgen.spv").to_vec(),
@@ -294,7 +295,7 @@ impl RtPrepass {
         let pipeline =
             ctx.create_ray_tracing_pipeline(RayTracingPipelineInfo {
                 shaders: vec![
-                    primary_rgen.into(),
+                    viewport_rgen.into(),
                     primary_rmiss.into(),
                     primary_rchit.into(),
                     diffuse_rmiss.into(),
@@ -595,7 +596,11 @@ impl<'a> Pass<'a> for RtPrepass {
 
         let findex = (frame & 1) as u32;
 
-        assert_eq!(self.output_albedo_image.info().extent, input.extent.into());
+        assert_eq!(self.output_albedo_image.info().extent, input.extent);
+
+        let storage_buffers = BumpaloCellList::new();
+        let combined_image_samples = BumpaloCellList::new();
+        let bind_ray_tracing_descriptor_sets_array;
 
         // https://microsoft.github.io/DirectX-Specs/d3d/Raytracing.html#general-tips-for-building-acceleration-structures
         //
@@ -662,13 +667,24 @@ impl<'a> Pass<'a> for RtPrepass {
                     assert_eq!(indices_offset & 15, 0);
 
                     // FIXME: Leak
-                    let indices_desc = Descriptors::StorageBuffer(bump.alloc(
-                        [(indices_buffer, indices_offset, indices_size)],
-                    ));
 
-                    let vectors_desc = Descriptors::StorageBuffer(bump.alloc(
-                        [(vectors_buffer, vectors_offset, vectors_size)],
-                    ));
+                    let indices_tuple = storage_buffers.push_in(
+                        (indices_buffer, indices_offset, indices_size),
+                        bump,
+                    );
+
+                    let vectors_tuple = storage_buffers.push_in(
+                        (vectors_buffer, vectors_offset, vectors_size),
+                        bump,
+                    );
+
+                    let indices_desc = Descriptors::StorageBuffer(
+                        std::slice::from_ref(indices_tuple),
+                    );
+
+                    let vectors_desc = Descriptors::StorageBuffer(
+                        std::slice::from_ref(vectors_tuple),
+                    );
 
                     writes.push(WriteDescriptorSet {
                         set: &self.set,
@@ -745,12 +761,18 @@ impl<'a> Pass<'a> for RtPrepass {
                     let (albedo_index, new) = self.albedo.index(albedo.clone());
 
                     if new {
-                        let descriptors =
-                            Descriptors::CombinedImageSampler(bump.alloc([(
-                                albedo.image.clone(),
-                                Layout::General,
-                                albedo.sampler.clone(),
-                            )]));
+                        let descriptors = Descriptors::CombinedImageSampler(
+                            std::slice::from_ref(
+                                combined_image_samples.push_in(
+                                    (
+                                        albedo.image.clone(),
+                                        Layout::General,
+                                        albedo.sampler.clone(),
+                                    ),
+                                    bump,
+                                ),
+                            ),
+                        );
                         writes.push(WriteDescriptorSet {
                             set: &self.set,
                             binding: 4,
@@ -770,12 +792,18 @@ impl<'a> Pass<'a> for RtPrepass {
                     let (normal_index, new) = self.normal.index(normal.clone());
 
                     if new {
-                        let descriptors =
-                            Descriptors::CombinedImageSampler(bump.alloc([(
-                                normal.image.clone(),
-                                Layout::General,
-                                normal.sampler.clone(),
-                            )]));
+                        let descriptors = Descriptors::CombinedImageSampler(
+                            std::slice::from_ref(
+                                combined_image_samples.push_in(
+                                    (
+                                        normal.image.clone(),
+                                        Layout::General,
+                                        normal.sampler.clone(),
+                                    ),
+                                    bump,
+                                ),
+                            ),
+                        );
                         writes.push(WriteDescriptorSet {
                             set: &self.set,
                             binding: 5,
@@ -962,13 +990,15 @@ impl<'a> Pass<'a> for RtPrepass {
 
         encoder.bind_ray_tracing_pipeline(&self.pipeline);
 
+        bind_ray_tracing_descriptor_sets_array = [
+            self.set.clone(),
+            self.per_frame_sets[findex as usize].clone(),
+        ];
+
         encoder.bind_ray_tracing_descriptor_sets(
             &self.pipeline_layout,
             0,
-            bump.alloc([
-                self.set.clone(),
-                self.per_frame_sets[findex as usize].clone(),
-            ]),
+            &bind_ray_tracing_descriptor_sets_array,
             &[],
         );
 

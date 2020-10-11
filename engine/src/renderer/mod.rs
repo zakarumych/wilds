@@ -59,7 +59,7 @@ pub struct Renderer {
     blases: HashMap<Mesh, AccelerationStructure>,
     swapchain: Swapchain,
     blue_noise_buffer: Buffer,
-    pipeline: PathTracePipeline,
+    pipeline: RayProbePipeline,
 }
 
 impl Deref for Renderer {
@@ -148,29 +148,15 @@ impl Renderer {
 
         let mut swapchain = context.create_swapchain(&mut surface)?;
         swapchain.configure(
-            ImageUsage::COLOR_ATTACHMENT,
+            ImageUsage::COLOR_ATTACHMENT | ImageUsage::TRANSFER_DST,
             format,
             PresentMode::Fifo,
         )?;
 
-        // let pose = PosePass::new(&mut context)?;
-
         let blue_noise_buffer = load_blue_noise(&mut context)?;
-        // let rt_prepass = RtPrepass::new(
-        //     window_extent,
-        //     &mut context,
-        //     blue_noise_buffer.clone(),
-        // )?;
 
-        // let combine = CombinePass::new(&mut context)?;
-        // let diffuse_filter = ATrousFilter::new(&mut context)?;
-        // let direct_filter = ATrousFilter::new(&mut context)?;
-
-        let pipeline = PathTracePipeline::new(
-            &mut context,
-            blue_noise_buffer.clone(),
-            window_extent,
-        )?;
+        let pipeline =
+            RayProbePipeline::new(&mut context, blue_noise_buffer.clone())?;
 
         Ok(Renderer {
             blases: HashMap::new(),
@@ -233,117 +219,10 @@ impl Renderer {
                 .submit_no_semaphores(encoder.finish(), None);
         }
 
-        // if self.frame > 1 {
-        //     let fence = &self.fences[(self.frame % 2) as usize];
-        //     self.device.wait_fences(&[fence], true);
-        //     self.device.reset_fences(&[fence])
-        // }
-
-        // self.pose.draw(
-        //     (),
-        //     self.frame,
-        //     &[],
-        //     &[],
-        //     None,
-        //     &mut self.context,
-        //     world,
-        //     bump,
-        // )?;
-
         let frame = self
             .swapchain
             .acquire_image()?
             .expect("Resize unimplemented");
-
-        // let rt_prepass_output = self.rt_prepass.draw(
-        //     rt_prepass::Input {
-        //         extent: frame.info().image.info().extent.into_2d(),
-        //         camera_global,
-        //         camera_projection,
-        //         blases: &self.blases,
-        //     },
-        //     self.frame,
-        //     &[],
-        //     &[],
-        //     None,
-        //     &mut self.context,
-        //     world,
-        //     bump,
-        // )?;
-
-        // if constants.filter_enabled {
-        //     let diffuse_filter_output = self.diffuse_filter.draw(
-        //         atrous::Input {
-        //             normal_depth: rt_prepass_output.normal_depth.clone(),
-        //             unfiltered: rt_prepass_output.diffuse,
-        //         },
-        //         self.frame,
-        //         &[],
-        //         &[],
-        //         None,
-        //         &mut self.context,
-        //         world,
-        //         bump,
-        //     )?;
-
-        //     let direct_filter_output = self.direct_filter.draw(
-        //         atrous::Input {
-        //             normal_depth: rt_prepass_output.normal_depth.clone(),
-        //             unfiltered: rt_prepass_output.direct,
-        //         },
-        //         self.frame,
-        //         &[],
-        //         &[],
-        //         None,
-        //         &mut self.context,
-        //         world,
-        //         bump,
-        //     )?;
-
-        //     let fence = &self.fences[(self.frame % 2) as usize];
-        //     self.combine.draw(
-        //         combine::Input {
-        //             albedo: rt_prepass_output.albedo,
-        //             normal_depth: rt_prepass_output.normal_depth,
-        //             emissive: rt_prepass_output.emissive,
-        //             direct: direct_filter_output.filtered,
-        //             diffuse: diffuse_filter_output.filtered,
-        //             combined: frame.info().image.clone(),
-        //         },
-        //         self.frame,
-        //         &[(
-        //             PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-        //             frame.info().wait.clone(),
-        //         )],
-        //         &[frame.info().signal.clone()],
-        //         Some(fence),
-        //         &mut self.context,
-        //         world,
-        //         bump,
-        //     )?;
-        // } else {
-        //     let fence = &self.fences[(self.frame % 2) as usize];
-        //     self.combine.draw(
-        //         combine::Input {
-        //             albedo: rt_prepass_output.albedo,
-        //             normal_depth: rt_prepass_output.normal_depth,
-        //             emissive: rt_prepass_output.emissive,
-        //             direct: rt_prepass_output.direct,
-        //             diffuse: rt_prepass_output.diffuse,
-        //             combined: frame.info().image.clone(),
-        //         },
-        //         self.frame,
-        //         &[(
-        //             PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-        //             frame.info().wait.clone(),
-        //         )],
-        //         &[frame.info().signal.clone()],
-        //         Some(fence),
-        //         &mut self.context,
-        //         world,
-        //         bump,
-        //     )?;
-        // }
 
         self.pipeline.draw(
             frame.info().image.clone(),
