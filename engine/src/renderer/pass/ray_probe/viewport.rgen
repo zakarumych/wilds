@@ -9,7 +9,7 @@
 
 layout(location = 0) rayPayloadEXT PrimaryHitPayload prd;
 
-layout(binding = 6, set = 0, rgba8) uniform image2D result;
+layout(binding = 6, set = 1, rgba8) uniform image2D result;
 
 void main() {
     prd.result = vec3(0);

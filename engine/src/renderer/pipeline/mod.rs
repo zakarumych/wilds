@@ -1,4 +1,5 @@
-mod pathtrace;
+mod path_trace;
+mod ray_probe;
 
 use {
     super::{AccelerationStructure, Context, Image, Mesh, Semaphore},
@@ -8,7 +9,7 @@ use {
     std::collections::HashMap,
 };
 
-pub use self::pathtrace::*;
+pub use self::{path_trace::*, ray_probe::*};
 
 /// Pipeline represents particular rendering strategy.
 /// For example path-tracing pipeline uses path tracing and denoising to render final image.

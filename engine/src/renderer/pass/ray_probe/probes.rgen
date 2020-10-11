@@ -17,7 +17,7 @@ void main()
 {
     const uvec4 co = uvec4(gl_LaunchIDEXT, globals.frame * globals.diffuse_rays);
     const uint index = gl_LaunchIDEXT.x + gl_LaunchIDEXT.y * gl_LaunchSizeEXT.x + gl_LaunchIDEXT.z * gl_LaunchSizeEXT.x * gl_LaunchSizeEXT.y;
-    const vec3 origin = globals.offset + globals.extent * vec3(gl_LaunchIDEXT) / vec3(gl_LaunchSizeEXT);
+    const vec3 origin = globals.probes_offset + globals.probes_dimensions * vec3(gl_LaunchIDEXT) / (vec3(gl_LaunchSizeEXT) - min(gl_LaunchIDEXT, uvec3(1, 1, 1)));
 
     init_sherical_harmonics(newprobes[index].spherical_harmonics);
 
