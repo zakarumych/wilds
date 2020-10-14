@@ -14,7 +14,7 @@ use {
             AccelerationStructure, AccelerationStructureInfo,
             AccelerationStructureLevel,
         },
-        arith_eq, arith_le, arith_ne, assert_object,
+        align_up, arith_eq, arith_le, arith_ne, assert_object,
         buffer::{Buffer, BufferInfo, BufferUsage, StridedBufferRegion},
         descriptor::{
             CopyDescriptorSet, DescriptorSet, DescriptorSetInfo,
@@ -2358,6 +2358,9 @@ impl Device {
         let group_align =
             u64::from(self.inner.properties.rt.shader_group_base_alignment - 1);
 
+        let group_align_usize =
+            usize::try_from(group_align).map_err(|_| OutOfMemory)?;
+
         let group_count_usize = info.raygen.is_some() as usize
             + info.miss.len()
             + info.hit.len()
@@ -2366,8 +2369,12 @@ impl Device {
         let group_count =
             u32::try_from(group_count_usize).map_err(|_| OutOfMemory)?;
 
-        let total_size = (group_size.checked_mul(u64::from(group_count)))
-            .ok_or(OutOfMemory)?;
+        let group_size_aligned =
+            align_up(group_size, group_align).ok_or(OutOfMemory)?;
+
+        let total_size = (group_size_aligned
+            .checked_mul(u64::from(group_count)))
+        .ok_or(OutOfMemory)?;
 
         let total_size_usize = usize::try_from(total_size)
             .unwrap_or_else(|_| out_of_host_memory());
@@ -2384,6 +2391,7 @@ impl Device {
             info.raygen.iter().copied(),
             &mut write_offset,
             group_size,
+            group_align_usize,
         );
 
         let miss_handlers = copy_group_handlers(
@@ -2392,6 +2400,7 @@ impl Device {
             info.miss.iter().copied(),
             &mut write_offset,
             group_size,
+            group_align_usize,
         );
 
         let hit_handlers = copy_group_handlers(
@@ -2400,6 +2409,7 @@ impl Device {
             info.hit.iter().copied(),
             &mut write_offset,
             group_size,
+            group_align_usize,
         );
 
         let callable_handlers = copy_group_handlers(
@@ -2408,6 +2418,7 @@ impl Device {
             info.callable.iter().copied(),
             &mut write_offset,
             group_size,
+            group_align_usize,
         );
 
         let buffer = self.create_buffer_static(
@@ -2479,6 +2490,10 @@ impl Device {
         offset: u64,
         data: &[T],
     ) -> Result<(), MappingError> {
+        if size_of_val(data) == 0 {
+            return Ok(());
+        }
+
         // let size =
         //     u64::try_from(data.len()).map_err(|_|
         // MappingError::OutOfBounds)?; let end = offset
@@ -2543,7 +2558,10 @@ fn copy_group_handlers(
     group_indices: impl IntoIterator<Item = u32>,
     write_offset: &mut usize,
     group_size: u64,
+    group_align: usize,
 ) -> Option<Range<u64>> {
+    *write_offset = align_up(group_align, *write_offset)?;
+
     let result_start = u64::try_from(*write_offset).ok()?;
     let group_size_usize = usize::try_from(group_size).ok()?;
 
@@ -2561,7 +2579,7 @@ fn copy_group_handlers(
         let output = &mut write[write_range];
 
         output.copy_from_slice(handler);
-        *write_offset = write_end;
+        *write_offset = align_up(group_align, write_end)?;
     }
 
     let result_end = u64::try_from(*write_offset).ok()?;
