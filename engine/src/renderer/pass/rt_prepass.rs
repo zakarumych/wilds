@@ -1143,7 +1143,7 @@ const fn globals_size() -> u64 {
 }
 
 fn globals_offset(frame: u32) -> u64 {
-    u64::from(frame) * align_up(255, globals_size()).unwrap()
+    u64::from(frame) * align_up(255u8, globals_size()).unwrap()
 }
 
 fn globals_end(frame: u32) -> u64 {
@@ -1155,8 +1155,8 @@ const fn instances_size() -> u64 {
 }
 
 fn instances_offset(frame: u32) -> u64 {
-    align_up(255, globals_end(1)).unwrap()
-        + u64::from(frame) * align_up(255, instances_size()).unwrap()
+    align_up(255u8, globals_end(1)).unwrap()
+        + u64::from(frame) * align_up(255u8, instances_size()).unwrap()
 }
 
 fn instances_end(frame: u32) -> u64 {
@@ -1168,8 +1168,8 @@ const fn pointlight_size() -> u64 {
 }
 
 fn pointlight_offset(frame: u32) -> u64 {
-    align_up(255, instances_end(1)).unwrap()
-        + u64::from(frame) * align_up(255, pointlight_size()).unwrap()
+    align_up(255u8, instances_end(1)).unwrap()
+        + u64::from(frame) * align_up(255u8, pointlight_size()).unwrap()
 }
 
 fn pointlight_end(frame: u32) -> u64 {
@@ -1182,8 +1182,8 @@ const fn acc_instances_size() -> u64 {
 }
 
 fn acc_instances_offset(frame: u32) -> u64 {
-    align_up(255, pointlight_end(1)).unwrap()
-        + u64::from(frame) * align_up(255, acc_instances_size()).unwrap()
+    align_up(255u8, pointlight_end(1)).unwrap()
+        + u64::from(frame) * align_up(255u8, acc_instances_size()).unwrap()
 }
 
 fn acc_instances_end(frame: u32) -> u64 {

@@ -21,6 +21,7 @@ struct Instance {
     uint normals_sampler;
     float normals_factor;
     uint anim;
+    
 };
 
 struct DirLight {
@@ -58,15 +59,20 @@ layout(binding = 0, set = 1, std140) uniform Globals {
     Camera cam;
     DirLight dirlight;
     vec3 skylight;
+    float pad0;
     uint plights;
     uint frame;
     uint shadow_rays;
     uint diffuse_rays;
     vec3 probes_dimensions;
+    float pad1;
     vec3 probes_offset;
+    float pad2;
+    uvec3 probes_extent;
+    float pad3;
 } globals;
 
 layout(binding = 1, set = 1, scalar) buffer Scene { Instance instances[]; };
 layout(binding = 2, set = 1, std140) buffer PointLights { PointLight plight[]; };
 layout(binding = 3, set = 1, scalar) buffer AnimVertices { Vertex v[]; } anim_vertices[];
-layout(binding = 4, set = 1) buffer Probes { Probe probes[]; };
+layout(binding = 4, set = 1, std140) buffer Probes { Probe probes[]; };

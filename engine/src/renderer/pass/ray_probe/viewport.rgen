@@ -15,5 +15,7 @@ void main() {
     prd.result = vec3(0);
     prd.cozw = uvec2(0, 0);
     traceViewportPixelRay();
-    imageStore(result, ivec2(gl_LaunchIDEXT.xy), vec4(prd.result, 0.));
+
+    vec3 output_color = prd.result / (vec3(1, 1, 1) + prd.result);
+    imageStore(result, ivec2(gl_LaunchIDEXT.xy), vec4(output_color, 1.));
 }
