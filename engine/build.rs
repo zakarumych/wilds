@@ -85,7 +85,21 @@ fn all_shaders() -> Result<Vec<PathBuf>, Report> {
         .join("renderer")
         .join("pass");
 
-    let force_before = root.join("common").metadata()?.modified()?;
+    let commons = root.join("common");
+    let mut force_before = commons.metadata()?.modified()?;
+
+    for e in read_dir(&commons)? {
+        let e = e?;
+        let ft = e.file_type()?;
+        let p = e.path();
+
+        if ft.is_file() {
+            force_before =
+                std::cmp::max(force_before, p.metadata()?.modified()?);
+        } else {
+            panic!("Common shaders dir should contain only files");
+        }
+    }
 
     let mut result = Vec::new();
     find_shaders(&root, force_before, &mut result)?;

@@ -15,34 +15,44 @@ hitAttributeEXT vec2 attribs;
 
 const uint shadow_ray_flags = gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsSkipClosestHitShaderEXT;
 
-void query_probe(ivec3 probe, vec3 origin, vec3 normal, inout vec3 result, inout float weight)
+vec3 probe_cell_size() {
+    return globals.probes_dimensions / vec3(globals.probes_extent - uvec3(1, 1, 1));
+}
+
+void query_probe(ivec3 probe, vec3 origin, vec3 normal, inout vec3 result, inout float total_weight)
 {
     if (probe.x < 0 || probe.y < 0 || probe.z < 0 || probe.x >= globals.probes_extent.x || probe.y >= globals.probes_extent.y || probe.z >= globals.probes_extent.z)
         return;
 
     const uint probe_index = probe.x + probe.y * globals.probes_extent.x + probe.z * globals.probes_extent.x * globals.probes_extent.y;
-
-    vec3 probe_cell_size = globals.probes_dimensions / vec3(globals.probes_extent);
+    const vec3 probe_cell_size = probe_cell_size();
 
     vec3 probe_location = probe_cell_size * probe + globals.probes_offset;
     vec3 toprobe = probe_location - origin;
-    float dist_squared = dot(toprobe, toprobe);
-    float dist = sqrt(dist_squared);
-    vec3 dir = toprobe / dist;
 
-    unshadows = 0;
-    traceRayEXT(tlas, shadow_ray_flags, 0xff, 0, 0, 1, origin, 0, dir, dist, 1);
-    if (unshadows > 0)
+    vec3 probe_weight = vec3(1, 1, 1) - abs(toprobe) / probe_cell_size;
+    float weight = probe_weight.x * probe_weight.y * probe_weight.z;
+
+    vec3 probe_dir = normalize(toprobe);
+    float probe_dist = dot(toprobe, toprobe);
+
+    // weight *= (dot(normal, probe_dir) + 1) * .5;
+
+    if (dot(normal, probe_dir) > 0.01)
     {
-        result += evaluete_sherical_harmonics(normal, probes[probe_index].spherical_harmonics);
-        weight += 1.0 / dist_squared;
+        // unshadows = 0;
+        // traceRayEXT(tlas, shadow_ray_flags, 0xff, 0, 0, 1, origin + normal / 100, 0, probe_dir, probe_dist, 1);
+        // if (unshadows > 0)
+        {
+            total_weight += weight;
+            result += evaluete_sherical_harmonics(normal, probes[probe_index].spherical_harmonics) * weight;
+        }
     }
 }
 
 void query_probes(vec3 origin, vec3 normal, inout vec3 result, inout float weight)
 {
-    vec3 probe_cell_size = globals.probes_dimensions / vec3(globals.probes_extent);
-    vec3 loc = origin - globals.probes_offset / probe_cell_size;
+    vec3 loc = (origin - globals.probes_offset) / probe_cell_size();
     ivec3 probe;
 
     probe = ivec3(floor(loc));
@@ -69,7 +79,7 @@ vec3 query_diffuse_from_probes(vec3 origin, vec3 normal)
     float weight = 0.000001;
     query_probes(origin, normal, result, weight);
 
-    return result / weight;
+    return result / weight / globals.diffuse_rays;
 }
 
 void main()
@@ -78,7 +88,6 @@ void main()
     const vec3 back = gl_WorldRayDirectionEXT * 0.001;
 
     uint shadow_rays = globals.shadow_rays;
-    uint diffuse_rays = globals.diffuse_rays;
 
     const vec3 barycentrics = vec3(1.0f - attribs.x - attribs.y, attribs.x, attribs.y);
     uvec3 indices = instance_triangle_indices();
@@ -110,8 +119,8 @@ void main()
             unshadows = 0;
             for (uint i = 0; i < shadow_rays; ++i)
             {
-                vec3 r = normalize(/*blue_rand_sphere(co + uvec4(0, 0, 0, i))*/ - globals.dirlight.dir);
-                traceRayEXT(tlas, shadow_ray_flags, 0xff, 0, 0, 1, world_space_origin, 0, r, 1000.0, 1);
+                vec3 r = normalize(rand_sphere(blue_rand(co + uvec4(0, 0, 0, i))) - globals.dirlight.dir);
+                traceRayEXT(tlas, shadow_ray_flags, 0xff, 0, 0, 1, world_space_pos - back, 0, r, 1000.0, 1);
             }
             radiance += globals.dirlight.rad * (ray_contribution * unshadows);
         }
@@ -132,15 +141,15 @@ void main()
     //             unshadows = 0;
     //             for (int i = 0; i < shadow_rays; ++i)
     //             {
-    //                 vec3 r = normalize(blue_rand_sphere(co + uvec4(0, 0, 0, i + shadow_rays)) + tolight);
-    //                 traceRayEXT(tlas, shadow_ray_flags, 0xff, 0, 0, 1, world_space_origin, 0, r, l, 1);
+    //                 vec3 r = normalize(rand_sphere(rand(co + uvec4(0, 0, 0, i + shadow_rays))) + tolight);
+    //                 traceRayEXT(tlas, shadow_ray_flags, 0xff, 0, 0, 1, world_space_pos - back, 0, r, l, 1);
     //             }
     //             radiance += plight[i].rad * (ray_contribution * unshadows);
     //         }
     //     }
     // }
 
-    // radiance += query_diffuse_from_probes(world_space_origin, world_space_normal);
+    radiance += query_diffuse_from_probes(world_space_pos - back + world_space_normal * 0.001, world_space_normal);
     radiance *= sample_albedo(uv).rgb;
 
     prd.result += radiance;

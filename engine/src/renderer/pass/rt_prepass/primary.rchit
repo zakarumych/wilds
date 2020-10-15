@@ -53,7 +53,7 @@ void main()
             unshadows = 0;
             for (uint i = 0; i < shadow_rays; ++i)
             {
-                vec3 r = normalize(blue_rand_sphere(uvec4(co, i)) - globals.dirlight.dir);
+                vec3 r = normalize(rand_sphere(blue_rand(uvec4(co, i))) - globals.dirlight.dir);
                 traceRayEXT(tlas, shadow_ray_flags, 0xff, 0, 0, 2, worls_space_pos - back, 0, r, 1000.0, 1);
             }
             prd.direct += globals.dirlight.rad * (ray_contribution * unshadows);
@@ -75,7 +75,7 @@ void main()
                 unshadows = 0;
                 for (int i = 0; i < shadow_rays; ++i)
                 {
-                    vec3 r = normalize(blue_rand_sphere(uvec4(co, i + shadow_rays)) + tolight);
+                    vec3 r = normalize(rand_sphere(blue_rand(uvec4(co, i + shadow_rays))) + tolight);
                     traceRayEXT(tlas, shadow_ray_flags, 0xff, 0, 0, 2, worls_space_pos - back, 0, r, l, 1);
                 }
                 prd.direct += plight[i].rad * (ray_contribution * unshadows);
@@ -88,7 +88,7 @@ void main()
     for (uint i = 0; i < diffuse_rays; ++i)
     {
         dprd.ray_index++;
-        vec3 dir = blue_rand_hemisphere_cosine_dir(uvec4(co, i + 1024), world_space_normal);
+        vec3 dir = rand_hemisphere_cosine_dir(blue_rand(uvec4(co, i + 1024)), world_space_normal);
         traceRayEXT(tlas, 00, 0xff, 1, 0, 1, worls_space_pos - back, 0, dir, 1000.0, 2);
     }
     prd.diffuse += dprd.radiation / diffuse_rays;

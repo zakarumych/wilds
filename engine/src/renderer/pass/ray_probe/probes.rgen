@@ -23,11 +23,13 @@ void main()
 
     for (uint i = 0; i < globals.diffuse_rays; ++i)
     {
-        vec3 dir = blue_rand_sphere(co + uvec4(0, 0, 0, i));
+        vec3 dir = rand_sphere(nice_rand(co + uvec4(0, 0, 0, i)));
         prd.result = vec3(0);
         prd.cozw = uvec2(0, i);
         traceRayEXT(tlas, 0, 0xff, 0, 0, 0, origin, 0.0, dir, 1000.0, 0);
 
         add_sample_to_sherical_harmonics(dir, prd.result, newprobes[index].spherical_harmonics);
     }
+
+    interpolate_sherical_harmonics(probes[index].spherical_harmonics, newprobes[index].spherical_harmonics);
 }

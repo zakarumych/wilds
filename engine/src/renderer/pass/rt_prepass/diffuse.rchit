@@ -50,7 +50,7 @@ void main() {
             unshadows = 0;
             for (uint i = 0; i < shadow_rays; ++i)
             {
-                vec3 r = normalize(blue_rand_sphere(uvec4(co, i)) - globals.dirlight.dir);
+                vec3 r = normalize(rand_sphere(blue_rand(uvec4(co, i))) - globals.dirlight.dir);
                 traceRayEXT(tlas, shadow_ray_flags, 0xff, 0, 0, 2, worls_space_pos - back, 0, r, 1000.0, 1);
             }
             radiation += globals.dirlight.rad * (ray_contribution * unshadows);
@@ -72,7 +72,7 @@ void main() {
     //             unshadows = 0;
     //             for (int i = 0; i < shadow_rays; ++i)
     //             {
-    //                 vec3 r = normalize(blue_rand_sphere(uvec4(co, i + shadow_rays)) + tolight);
+    //                 vec3 r = normalize(rand_sphere(blue_rand(uvec4(co, i + shadow_rays))) + tolight);
     //                 traceRayEXT(tlas, shadow_ray_flags, 0xff, 0, 0, 2, worls_space_pos - back, 0, r, l, 1);
     //             }
     //             radiation += plight[i].rad * (ray_contribution * unshadows);
