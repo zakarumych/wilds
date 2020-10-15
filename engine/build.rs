@@ -1,6 +1,12 @@
 use {
     eyre::{bail, Report},
-    std::{env, path::{Path, PathBuf}, process::Command, fs::read_dir},
+    std::{
+        env,
+        fs::read_dir,
+        path::{Path, PathBuf},
+        process::Command,
+        time::SystemTime,
+    },
 };
 
 fn main() -> Result<(), Report> {
@@ -9,17 +15,7 @@ fn main() -> Result<(), Report> {
 
     // for shader in SHADERS_TO_COMPILE.iter().copied() {
     for path in all_shaders()? {
-        // let path = root.join(shader);
-        let ext = path.extension().unwrap();
-        let spv = format!("{}.spv", ext.to_str().unwrap());
-        let target = path.with_extension(spv);
-
-        if target.exists() {
-            if (|| Ok::<_, Report>(target.metadata()?.modified()? >= path.metadata()?.modified()?))().unwrap_or(false)
-        {         // Skip unchanged
-                continue;
-            }
-        }
+        let target = shader_target(&path);
 
         commands.push(
             Command::new("glslangValidator")
@@ -83,44 +79,45 @@ fn main() -> Result<(), Report> {
     Ok(())
 }
 
-// const SHADERS_TO_COMPILE: &'static [&'static str] = &[
-//     "common/shadow.rmiss",
-//     "rt_prepass/viewport.rgen",
-//     "rt_prepass/primary.rchit",
-//     "rt_prepass/primary.rmiss",
-//     "rt_prepass/diffuse.rchit",
-//     "rt_prepass/diffuse.rmiss",
-//     "ray_probe/primary.rchit",
-//     "ray_probe/probes.rgen",
-//     "ray_probe/primary.rmiss",
-//     "combine/combine.vert",
-//     "combine/combine.frag",
-//     "gauss_filter/gauss_filter.vert",
-//     "gauss_filter/gauss_filter.frag",
-//     "atrous/atrous.vert",
-//     "atrous/atrous0h.frag",
-//     "atrous/atrous1h.frag",
-//     "atrous/atrous2h.frag",
-//     "atrous/atrous0v.frag",
-//     "atrous/atrous1v.frag",
-//     "atrous/atrous2v.frag",
-//     "pose/pose.comp",
-// ];
-
-
 fn all_shaders() -> Result<Vec<PathBuf>, Report> {
-    let mut result = Vec::new();
-    find_shaders(&Path::new(env!("CARGO_MANIFEST_DIR"))
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("src")
         .join("renderer")
-        .join("pass"), &mut result)?;
+        .join("pass");
+
+    let force_before = root.join("common").metadata()?.modified()?;
+
+    let mut result = Vec::new();
+    find_shaders(&root, force_before, &mut result)?;
 
     Ok(result)
 }
 
-fn find_shaders(root: &Path, paths: &mut Vec<PathBuf>) -> Result<(), Report> {
+fn find_shaders(
+    root: &Path,
+    force_before: SystemTime,
+    paths: &mut Vec<PathBuf>,
+) -> Result<SystemTime, Report> {
+    const SHADER_EXTENSIONS: [&'static str; 7] =
+        ["vert", "frag", "comp", "rgen", "rmiss", "rchit", "rahit"];
 
-    const SHADER_EXTENSIONS: [&'static str; 7] = ["vert", "frag", "comp", "rgen", "rmiss", "rchit", "rahit"];
+    let mut force_before_next = force_before;
+
+    for e in read_dir(&root)? {
+        let e = e?;
+        let ft = e.file_type()?;
+        let p = e.path();
+
+        if ft.is_dir() {
+            force_before_next = std::cmp::max(
+                force_before_next,
+                find_shaders(&p, force_before, paths)?,
+            );
+        } else if ft.is_file() {
+            force_before_next =
+                std::cmp::max(force_before_next, p.metadata()?.modified()?);
+        }
+    }
 
     for e in read_dir(&root)? {
         let e = e?;
@@ -129,13 +126,28 @@ fn find_shaders(root: &Path, paths: &mut Vec<PathBuf>) -> Result<(), Report> {
         if ft.is_file() {
             if let Some(ext) = p.extension() {
                 if SHADER_EXTENSIONS.iter().any(|e| **e == *ext) {
-                    paths.push(p);
+                    let target = shader_target(&p);
+
+                    if target.exists() {
+                        let target_modified = target.metadata()?.modified()?;
+                        if target_modified < force_before_next {
+                            paths.push(p);
+                        }
+                    } else {
+                        paths.push(p);
+                    }
                 }
             }
-        } else if ft.is_dir() {
-            find_shaders(&p, paths)?;
         }
     }
 
-    Ok(())
+    Ok(force_before_next)
+}
+
+fn shader_target(path: &Path) -> PathBuf {
+    if let Some(ext) = path.extension() {
+        path.with_extension(format!("{}.spv", ext.to_str().unwrap()))
+    } else {
+        path.with_extension("spv")
+    }
 }
