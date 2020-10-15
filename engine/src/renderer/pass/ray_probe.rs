@@ -35,12 +35,12 @@ impl Config {
     pub const fn new() -> Self {
         Config {
             probes_extent: Extent3d {
-                width: 33,
-                height: 33,
-                depth: 33,
+                width: 32,
+                height: 32,
+                depth: 32,
             },
-            probes_dimensions: [32.0; 3],
-            probes_offset: [-16.0; 3],
+            probes_dimensions: [32.0, 24.0, 24.0],
+            probes_offset: [-16.0, -12.0, -12.0],
         }
     }
 }
@@ -199,7 +199,8 @@ impl RayProbe {
                         binding: 4,
                         ty: DescriptorType::StorageBuffer,
                         count: 1024,
-                        stages: ShaderStageFlags::CLOSEST_HIT,
+                        stages: ShaderStageFlags::RAYGEN
+                            | ShaderStageFlags::CLOSEST_HIT,
                         flags: DescriptorBindingFlags::PARTIALLY_BOUND,
                     },
                     // New probes data
@@ -290,7 +291,7 @@ impl RayProbe {
                         closest_hit: Some(3),
                     },
                 ],
-                max_recursion_depth: 10,
+                max_recursion_depth: 2,
                 layout: pipeline_layout.clone(),
             })?;
 
@@ -944,10 +945,10 @@ impl<'a> Pass<'a> for RayProbe {
             dirlight,
             skylight,
             plights: pointlights.len() as u32,
-            // frame: frame as u32,
-            frame: 0,
-            shadow_rays: 1,
-            diffuse_rays: 1,
+            frame: frame as u32,
+            // frame: 0,
+            shadow_rays: 8,
+            diffuse_rays: 16,
             probes_dimensions: config.probes_dimensions.into(),
             probes_offset: config.probes_offset.into(),
             probes_extent: [
@@ -1008,7 +1009,7 @@ impl<'a> Pass<'a> for RayProbe {
         );
 
         // Trace probes.
-        // encoder.trace_rays(&self.probes_binding_table, config.probes_extent);
+        encoder.trace_rays(&self.probes_binding_table, config.probes_extent);
 
         // Trace viewport.
         encoder

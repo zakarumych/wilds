@@ -56,6 +56,23 @@ void init_sherical_harmonics(out SphericalHarmonicsRgb sh)
     sh.coeff[8] = vec3(0.);
 }
 
+vec3 interpolate(vec3 a, vec3 b) {
+    return a * 0.01 + b * 0.99;
+}
+
+void interpolate_sherical_harmonics(SphericalHarmonicsRgb old, inout SphericalHarmonicsRgb sh)
+{
+    sh.coeff[0] = interpolate(sh.coeff[0], old.coeff[0]);
+    sh.coeff[1] = interpolate(sh.coeff[1], old.coeff[1]);
+    sh.coeff[2] = interpolate(sh.coeff[2], old.coeff[2]);
+    sh.coeff[3] = interpolate(sh.coeff[3], old.coeff[3]);
+    sh.coeff[4] = interpolate(sh.coeff[4], old.coeff[4]);
+    sh.coeff[5] = interpolate(sh.coeff[5], old.coeff[5]);
+    sh.coeff[6] = interpolate(sh.coeff[6], old.coeff[6]);
+    sh.coeff[7] = interpolate(sh.coeff[7], old.coeff[7]);
+    sh.coeff[8] = interpolate(sh.coeff[8], old.coeff[8]);
+}
+
 
 void add_sample_to_sherical_harmonics(vec3 d, vec3 value, inout SphericalHarmonicsRgb sh)
 {
@@ -103,17 +120,17 @@ vec3 evaluete_sherical_harmonics(vec3 norm, in SphericalHarmonicsRgb sh) {
     };
 
     mat4 Mr = {
-        vec4(M[0].r, M[1].r, M[2].r, M[3].r),
-        vec4(M[4].r, M[5].r, M[6].r, M[7].r),
-        vec4(M[8].r, M[9].r, M[10].r, M[11].r),
-        vec4(M[12].r, M[13].r, M[14].r, M[15].r)
+        { M[0].r, M[1].r, M[2].r, M[3].r },
+        { M[4].r, M[5].r, M[6].r, M[7].r },
+        { M[8].r, M[9].r, M[10].r, M[11].r },
+        { M[12].r, M[13].r, M[14].r, M[15].r }
     };
 
     mat4 Mg = {
-        vec4(M[0].g, M[1].g, M[2].g, M[3].g),
-        vec4(M[4].g, M[5].g, M[6].g, M[7].g),
-        vec4(M[8].g, M[9].g, M[10].g, M[11].g),
-        vec4(M[12].g, M[13].g, M[14].g, M[15].g)
+        { M[0].g, M[1].g, M[2].g, M[3].g },
+        { M[4].g, M[5].g, M[6].g, M[7].g },
+        { M[8].g, M[9].g, M[10].g, M[11].g },
+        { M[12].g, M[13].g, M[14].g, M[15].g }
     };
 
     mat4 Mb = {
@@ -124,8 +141,8 @@ vec3 evaluete_sherical_harmonics(vec3 norm, in SphericalHarmonicsRgb sh) {
     };
 
     return vec3(
-        dot(vec4(norm, 1), Mr * vec4(norm, 1)),
-        dot(vec4(norm, 1), Mg * vec4(norm, 1)),
-        dot(vec4(norm, 1), Mb * vec4(norm, 1))
+        max(0, dot(vec4(norm, 1), Mr * vec4(norm, 1))),
+        max(0, dot(vec4(norm, 1), Mg * vec4(norm, 1))),
+        max(0, dot(vec4(norm, 1), Mb * vec4(norm, 1)))
     );
 }

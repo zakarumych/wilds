@@ -72,7 +72,7 @@ fn main() -> Result<(), Report> {
 
         engine.world.spawn((
             DirectionalLight {
-                direction: na::Vector3::new(-30.0, -30.0, -30.0),
+                direction: na::Vector3::new(-30.0, -25.0, -5.0),
                 radiance: sunlight.into(),
             },
             SkyLight {
@@ -82,7 +82,7 @@ fn main() -> Result<(), Report> {
 
         engine.add_system(move |ctx: SystemContext<'_>| {
             let elapsed = ctx.clocks.step - ctx.clocks.start;
-            let d = elapsed.as_secs_f32() / 20.0;
+            let d = elapsed.as_secs_f32() / 10.0;
             let mut query = ctx.world.query::<&mut DirectionalLight>();
 
             for (_, dirlight) in query.iter() {

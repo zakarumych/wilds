@@ -2358,9 +2358,6 @@ impl Device {
         let group_align =
             u64::from(self.inner.properties.rt.shader_group_base_alignment - 1);
 
-        let group_align_usize =
-            usize::try_from(group_align).map_err(|_| OutOfMemory)?;
-
         let group_count_usize = info.raygen.is_some() as usize
             + info.miss.len()
             + info.hit.len()
@@ -2369,12 +2366,14 @@ impl Device {
         let group_count =
             u32::try_from(group_count_usize).map_err(|_| OutOfMemory)?;
 
-        let group_size_aligned =
-            align_up(group_size, group_align).ok_or(OutOfMemory)?;
+        let group_stride =
+            align_up(group_align, group_size).ok_or(OutOfMemory)?;
 
-        let total_size = (group_size_aligned
-            .checked_mul(u64::from(group_count)))
-        .ok_or(OutOfMemory)?;
+        let group_stride_usize =
+            usize::try_from(group_stride).map_err(|_| OutOfMemory)?;
+
+        let total_size = (group_stride.checked_mul(u64::from(group_count)))
+            .ok_or(OutOfMemory)?;
 
         let total_size_usize = usize::try_from(total_size)
             .unwrap_or_else(|_| out_of_host_memory());
@@ -2391,7 +2390,7 @@ impl Device {
             info.raygen.iter().copied(),
             &mut write_offset,
             group_size,
-            group_align_usize,
+            group_stride_usize,
         );
 
         let miss_handlers = copy_group_handlers(
@@ -2400,7 +2399,7 @@ impl Device {
             info.miss.iter().copied(),
             &mut write_offset,
             group_size,
-            group_align_usize,
+            group_stride_usize,
         );
 
         let hit_handlers = copy_group_handlers(
@@ -2409,7 +2408,7 @@ impl Device {
             info.hit.iter().copied(),
             &mut write_offset,
             group_size,
-            group_align_usize,
+            group_stride_usize,
         );
 
         let callable_handlers = copy_group_handlers(
@@ -2418,7 +2417,7 @@ impl Device {
             info.callable.iter().copied(),
             &mut write_offset,
             group_size,
-            group_align_usize,
+            group_stride_usize,
         );
 
         let buffer = self.create_buffer_static(
@@ -2436,28 +2435,28 @@ impl Device {
                 buffer: buffer.clone(),
                 offset: range.start,
                 size: range.end - range.start,
-                stride: group_size,
+                stride: group_stride,
             }),
 
             miss: miss_handlers.map(|range| StridedBufferRegion {
                 buffer: buffer.clone(),
                 offset: range.start,
                 size: range.end - range.start,
-                stride: group_size,
+                stride: group_stride,
             }),
 
             hit: hit_handlers.map(|range| StridedBufferRegion {
                 buffer: buffer.clone(),
                 offset: range.start,
                 size: range.end - range.start,
-                stride: group_size,
+                stride: group_stride,
             }),
 
             callable: callable_handlers.map(|range| StridedBufferRegion {
                 buffer: buffer.clone(),
                 offset: range.start,
                 size: range.end - range.start,
-                stride: group_size,
+                stride: group_stride,
             }),
         })
     }
@@ -2558,10 +2557,8 @@ fn copy_group_handlers(
     group_indices: impl IntoIterator<Item = u32>,
     write_offset: &mut usize,
     group_size: u64,
-    group_align: usize,
+    group_stride: usize,
 ) -> Option<Range<u64>> {
-    *write_offset = align_up(group_align, *write_offset)?;
-
     let result_start = u64::try_from(*write_offset).ok()?;
     let group_size_usize = usize::try_from(group_size).ok()?;
 
@@ -2579,7 +2576,7 @@ fn copy_group_handlers(
         let output = &mut write[write_range];
 
         output.copy_from_slice(handler);
-        *write_offset = align_up(group_align, write_end)?;
+        *write_offset = write_offset.checked_add(group_stride)?;
     }
 
     let result_end = u64::try_from(*write_offset).ok()?;
