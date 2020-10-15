@@ -153,14 +153,6 @@ impl RayProbe {
                         stages: ShaderStageFlags::CLOSEST_HIT,
                         flags: DescriptorBindingFlags::PARTIALLY_BOUND | DescriptorBindingFlags::UPDATE_UNUSED_WHILE_PENDING,
                     },
-                    // Output image
-                    DescriptorSetLayoutBinding {
-                        binding: 6,
-                        ty: DescriptorType::StorageImage,
-                        count: 1,
-                        stages: ShaderStageFlags::RAYGEN,
-                        flags: DescriptorBindingFlags::empty(),
-                    },
                 ],
             })?;
 
@@ -204,7 +196,7 @@ impl RayProbe {
                     },
                     // Probes data
                     DescriptorSetLayoutBinding {
-                        binding: 3,
+                        binding: 4,
                         ty: DescriptorType::StorageBuffer,
                         count: 1024,
                         stages: ShaderStageFlags::CLOSEST_HIT,
@@ -212,11 +204,19 @@ impl RayProbe {
                     },
                     // New probes data
                     DescriptorSetLayoutBinding {
-                        binding: 4,
+                        binding: 5,
                         ty: DescriptorType::StorageBuffer,
                         count: 1024,
                         stages: ShaderStageFlags::RAYGEN,
                         flags: DescriptorBindingFlags::PARTIALLY_BOUND,
+                    },
+                    // Output image
+                    DescriptorSetLayoutBinding {
+                        binding: 6,
+                        ty: DescriptorType::StorageImage,
+                        count: 1,
+                        stages: ShaderStageFlags::RAYGEN,
+                        flags: DescriptorBindingFlags::empty(),
                     },
                 ],
             },
@@ -712,7 +712,6 @@ impl<'a> Pass<'a> for RayProbe {
                         .normal_factor
                         .into_inner(),
                     anim: anim as u32,
-                    _pad: [0.0; 3],
                 });
             } else {
                 tracing::error!("Missing BLAS for mesh @ {:?}", entity);
@@ -951,9 +950,15 @@ impl<'a> Pass<'a> for RayProbe {
             diffuse_rays: 1,
             probes_dimensions: config.probes_dimensions.into(),
             probes_offset: config.probes_offset.into(),
+            probes_extent: [
+                config.probes_extent.width,
+                config.probes_extent.height,
+                config.probes_extent.depth,
+            ],
             _pad0: 0.0,
             _pad1: 0.0,
             _pad2: 0.0,
+            _pad3: 0.0,
         };
 
         tracing::trace!("Update Globals");
@@ -988,9 +993,6 @@ impl<'a> Pass<'a> for RayProbe {
             PipelineStageFlags::RAY_TRACING_SHADER,
         );
 
-        // Trace probes.
-        encoder.trace_rays(&self.probes_binding_table, config.probes_extent);
-
         let images = [ImageLayoutTransition::initialize_whole(
             &output_image.info().image,
             Layout::General,
@@ -1005,22 +1007,25 @@ impl<'a> Pass<'a> for RayProbe {
             &images,
         );
 
+        // Trace probes.
+        // encoder.trace_rays(&self.probes_binding_table, config.probes_extent);
+
         // Trace viewport.
         encoder
             .trace_rays(&self.viewport_binding_table, input.extent.into_3d());
 
-        // Sync storage image with presentation.
-        let images = [ImageLayoutTransition::transition_whole(
-            &output_image.info().image,
-            Layout::General..Layout::TransferSrcOptimal,
-        )
-        .into()];
+        // // Sync storage image with presentation.
+        // let images = [ImageLayoutTransition::transition_whole(
+        //     &output_image.info().image,
+        //     Layout::General..Layout::TransferSrcOptimal,
+        // )
+        // .into()];
 
-        encoder.image_barriers(
-            PipelineStageFlags::RAY_TRACING_SHADER,
-            PipelineStageFlags::BOTTOM_OF_PIPE,
-            &images,
-        );
+        // encoder.image_barriers(
+        //     PipelineStageFlags::RAY_TRACING_SHADER,
+        //     PipelineStageFlags::BOTTOM_OF_PIPE,
+        //     &images,
+        // );
 
         let cbuf = encoder.finish();
 
@@ -1075,6 +1080,8 @@ struct Globals {
     _pad1: f32,
     probes_offset: [f32; 3],
     _pad2: f32,
+    probes_extent: [u32; 3],
+    _pad3: f32,
 }
 
 unsafe impl Zeroable for Globals {}
@@ -1090,7 +1097,6 @@ struct ShaderInstance {
     normal_sampler: u32,
     normal_factor: f32,
     anim: u32,
-    _pad: [f32; 3],
 }
 
 unsafe impl Zeroable for ShaderInstance {}
@@ -1113,7 +1119,7 @@ const fn globals_size() -> u64 {
 }
 
 fn globals_offset(frame: u32) -> u64 {
-    u64::from(frame) * align_up(255, globals_size()).unwrap()
+    u64::from(frame) * align_up(255u8, globals_size()).unwrap()
 }
 
 fn globals_end(frame: u32) -> u64 {
@@ -1125,8 +1131,8 @@ const fn instances_size() -> u64 {
 }
 
 fn instances_offset(frame: u32) -> u64 {
-    align_up(255, globals_end(1)).unwrap()
-        + u64::from(frame) * align_up(255, instances_size()).unwrap()
+    align_up(255u8, globals_end(1)).unwrap()
+        + u64::from(frame) * align_up(255u8, instances_size()).unwrap()
 }
 
 fn instances_end(frame: u32) -> u64 {
@@ -1138,8 +1144,8 @@ const fn pointlight_size() -> u64 {
 }
 
 fn pointlight_offset(frame: u32) -> u64 {
-    align_up(255, instances_end(1)).unwrap()
-        + u64::from(frame) * align_up(255, pointlight_size()).unwrap()
+    align_up(255u8, instances_end(1)).unwrap()
+        + u64::from(frame) * align_up(255u8, pointlight_size()).unwrap()
 }
 
 fn pointlight_end(frame: u32) -> u64 {
@@ -1152,8 +1158,8 @@ const fn acc_instances_size() -> u64 {
 }
 
 fn acc_instances_offset(frame: u32) -> u64 {
-    align_up(255, pointlight_end(1)).unwrap()
-        + u64::from(frame) * align_up(255, acc_instances_size()).unwrap()
+    align_up(255u8, pointlight_end(1)).unwrap()
+        + u64::from(frame) * align_up(255u8, acc_instances_size()).unwrap()
 }
 
 fn acc_instances_end(frame: u32) -> u64 {
@@ -1175,7 +1181,7 @@ const fn probes_size(extent: &Extent3d) -> u64 {
 }
 
 fn probes_offset(frame: u32, extent: &Extent3d) -> u64 {
-    u64::from(frame) * align_up(255, probes_size(extent)).unwrap()
+    u64::from(frame) * align_up(255u8, probes_size(extent)).unwrap()
 }
 
 fn probes_end(frame: u32, extent: &Extent3d) -> u64 {

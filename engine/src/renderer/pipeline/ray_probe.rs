@@ -123,8 +123,7 @@ impl Pipeline for RayProbePipeline {
         ];
 
         encoder.image_barriers(
-            PipelineStageFlags::RAY_TRACING_SHADER
-                | PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            PipelineStageFlags::RAY_TRACING_SHADER,
             PipelineStageFlags::TRANSFER
                 | PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
             &images,
@@ -137,6 +136,18 @@ impl Pipeline for RayProbePipeline {
             Layout::TransferDstOptimal,
             std::slice::from_ref(&blit),
             Filter::Nearest,
+        );
+
+        let images = [ImageLayoutTransition::transition_whole(
+            &target,
+            Layout::TransferDstOptimal..Layout::Present,
+        )
+        .into()];
+
+        encoder.image_barriers(
+            PipelineStageFlags::TRANSFER,
+            PipelineStageFlags::TOP_OF_PIPE,
+            &images,
         );
 
         let fence = &self.fences[(self.frame % 2) as usize];
