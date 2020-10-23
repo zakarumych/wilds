@@ -4,6 +4,8 @@ version = "0.1.0"
 authors = ["Zakarum <zakarumych@ya.ru>"]
 edition = "2018"
 publish = false
+license = "MIT OR Apache-2.0"
+readme = "../README.md"
 
 [dependencies]
 hecs = "0.2"
