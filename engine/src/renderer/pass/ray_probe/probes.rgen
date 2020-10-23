@@ -3,33 +3,32 @@
 #extension GL_GOOGLE_include_directive : enable
 #extension GL_EXT_scalar_block_layout : enable
 
-#include "../common/sh.glsl"
 #include "descriptors.glsl"
 #include "../common/rand.glsl"
+#include "probes.glsl"
 
 layout(location = 0) rayPayloadEXT PrimaryHitPayload prd;
 
-layout(binding = 5, set = 1) buffer NewProbes {
-    Probe newprobes[];
-};
+layout(binding = 0, set = 0) uniform accelerationStructureEXT tlas;
+layout(binding = 5, set = 1, rgba32f) uniform restrict writeonly image2D new_probes;
 
 void main()
 {
-    const uvec4 co = uvec4(gl_LaunchIDEXT, globals.frame * globals.diffuse_rays);
-    const uint index = gl_LaunchIDEXT.x + gl_LaunchIDEXT.y * gl_LaunchSizeEXT.x + gl_LaunchIDEXT.z * gl_LaunchSizeEXT.x * gl_LaunchSizeEXT.y;
-    const vec3 origin = globals.probes_offset + globals.probes_dimensions * vec3(gl_LaunchIDEXT) / (vec3(gl_LaunchSizeEXT) - min(gl_LaunchIDEXT, uvec3(1, 1, 1)));
+    const uvec4 co = uvec4(gl_LaunchIDEXT.xy, globals.frame, 0);
+    const uint probe_index = gl_LaunchIDEXT.x;
+    const vec3 probe_cell_size = probe_cell_size();
 
-    init_sherical_harmonics(newprobes[index].spherical_harmonics);
+    const uvec3 probe = uvec3(
+        probe_index % globals.probes_extent.x,
+        (probe_index / globals.probes_extent.x) % globals.probes_extent.y,
+        (probe_index / globals.probes_extent.x / globals.probes_extent.y) % globals.probes_extent.z
+    );
 
-    for (uint i = 0; i < globals.diffuse_rays; ++i)
-    {
-        vec3 dir = rand_sphere(nice_rand(co + uvec4(0, 0, 0, i)));
-        prd.result = vec3(0);
-        prd.cozw = uvec2(0, i);
-        traceRayEXT(tlas, 0, 0xff, 0, 0, 0, origin, 0.0, dir, 1000.0, 0);
+    const vec3 origin = probe_cell_size * probe + globals.probes_offset;
+    vec3 dir = rand_sphere(nice_rand(co));
+    prd.result = vec3(0);
+    prd.shadow_rays = 1;
+    traceRayEXT(tlas, 0, 0xff, 0, 0, 0, origin, 0.0, dir, 1000.0, 0);
 
-        add_sample_to_sherical_harmonics(dir, prd.result, newprobes[index].spherical_harmonics);
-    }
-
-    interpolate_sherical_harmonics(probes[index].spherical_harmonics, newprobes[index].spherical_harmonics);
+    imageStore(new_probes, ivec2(gl_LaunchIDEXT.xy), vec4(prd.result, 1.));
 }

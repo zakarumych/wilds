@@ -11,7 +11,7 @@ edition = "2018"
 
 [dependencies]
 # Assets
-goods = { version = "0.5", features = ["fs", "tokio-spawn", "data-url", "trace"], path = "../../goods" }
+goods = { version = "0.6", features = ["fs", "tokio-spawn", "data-url", "trace"] }
 gltf = "0.15"
 
 # Physics

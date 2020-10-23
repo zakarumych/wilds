@@ -182,6 +182,12 @@ pub struct Extent2d {
     pub height: ImageSize,
 }
 
+impl Extent2d {
+    pub fn aspect_ratio(&self) -> f32 {
+        self.width as f32 / self.height as f32
+    }
+}
+
 impl PartialOrd for Extent2d {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         let width = Ord::cmp(&self.width, &other.width);

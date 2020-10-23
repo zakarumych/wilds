@@ -3,17 +3,19 @@
 #extension GL_GOOGLE_include_directive : enable
 #extension GL_EXT_scalar_block_layout : enable
 
-#include "../common/sh.glsl"
 #include "descriptors.glsl"
+
+layout(binding = 0, set = 0) uniform accelerationStructureEXT tlas;
 #include "../common/viewport.glsl"
 
 layout(location = 0) rayPayloadEXT PrimaryHitPayload prd;
 
-layout(binding = 6, set = 1, rgba8) uniform image2D result;
+
+layout(binding = 6, set = 1, rgba8) uniform restrict writeonly image2D result;
 
 void main() {
     prd.result = vec3(0);
-    prd.cozw = uvec2(0, 0);
+    prd.shadow_rays = globals.shadow_rays;
     traceViewportPixelRay();
 
     vec3 output_color = prd.result / (vec3(1, 1, 1) + prd.result);

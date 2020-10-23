@@ -19,6 +19,7 @@ vec3 wave(vec3 v) {
     return vec3(wave(v.x), wave(v.y), wave(v.z));
 }
 
+
 vec4 wave(vec4 v) {
     return vec4(wave(v.x), wave(v.y), wave(v.z), wave(v.w));
 }
