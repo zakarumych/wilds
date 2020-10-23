@@ -3,7 +3,7 @@
 void traceViewportPixelRay()
 {
     const uint shadow_ray_flags = gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsSkipClosestHitShaderEXT;
-    const uvec3 co = uvec3(gl_LaunchIDEXT.xy, globals.frame * globals.diffuse_rays);
+    const uvec3 co = uvec3(gl_LaunchIDEXT.xy, globals.frame);
     const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy);
     const vec2 inUV = pixelCenter/vec2(gl_LaunchSizeEXT.xy);
     vec2 d = inUV * 2.0 - 1.0;

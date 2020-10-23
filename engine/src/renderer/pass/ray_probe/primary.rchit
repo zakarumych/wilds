@@ -3,28 +3,26 @@
 #extension GL_GOOGLE_include_directive : enable
 #extension GL_EXT_scalar_block_layout : enable
 
-#include "../common/sh.glsl"
 #include "descriptors.glsl"
 #include "../common/rand.glsl"
 #include "../common/rayhit.glsl"
+#include "probes.glsl"
 
 layout(location = 0) rayPayloadInEXT PrimaryHitPayload prd;
 layout(location = 1) rayPayloadEXT uint unshadows;
 
 hitAttributeEXT vec2 attribs;
 
-const uint shadow_ray_flags = gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsSkipClosestHitShaderEXT;
+layout(binding = 0, set = 0) uniform accelerationStructureEXT tlas;
 
-vec3 probe_cell_size() {
-    return globals.probes_dimensions / vec3(globals.probes_extent - uvec3(1, 1, 1));
-}
+const uint shadow_ray_flags = gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsSkipClosestHitShaderEXT;
 
 void query_probe(ivec3 probe, vec3 origin, vec3 normal, inout vec3 result, inout float total_weight)
 {
     if (probe.x < 0 || probe.y < 0 || probe.z < 0 || probe.x >= globals.probes_extent.x || probe.y >= globals.probes_extent.y || probe.z >= globals.probes_extent.z)
         return;
 
-    const uint probe_index = probe.x + probe.y * globals.probes_extent.x + probe.z * globals.probes_extent.x * globals.probes_extent.y;
+    // const uint probe_index = probe.x + probe.y * globals.probes_extent.x + probe.z * globals.probes_extent.x * globals.probes_extent.y;
     const vec3 probe_cell_size = probe_cell_size();
 
     vec3 probe_location = probe_cell_size * probe + globals.probes_offset;
@@ -36,17 +34,20 @@ void query_probe(ivec3 probe, vec3 origin, vec3 normal, inout vec3 result, inout
     vec3 probe_dir = normalize(toprobe);
     float probe_dist = dot(toprobe, toprobe);
 
-    // weight *= (dot(normal, probe_dir) + 1) * .5;
+    weight *= dot(normal, probe_dir) + 1;
+    // weight *= .01;
 
-    if (dot(normal, probe_dir) > 0.01)
+    // if (dot(normal, probe_dir) > 0.01)
     {
-        // unshadows = 0;
-        // traceRayEXT(tlas, shadow_ray_flags, 0xff, 0, 0, 1, origin + normal / 100, 0, probe_dir, probe_dist, 1);
-        // if (unshadows > 0)
+        unshadows = 0;
+        traceRayEXT(tlas, shadow_ray_flags, 0xff, 0, 0, 1, origin, 0, probe_dir, .1, 1);
+        if (unshadows == 0)
         {
-            total_weight += weight;
-            result += evaluete_sherical_harmonics(normal, probes[probe_index].spherical_harmonics) * weight;
+            weight *= .1;
         }
+        vec3 p = get_cube_probe_3(normal, probe);
+        total_weight += weight;
+        result += p * weight * 6;
     }
 }
 
@@ -79,15 +80,15 @@ vec3 query_diffuse_from_probes(vec3 origin, vec3 normal)
     float weight = 0.000001;
     query_probes(origin, normal, result, weight);
 
-    return result / weight / globals.diffuse_rays;
+    return result / weight;
 }
 
 void main()
 {
-    const uvec4 co = uvec4(gl_LaunchIDEXT, globals.frame * globals.diffuse_rays) + uvec4(0, 0, prd.cozw);
+    const uvec4 co = uvec4(gl_LaunchIDEXT, globals.frame);
     const vec3 back = gl_WorldRayDirectionEXT * 0.001;
 
-    uint shadow_rays = globals.shadow_rays;
+    uint shadow_rays = prd.shadow_rays;
 
     const vec3 barycentrics = vec3(1.0f - attribs.x - attribs.y, attribs.x, attribs.y);
     uvec3 indices = instance_triangle_indices();

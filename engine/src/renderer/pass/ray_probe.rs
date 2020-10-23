@@ -17,11 +17,7 @@ use {
     hecs::World,
     illume::*,
     nalgebra as na,
-    std::{
-        collections::HashMap,
-        convert::TryFrom as _,
-        mem::{align_of, size_of},
-    },
+    std::{collections::HashMap, convert::TryFrom as _, mem::size_of},
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -29,6 +25,8 @@ pub struct Config {
     pub probes_extent: Extent3d,
     pub probes_dimensions: [f32; 3],
     pub probes_offset: [f32; 3],
+    pub diffuse_rays: u32,
+    pub shadow_rays: u32,
 }
 
 impl Config {
@@ -39,8 +37,10 @@ impl Config {
                 height: 32,
                 depth: 32,
             },
-            probes_dimensions: [32.0, 24.0, 24.0],
-            probes_offset: [-16.0, -12.0, -12.0],
+            probes_dimensions: [35.0, 35.0, 35.0],
+            probes_offset: [-17.5, -17.5, -17.5],
+            diffuse_rays: 256,
+            shadow_rays: 8,
         }
     }
 }
@@ -60,13 +60,7 @@ pub struct Input<'a> {
 
 pub struct Output {
     pub tlas: AccelerationStructure,
-    pub probes: Buffer,
     pub output_image: Image,
-}
-
-#[repr(C)]
-struct ProbeData {
-    sh: [f32; 4 * 9],
 }
 
 const MAX_INSTANCE_COUNT: u16 = 1024 * 32;
@@ -75,14 +69,17 @@ const MAX_INSTANCE_COUNT: u16 = 1024 * 32;
 pub struct RayProbe {
     pipeline_layout: PipelineLayout,
     pipeline: RayTracingPipeline,
+    compile: ComputePipeline,
     probes_binding_table: ShaderBindingTable,
     viewport_binding_table: ShaderBindingTable,
 
     tlas: AccelerationStructure,
     scratch: Buffer,
     globals_and_instances: Buffer,
-    probes_buffer: Option<Buffer>,
-    probes_bound: [bool; 2],
+    probes_data: Option<ImageView>,
+    probes_data_bound: [bool; 2],
+    probes_compiled: Option<ImageView>,
+    probes_compiled_bound: [bool; 2],
 
     output_image: Option<ImageView>,
     output_bound: [bool; 2],
@@ -119,7 +116,8 @@ impl RayProbe {
                         ty: DescriptorType::StorageBuffer,
                         count: 1,
                         stages: ShaderStageFlags::RAYGEN
-                            | ShaderStageFlags::CLOSEST_HIT,
+                            | ShaderStageFlags::CLOSEST_HIT
+                            | ShaderStageFlags::COMPUTE,
                         flags: DescriptorBindingFlags::empty(),
                     },
                     // Indices
@@ -167,7 +165,8 @@ impl RayProbe {
                         count: 1,
                         stages: ShaderStageFlags::RAYGEN
                             | ShaderStageFlags::CLOSEST_HIT
-                            | ShaderStageFlags::MISS,
+                            | ShaderStageFlags::MISS
+                            | ShaderStageFlags::COMPUTE,
                         flags: DescriptorBindingFlags::empty(),
                     },
                     // Scene
@@ -197,19 +196,21 @@ impl RayProbe {
                     // Probes data
                     DescriptorSetLayoutBinding {
                         binding: 4,
-                        ty: DescriptorType::StorageBuffer,
-                        count: 1024,
+                        ty: DescriptorType::StorageImage,
+                        count: 1,
                         stages: ShaderStageFlags::RAYGEN
-                            | ShaderStageFlags::CLOSEST_HIT,
-                        flags: DescriptorBindingFlags::PARTIALLY_BOUND,
+                            | ShaderStageFlags::CLOSEST_HIT
+                            | ShaderStageFlags::COMPUTE,
+                        flags: DescriptorBindingFlags::empty(),
                     },
                     // New probes data
                     DescriptorSetLayoutBinding {
                         binding: 5,
-                        ty: DescriptorType::StorageBuffer,
-                        count: 1024,
-                        stages: ShaderStageFlags::RAYGEN,
-                        flags: DescriptorBindingFlags::PARTIALLY_BOUND,
+                        ty: DescriptorType::StorageImage,
+                        count: 1,
+                        stages: ShaderStageFlags::RAYGEN
+                            | ShaderStageFlags::COMPUTE,
+                        flags: DescriptorBindingFlags::empty(),
                     },
                     // Output image
                     DescriptorSetLayoutBinding {
@@ -272,6 +273,15 @@ impl RayProbe {
             )?,
         );
 
+        let compile = ComputeShader::with_main(
+            ctx.create_shader_module(
+                Spirv::new(
+                    include_bytes!("ray_probe/compile.comp.spv").to_vec(),
+                )
+                .into(),
+            )?,
+        );
+
         let pipeline =
             ctx.create_ray_tracing_pipeline(RayTracingPipelineInfo {
                 shaders: vec![
@@ -318,6 +328,11 @@ impl RayProbe {
             )?;
 
         tracing::trace!("RT pipeline created");
+
+        let compile = ctx.create_compute_pipeline(ComputePipelineInfo {
+            shader: compile,
+            layout: pipeline_layout.clone(),
+        })?;
 
         // Creating TLAS.
         let tlas =
@@ -452,13 +467,16 @@ impl RayProbe {
         Ok(RayProbe {
             pipeline_layout,
             pipeline,
+            compile,
             probes_binding_table,
             viewport_binding_table,
             tlas,
             scratch,
             globals_and_instances,
-            probes_buffer: None,
-            probes_bound: [false; 2],
+            probes_data: None,
+            probes_data_bound: [false; 2],
+            probes_compiled: None,
+            probes_compiled_bound: [false; 2],
             output_image: None,
             output_bound: [false; 2],
             set,
@@ -510,7 +528,6 @@ impl<'a> Pass<'a> for RayProbe {
         let mut instances = BVec::new_in(bump);
         let mut acc_instances = BVec::new_in(bump);
         let mut anim_vertices_descriptors = BVec::new_in(bump);
-        let storage_buffers = BumpaloCellList::new();
         let storage_images = BumpaloCellList::new();
         let bind_descriptor_sets;
 
@@ -730,63 +747,110 @@ impl<'a> Pass<'a> for RayProbe {
             });
         }
 
-        tracing::trace!("Update probes buffer");
+        tracing::trace!("Update probes data image");
 
-        let probes_buffer = match &mut self.probes_buffer {
-            Some(probes_buffer)
-                if probes_buffer.info().size
-                    == probes_buffer_size(&config.probes_extent) =>
+        let probes_data = match &mut self.probes_data {
+            Some(probes_data)
+                if probes_data.info().image.info().extent
+                    == probes_data_image_size(&config) =>
             {
-                probes_buffer.clone()
+                probes_data.clone()
             }
 
             slot => {
-                self.probes_bound = [false; 2];
+                self.probes_data_bound = [false; 2];
 
-                let buffer = ctx.create_buffer(BufferInfo {
-                    align: probes_buffer_align(),
-                    size: probes_buffer_size(&config.probes_extent),
-                    usage: BufferUsage::STORAGE,
+                let image = ctx.create_image(ImageInfo {
+                    extent: probes_data_image_size(&config),
+                    format: Format::RGBA32Sfloat,
+                    levels: 1,
+                    layers: 1,
+                    samples: Samples1,
+                    usage: ImageUsage::STORAGE,
                     memory: MemoryUsageFlags::empty(),
                 })?;
 
-                *slot = Some(buffer.clone());
-                buffer
+                let view = ctx.create_image_view(ImageViewInfo::new(image))?;
+
+                *slot = Some(view.clone());
+                view
             }
         };
 
-        if !self.probes_bound[findex as usize] {
-            writes.push(WriteDescriptorSet {
-                set: &self.per_frame_sets[findex as usize],
-                binding: 4,
-                element: 0,
-                descriptors: Descriptors::StorageBuffer(std::slice::from_ref(
-                    storage_buffers.push_in(
-                        (
-                            probes_buffer.clone(),
-                            probes_offset(findex, &config.probes_extent),
-                            probes_size(&config.probes_extent),
-                        ),
-                        bump,
-                    ),
-                )),
-            });
+        let new_probes_compiled_image;
+        let new_probes_compiled_image_barrier;
+
+        let probes_compiled = match &mut self.probes_compiled {
+            Some(probes_compiled)
+                if probes_compiled.info().image.info().extent
+                    == probes_compiled_image_size(&config) =>
+            {
+                probes_compiled.clone()
+            }
+
+            slot => {
+                self.probes_compiled_bound = [false; 2];
+
+                let image = ctx.create_image(ImageInfo {
+                    extent: probes_compiled_image_size(&config),
+                    format: Format::RGBA32Sfloat,
+                    levels: 1,
+                    layers: 1,
+                    samples: Samples1,
+                    usage: ImageUsage::STORAGE,
+                    memory: MemoryUsageFlags::empty(),
+                })?;
+
+                new_probes_compiled_image = image.clone();
+
+                new_probes_compiled_image_barrier =
+                    [ImageLayoutTransition::initialize_whole(
+                        &new_probes_compiled_image,
+                        Layout::General,
+                    )
+                    .into()];
+
+                // Sync probes data write and read.
+                encoder.image_barriers(
+                    PipelineStageFlags::BOTTOM_OF_PIPE,
+                    PipelineStageFlags::RAY_TRACING_SHADER,
+                    &new_probes_compiled_image_barrier,
+                );
+
+                let view = ctx.create_image_view(ImageViewInfo::new(image))?;
+
+                *slot = Some(view.clone());
+
+                view
+            }
+        };
+
+        if !self.probes_data_bound[findex as usize] {
+            self.probes_data_bound[findex as usize] = true;
             writes.push(WriteDescriptorSet {
                 set: &self.per_frame_sets[findex as usize],
                 binding: 5,
                 element: 0,
-                descriptors: Descriptors::StorageBuffer(std::slice::from_ref(
-                    storage_buffers.push_in(
-                        (
-                            probes_buffer.clone(),
-                            probes_offset(1 - findex, &config.probes_extent),
-                            probes_size(&config.probes_extent),
-                        ),
+                descriptors: Descriptors::StorageImage(std::slice::from_ref(
+                    storage_images
+                        .push_in((probes_data.clone(), Layout::General), bump),
+                )),
+            });
+        }
+
+        if !self.probes_compiled_bound[findex as usize] {
+            self.probes_compiled_bound[findex as usize] = true;
+            writes.push(WriteDescriptorSet {
+                set: &self.per_frame_sets[findex as usize],
+                binding: 4,
+                element: 0,
+                descriptors: Descriptors::StorageImage(std::slice::from_ref(
+                    storage_images.push_in(
+                        (probes_compiled.clone(), Layout::General),
                         bump,
                     ),
                 )),
             });
-            self.probes_bound[findex as usize] = true;
         }
 
         tracing::trace!("Update output image");
@@ -845,13 +909,21 @@ impl<'a> Pass<'a> for RayProbe {
 
         ensure!(u32::try_from(instances.len()).is_ok(), "Too many instances");
 
-        tracing::trace!("Build TLAS");
+        tracing::trace!("Update Globals");
 
-        // Sync BLAS and TLAS builds.
-        encoder.pipeline_barrier(
-            PipelineStageFlags::ACCELERATION_STRUCTURE_BUILD,
-            PipelineStageFlags::ACCELERATION_STRUCTURE_BUILD,
-        );
+        ctx.write_memory(
+            &self.globals_and_instances,
+            acc_instances_offset(findex),
+            &acc_instances,
+        )?;
+
+        ctx.write_memory(
+            &self.globals_and_instances,
+            instances_offset(findex),
+            &instances,
+        )?;
+
+        tracing::trace!("Build TLAS");
 
         let infos = bump.alloc([AccelerationStructureBuildGeometryInfo {
             src: None,
@@ -873,19 +945,11 @@ impl<'a> Pass<'a> for RayProbe {
 
         tracing::trace!("Update Globals");
 
-        ctx.write_memory(
-            &self.globals_and_instances,
-            acc_instances_offset(findex),
-            &acc_instances,
-        )?;
-
-        tracing::trace!("Update Globals");
-
-        ctx.write_memory(
-            &self.globals_and_instances,
-            instances_offset(findex),
-            &instances,
-        )?;
+        // Sync BLAS and TLAS builds.
+        encoder.pipeline_barrier(
+            PipelineStageFlags::ACCELERATION_STRUCTURE_BUILD,
+            PipelineStageFlags::ACCELERATION_STRUCTURE_BUILD,
+        );
 
         let mut pointlights: BVec<ShaderPointLight> =
             BVec::with_capacity_in(32, bump);
@@ -901,8 +965,6 @@ impl<'a> Pass<'a> for RayProbe {
                 })
                 .take(32),
         );
-
-        tracing::trace!("Update Globals");
 
         ctx.write_memory(
             &self.globals_and_instances,
@@ -946,9 +1008,8 @@ impl<'a> Pass<'a> for RayProbe {
             skylight,
             plights: pointlights.len() as u32,
             frame: frame as u32,
-            // frame: 0,
-            shadow_rays: 8,
-            diffuse_rays: 16,
+            shadow_rays: config.shadow_rays,
+            diffuse_rays: config.diffuse_rays,
             probes_dimensions: config.probes_dimensions.into(),
             probes_offset: config.probes_offset.into(),
             probes_extent: [
@@ -970,10 +1031,6 @@ impl<'a> Pass<'a> for RayProbe {
             std::slice::from_ref(&globals),
         )?;
 
-        tracing::trace!("Trace rays");
-
-        encoder.bind_ray_tracing_pipeline(&self.pipeline);
-
         bind_descriptor_sets = [
             self.set.clone(),
             self.per_frame_sets[findex as usize].clone(),
@@ -986,47 +1043,74 @@ impl<'a> Pass<'a> for RayProbe {
             &[],
         );
 
-        // Sync TLAS build with ray-tracing shader where it will be used.
-        // Sync previous probes buffer access with probes query.
-        encoder.pipeline_barrier(
-            PipelineStageFlags::ACCELERATION_STRUCTURE_BUILD
-                | PipelineStageFlags::RAY_TRACING_SHADER, // FIXME: Compure barrier.
-            PipelineStageFlags::RAY_TRACING_SHADER,
+        encoder.bind_compute_descriptor_sets(
+            &self.pipeline_layout,
+            0,
+            &bind_descriptor_sets,
+            &[],
         );
 
-        let images = [ImageLayoutTransition::initialize_whole(
-            &output_image.info().image,
-            Layout::General,
-        )
-        .into()];
+        encoder.bind_ray_tracing_pipeline(&self.pipeline);
+        encoder.bind_compute_pipeline(&self.compile);
 
-        // Sync probe query and probe reads.
-        // Sync output image with previous access.
+        // Sync TLAS build with ray-tracing shader where it will be used.
+        // Sync previous probes data access with new probes query.
+        let images = [
+            ImageLayoutTransition::initialize_whole(
+                &probes_data.info().image,
+                Layout::General,
+            )
+            .into(),
+            ImageLayoutTransition::initialize_whole(
+                &output_image.info().image,
+                Layout::General,
+            )
+            .into(),
+        ];
+
         encoder.image_barriers(
-            PipelineStageFlags::RAY_TRACING_SHADER,
+            PipelineStageFlags::ACCELERATION_STRUCTURE_BUILD
+                | PipelineStageFlags::COMPUTE_SHADER, // FIXME: Compure barrier.
             PipelineStageFlags::RAY_TRACING_SHADER,
             &images,
         );
 
+        let total_probes = config.probes_extent.width
+            * config.probes_extent.height
+            * config.probes_extent.depth;
+
         // Trace probes.
-        encoder.trace_rays(&self.probes_binding_table, config.probes_extent);
+        encoder.trace_rays(
+            &self.probes_binding_table,
+            Extent3d {
+                width: total_probes,
+                height: globals.diffuse_rays,
+                depth: 1,
+            },
+        );
+
+        // Sync probes data write and read.
+        encoder.pipeline_barrier(
+            PipelineStageFlags::RAY_TRACING_SHADER,
+            PipelineStageFlags::COMPUTE_SHADER,
+        );
+
+        // Compile probes
+        encoder.dispatch(
+            config.probes_extent.width,
+            config.probes_extent.height,
+            config.probes_extent.depth,
+        );
+
+        // Sync probes compiled write and read.
+        encoder.pipeline_barrier(
+            PipelineStageFlags::COMPUTE_SHADER,
+            PipelineStageFlags::RAY_TRACING_SHADER,
+        );
 
         // Trace viewport.
         encoder
             .trace_rays(&self.viewport_binding_table, input.extent.into_3d());
-
-        // // Sync storage image with presentation.
-        // let images = [ImageLayoutTransition::transition_whole(
-        //     &output_image.info().image,
-        //     Layout::General..Layout::TransferSrcOptimal,
-        // )
-        // .into()];
-
-        // encoder.image_barriers(
-        //     PipelineStageFlags::RAY_TRACING_SHADER,
-        //     PipelineStageFlags::BOTTOM_OF_PIPE,
-        //     &images,
-        // );
 
         let cbuf = encoder.finish();
 
@@ -1036,7 +1120,6 @@ impl<'a> Pass<'a> for RayProbe {
 
         Ok(Output {
             output_image: output_image.info().image.clone(),
-            probes: probes_buffer,
             tlas: self.tlas.clone(),
         })
     }
@@ -1175,24 +1258,18 @@ fn globals_and_instances_size() -> u64 {
     acc_instances_end(1)
 }
 
-const fn probes_size(extent: &Extent3d) -> u64 {
-    let count =
-        extent.width as u64 * extent.height as u64 * extent.depth as u64;
-    size_of::<ProbeData>() as u64 * count
+fn probes_compiled_image_size(config: &Config) -> ImageExtent {
+    ImageExtent::D2 {
+        width: config.probes_extent.width * config.probes_extent.depth,
+        height: config.probes_extent.height * 6,
+    }
 }
 
-fn probes_offset(frame: u32, extent: &Extent3d) -> u64 {
-    u64::from(frame) * align_up(255u8, probes_size(extent)).unwrap()
-}
-
-fn probes_end(frame: u32, extent: &Extent3d) -> u64 {
-    probes_offset(frame, extent) + probes_size(extent)
-}
-
-const fn probes_buffer_align() -> u64 {
-    255
-}
-
-fn probes_buffer_size(extent: &Extent3d) -> u64 {
-    probes_end(1, extent)
+fn probes_data_image_size(config: &Config) -> ImageExtent {
+    ImageExtent::D2 {
+        width: config.probes_extent.width
+            * config.probes_extent.height
+            * config.probes_extent.depth,
+        height: config.diffuse_rays,
+    }
 }

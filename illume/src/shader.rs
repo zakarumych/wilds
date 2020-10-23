@@ -239,7 +239,7 @@ pub enum InvalidShader {
     #[error("Source size is not multiple of 4 bytes")]
     SizeIsNotMultipleOfFour,
 
-    #[error("Wrong spir-v magic. Expected 0x07230203, found {found}")]
+    #[error("Wrong spir-v magic. Expected 0x07230203, found 0x{found:x}")]
     WrongMagic { found: u32 },
 }
 

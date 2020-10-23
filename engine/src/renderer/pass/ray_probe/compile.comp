@@ -1,0 +1,49 @@
+#version 460
+
+#extension GL_GOOGLE_include_directive : enable
+
+#include "descriptors.glsl"
+#include "../common/rand.glsl"
+#include "probes.glsl"
+
+layout(binding = 5, set = 1, rgba32f) uniform restrict image2D new_probes;
+
+void main() {
+    const uvec3 probe = gl_GlobalInvocationID;
+    const uint probe_index = probe.x + globals.probes_extent.x * (probe.y + globals.probes_extent.y * probe.z);
+
+    vec3 faces[6] = {{0,0,0}, {0,0,0}, {0,0,0}, {0,0,0}, {0,0,0}, {0,0,0}};
+
+    for (int i = 0; i < globals.diffuse_rays; ++i) {
+        const uvec4 co = uvec4(gl_GlobalInvocationID.x, i, globals.frame, 0);
+        vec3 dir = rand_sphere(nice_rand(co));
+
+        float faces_blend[6];
+        float total = .0;
+        cube_blend(dir, faces_blend);
+
+        vec3 irradiance = imageLoad(new_probes, ivec2(probe_index, i)).rgb;
+
+        for (int j = 0; j < 6; ++j) {
+            total += faces_blend[j];
+        }
+
+        total = 1. / total;
+
+        for (int j = 0; j < 6; ++j) {
+            faces[j] += irradiance / globals.diffuse_rays * faces_blend[j] * total;
+        }
+    }
+
+    ivec2 uv = ivec2(probe.x + globals.probes_extent.x * probe.z, probe.y * 6);
+    for (int i = 0; i < 6; ++i) {
+        // vec4 old = imageLoad(probes, uv + ivec2(0, i));
+        // vec4 new = vec4(faces[i] / (old.a + 1) + old.rgb * old.a / (old.a + 1), old.a + 1);
+        // imageStore(probes, uv + ivec2(0, i), new);
+
+        
+        vec3 old = imageLoad(probes, uv + ivec2(0, i)).rgb;
+        vec3 new = old * .97 + faces[i] * .03;
+        imageStore(probes, uv + ivec2(0, i), vec4(new, 1.));
+    }
+}

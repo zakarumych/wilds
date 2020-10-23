@@ -57,7 +57,8 @@ void init_sherical_harmonics(out SphericalHarmonicsRgb sh)
 }
 
 vec3 interpolate(vec3 a, vec3 b) {
-    return a * 0.01 + b * 0.99;
+    float f = .01;
+    return (a * f + b * (1 - f));
 }
 
 void interpolate_sherical_harmonics(SphericalHarmonicsRgb old, inout SphericalHarmonicsRgb sh)

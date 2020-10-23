@@ -21,9 +21,9 @@ use {
         engine::{Engine, SystemContext},
         fps_counter::FpsCounter,
         light::{DirectionalLight, PointLight, SkyLight},
-        physics::Physics,
+        physics::{Constants, Physics},
         renderer::{
-            PoseMesh, RenderConstants, Renderable, Renderer, Skin,
+            Extent2d, PoseMesh, RenderConstants, Renderable, Renderer, Skin,
             VertexType as _,
         },
         scene::{Global3, Local3, SceneSystem},
@@ -38,26 +38,29 @@ use {
     },
 };
 
+const WINDOW_EXTENT: Extent2d = Extent2d {
+    width: 1280,
+    height: 720,
+};
+
 fn main() -> Result<(), Report> {
     tracing_subscriber::fmt::init();
     tracing::info!("App started");
 
     Engine::run(|mut engine| async move {
-        engine
-            .resources
-            .insert(wilds::physics::Constants { time_factor: 0.1 });
+        engine.resources.insert(Constants { time_factor: 0.1 });
 
         // engine.add_system(Physics::new());
         engine.add_system(SceneSystem);
 
         let window = engine.build_window(
             WindowBuilder::new().with_inner_size(PhysicalSize {
-                width: 640,
-                height: 480,
+                width: WINDOW_EXTENT.width,
+                height: WINDOW_EXTENT.height,
             }),
         )?;
 
-        let aspect = 640.0 / 480.0;
+        let aspect = WINDOW_EXTENT.aspect_ratio();
 
         let mut bump = Bump::with_capacity(1024 * 1024);
         let mut renderer = Renderer::new(&window)?;
@@ -101,15 +104,15 @@ fn main() -> Result<(), Report> {
             }
         });
 
-        engine.world.spawn((
-            PointLight {
-                radiance: [10.0, 10.0, 10.0],
-            },
-            na::Isometry3 {
-                translation: na::Translation3::new(0.0, 0.0, 0.0),
-                rotation: na::UnitQuaternion::identity(),
-            },
-        ));
+        // engine.world.spawn((
+        //     PointLight {
+        //         radiance: [10.0, 10.0, 10.0],
+        //     },
+        //     na::Isometry3 {
+        //         translation: na::Translation3::new(0.0, 0.0, 0.0),
+        //         rotation: na::UnitQuaternion::identity(),
+        //     },
+        // ));
 
         // engine.add_system(|ctx: wilds::engine::SystemContext<'_>| {
         //     let mut query = ctx
@@ -122,8 +125,9 @@ fn main() -> Result<(), Report> {
         //             (ctx.clocks.step - ctx.clocks.start).as_secs_f32().sin();
         //         iso.translation.y = 5.0
         //             + 3.0
-        //                 * (ctx.clocks.step - ctx.clocks.start) .as_secs_f32()
-        //                   .cos();
+        //                 * (ctx.clocks.step - ctx.clocks.start)
+        //                     .as_secs_f32()
+        //                     .cos();
         //     }
         // });
 
