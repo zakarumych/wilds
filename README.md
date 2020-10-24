@@ -1,6 +1,12 @@
 
 # Wilds
 
+<!-- [![crates](https://img.shields.io/crates/v/wilds.svg?style=for-the-badge&label=wilds)](https://crates.io/crates/wilds) -->
+<!-- [![docs](https://img.shields.io/badge/docs.rs-wilds-66c2a5?style=for-the-badge&labelColor=555555&logoColor=white)](https://docs.rs/wilds) -->
+<!-- [![actions](https://img.shields.io/github/workflow/status/zakarumych/wilds/Rust/master?style=for-the-badge)](https://github.com/zakarumych/wilds/actions?query=workflow%3ARust) -->
+[![MIT/Apache](https://img.shields.io/badge/license-MIT%2FApache-blue.svg?style=for-the-badge)](COPYING)
+![loc](https://img.shields.io/tokei/lines/github/zakarumych/wilds?style=for-the-badge)
+
 ## Goals
 
 Currently this repository serves as playground for my ray-tracing experiments.
