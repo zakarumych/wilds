@@ -7,6 +7,10 @@
 [![MIT/Apache](https://img.shields.io/badge/license-MIT%2FApache-blue.svg?style=for-the-badge)](COPYING)
 ![loc](https://img.shields.io/tokei/lines/github/zakarumych/wilds?style=for-the-badge)
 
+Real-time rendering preview
+
+[![preview](img/preview.gif)](https://twitter.com/i/status/1319639941513662464)
+
 ## Goals
 
 Currently this repository serves as playground for my ray-tracing experiments.
