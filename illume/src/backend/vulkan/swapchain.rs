@@ -6,7 +6,6 @@ use super::{
 use crate::{
     format::Format,
     image::{Image, ImageInfo, ImageUsage, Samples},
-    memory::MemoryUsageFlags,
     out_of_host_memory,
     semaphore::Semaphore,
     surface::{PresentMode, SurfaceError},
@@ -20,26 +19,52 @@ use erupt::{
     vk1_0,
 };
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc, Weak,
+    atomic::{AtomicUsize, Ordering::*},
+    Arc,
 };
 
-define_handle! {
-    pub struct SwapchainImage : SwapchainImageInner {
-        pub info: SwapchainImageInfo,
-        pub owner: WeakDevice,
-        handle: SwapchainKHR,
-        supported_families: Arc<Vec<bool>>,
-        counter: Weak<AtomicUsize>,
-        index: u32,
+#[derive(Clone, Debug)]
+pub struct SwapchainImage {
+    info: SwapchainImageInfo,
+    owner: WeakDevice,
+    handle: SwapchainKHR,
+    supported_families: Arc<[bool]>,
+    counter: Arc<AtomicUsize>,
+    index: u32,
+}
+
+impl SwapchainImage {
+    pub fn info(&self) -> &SwapchainImageInfo {
+        &self.info
+    }
+
+    pub(super) fn supported_families(&self) -> &[bool] {
+        &*self.supported_families
+    }
+
+    pub(super) fn index(&self) -> u32 {
+        self.index
+    }
+
+    pub(super) fn is_owned_by(
+        &self,
+        owner: &impl PartialEq<WeakDevice>,
+    ) -> bool {
+        *owner == self.owner
+    }
+
+    pub(super) fn owner(&self) -> &WeakDevice {
+        &self.owner
+    }
+
+    pub(super) fn handle(&self) -> SwapchainKHR {
+        self.handle
     }
 }
 
 impl Drop for SwapchainImage {
     fn drop(&mut self) {
-        if let Some(counter) = self.inner.counter.upgrade() {
-            counter.fetch_sub(1, Ordering::Release);
-        }
+        self.counter.fetch_sub(1, Release);
     }
 }
 
@@ -89,7 +114,7 @@ pub struct Swapchain {
     free_semaphore: Semaphore,
     device: WeakDevice,
     surface: Surface,
-    supported_families: Arc<Vec<bool>>,
+    supported_families: Arc<[bool]>,
 }
 
 impl Swapchain {
@@ -100,7 +125,7 @@ impl Swapchain {
         let handle = surface.handle();
 
         assert!(
-            device.graphics().instance.enabled.khr_surface,
+            device.graphics().instance.enabled().khr_surface,
             "Should be enabled given that there is a Surface"
         );
 
@@ -145,7 +170,7 @@ impl Swapchain {
             retired: Vec::new(),
             retired_offset: 0,
             device: device.downgrade(),
-            supported_families: Arc::new(supported_families),
+            supported_families: supported_families.into(),
         })
     }
 }
@@ -165,11 +190,11 @@ impl Swapchain {
         let surface = self.surface.handle();
 
         assert!(
-            device.graphics().instance.enabled.khr_surface,
+            device.graphics().instance.enabled().khr_surface,
             "Should be enabled given that there is a Swapchain"
         );
         assert!(
-            device.logical().enabled.khr_swapchain,
+            device.logical().enabled().khr_swapchain,
             "Should be enabled given that there is a Swapchain"
         );
         let instance = &device.graphics().instance;
@@ -257,8 +282,7 @@ impl Swapchain {
 
         let handle = unsafe {
             logical.create_swapchain_khr(
-                &vksw::SwapchainCreateInfoKHR::default()
-                    .into_builder()
+                &vksw::SwapchainCreateInfoKHRBuilder::new()
                     .surface(surface)
                     .min_image_count(
                         3.min(caps.max_image_count).max(caps.min_image_count),
@@ -323,7 +347,7 @@ impl Swapchain {
                 .into_iter()
                 .zip(semaphores)
                 .map(|(i, (a, r))| SwapchainImageAndSemaphores {
-                    image: Image::make(
+                    image: Image::new(
                         ImageInfo {
                             extent: Extent2d::from_erupt(caps.current_extent)
                                 .into(),
@@ -332,7 +356,6 @@ impl Swapchain {
                             layers: 1,
                             samples: Samples::Samples1,
                             usage,
-                            memory: MemoryUsageFlags::empty(),
                         },
                         self.device.clone(),
                         i,
@@ -363,12 +386,12 @@ impl Swapchain {
             .ok_or_else(|| SurfaceError::SurfaceLost)?;
 
         assert!(
-            device.logical().enabled.khr_swapchain,
+            device.logical().enabled().khr_swapchain,
             "Should be enabled given that there is a Swapchain"
         );
 
         if let Some(inner) = self.inner.as_mut() {
-            if inner.counter.load(Ordering::Acquire) >= inner.images.len() {
+            if inner.counter.load(Acquire) >= inner.images.len() {
                 tracing::error!("Acquire would block");
                 return Ok(None);
             }
@@ -381,7 +404,7 @@ impl Swapchain {
                     inner.handle,
                     !0, /* wait indefinitely. This is OK as we never try to
                          * acquire more images than there is in swaphain. */
-                    Some(wait.handle(&device)),
+                    Some(wait.handle()),
                     None,
                     None,
                 )
@@ -391,7 +414,7 @@ impl Swapchain {
 
             let image_and_semaphores = &mut inner.images[index as usize];
 
-            inner.counter.fetch_add(1, Ordering::Acquire);
+            inner.counter.fetch_add(1, Acquire);
 
             std::mem::swap(
                 &mut image_and_semaphores.acquire
@@ -407,18 +430,18 @@ impl Swapchain {
 
             image_and_semaphores.release_index += 1;
 
-            Ok(Some(SwapchainImage::make(
-                SwapchainImageInfo {
+            Ok(Some(SwapchainImage {
+                info: SwapchainImageInfo {
                     image: image_and_semaphores.image.clone(),
                     wait,
                     signal,
                 },
-                self.device.clone(),
-                inner.handle,
-                self.supported_families.clone(),
-                Arc::downgrade(&inner.counter),
+                owner: self.device.clone(),
+                handle: inner.handle,
+                supported_families: self.supported_families.clone(),
+                counter: inner.counter.clone(),
                 index,
-            )))
+            }))
         } else {
             Ok(None)
         }

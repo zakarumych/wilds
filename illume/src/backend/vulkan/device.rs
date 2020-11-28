@@ -2,7 +2,8 @@ use {
     super::{
         access::supported_access,
         convert::{
-            from_erupt, memory_usage_to_tvma, oom_error_from_erupt,
+            buffer_memory_usage_to_gpu_alloc, from_erupt,
+            image_memory_usage_to_gpu_alloc, oom_error_from_erupt,
             ToErupt as _,
         },
         descriptor::DescriptorSizes,
@@ -11,21 +12,26 @@ use {
     },
     crate::{
         accel::{
-            AccelerationStructure, AccelerationStructureInfo,
+            AccelerationStructure, AccelerationStructureBuildFlags,
+            AccelerationStructureBuildSizesInfo,
+            AccelerationStructureGeometryInfo, AccelerationStructureInfo,
             AccelerationStructureLevel,
         },
-        align_up, arith_eq, arith_le, arith_ne, assert_object,
-        buffer::{Buffer, BufferInfo, BufferUsage, StridedBufferRegion},
+        align_up, arith_eq, arith_ne, assert_object,
+        buffer::{
+            Buffer, BufferInfo, BufferUsage, MappableBuffer,
+            StridedBufferRegion,
+        },
         descriptor::{
             CopyDescriptorSet, DescriptorSet, DescriptorSetInfo,
             DescriptorSetLayout, DescriptorSetLayoutFlags,
             DescriptorSetLayoutInfo, Descriptors, WriteDescriptorSet,
         },
-        fence::{Fence, FenceInfo},
+        fence::Fence,
         framebuffer::{Framebuffer, FramebufferInfo},
         host_memory_space_overlow,
         image::{Image, ImageInfo},
-        memory::MemoryUsageFlags,
+        memory::MemoryUsage,
         out_of_host_memory,
         pipeline::{
             ColorBlend, ComputePipeline, ComputePipelineInfo, GraphicsPipeline,
@@ -36,22 +42,27 @@ use {
         },
         render_pass::{RenderPass, RenderPassInfo},
         sampler::{Sampler, SamplerInfo},
-        semaphore::{Semaphore, SemaphoreInfo},
+        semaphore::Semaphore,
         shader::{
             CreateShaderModuleError, InvalidShader, ShaderLanguage,
-            ShaderModule, ShaderModuleInfo,
+            ShaderModule, ShaderModuleInfo, ShaderStage,
         },
         surface::{Surface, SurfaceError},
         swapchain::Swapchain,
         view::{ImageView, ImageViewInfo, ImageViewKind},
-        CreateImageError, DeviceAddress, MappingError, OutOfMemory,
+        CreateImageError, DeviceAddress, IndexType, MapError, OutOfMemory,
     },
     bumpalo::{collections::Vec as BVec, Bump},
     bytemuck::Pod,
     erupt::{
-        extensions::{khr_ray_tracing as vkrt, khr_swapchain as vksw},
+        extensions::{
+            khr_acceleration_structure as vkacc,
+            khr_ray_tracing_pipeline as vkrt, khr_swapchain as vksw,
+        },
         vk1_0, vk1_2, DeviceLoader, ExtendableFrom as _,
     },
+    gpu_alloc::GpuAllocator,
+    gpu_alloc_erupt::EruptMemoryDevice,
     parking_lot::Mutex,
     slab::Slab,
     smallvec::SmallVec,
@@ -65,12 +76,16 @@ use {
     },
 };
 
-impl From<tvma::MappingError> for MappingError {
-    fn from(err: tvma::MappingError) -> Self {
+impl From<gpu_alloc::MapError> for MapError {
+    fn from(err: gpu_alloc::MapError) -> Self {
         match err {
-            tvma::MappingError::OutOfMemory { .. } => OutOfMemory.into(),
-            tvma::MappingError::NonHostVisible => MappingError::NonHostVisible,
-            tvma::MappingError::OutOfBounds => MappingError::OutOfBounds,
+            gpu_alloc::MapError::OutOfDeviceMemory => MapError::OutOfMemory {
+                source: OutOfMemory,
+            },
+            gpu_alloc::MapError::OutOfHostMemory => out_of_host_memory(),
+            gpu_alloc::MapError::NonHostVisible => MapError::NonHostVisible,
+            gpu_alloc::MapError::MapFailed => MapError::MapFailed,
+            gpu_alloc::MapError::AlreadyMapped => MapError::AlreadyMapped,
         }
     }
 }
@@ -80,7 +95,7 @@ pub(crate) struct Inner {
     physical: vk1_0::PhysicalDevice,
     properties: Properties,
     features: Features,
-    allocator: tvma::Allocator,
+    allocator: Mutex<GpuAllocator<vk1_0::DeviceMemory>>,
     version: u32,
     buffers: Mutex<Slab<vk1_0::Buffer>>,
     // buffer_views: Mutex<Slab<vk1_0::BufferView>>,
@@ -96,7 +111,7 @@ pub(crate) struct Inner {
     render_passes: Mutex<Slab<vk1_0::RenderPass>>,
     semaphores: Mutex<Slab<vk1_0::Semaphore>>,
     shaders: Mutex<Slab<vk1_0::ShaderModule>>,
-    acceleration_strucutres: Mutex<Slab<vkrt::AccelerationStructureKHR>>,
+    acceleration_strucutres: Mutex<Slab<vkacc::AccelerationStructureKHR>>,
     samplers: Mutex<Slab<vk1_0::Sampler>>,
     swapchains: Mutex<Slab<vksw::SwapchainKHR>>,
 }
@@ -139,7 +154,25 @@ impl WeakDevice {
     }
 }
 
+impl PartialEq<WeakDevice> for WeakDevice {
+    fn eq(&self, weak: &WeakDevice) -> bool {
+        std::ptr::eq(weak.inner.as_ptr(), self.inner.as_ptr())
+    }
+}
+
 impl PartialEq<WeakDevice> for Device {
+    fn eq(&self, weak: &WeakDevice) -> bool {
+        std::ptr::eq(weak.inner.as_ptr(), &*self.inner)
+    }
+}
+
+impl PartialEq<WeakDevice> for &'_ WeakDevice {
+    fn eq(&self, weak: &WeakDevice) -> bool {
+        std::ptr::eq(weak.inner.as_ptr(), self.inner.as_ptr())
+    }
+}
+
+impl PartialEq<WeakDevice> for &'_ Device {
     fn eq(&self, weak: &WeakDevice) -> bool {
         std::ptr::eq(weak.inner.as_ptr(), &*self.inner)
     }
@@ -182,10 +215,6 @@ impl Device {
 
     // pub(crate) fn features(&self) -> &Features {
     //     &self.inner.features
-    // }
-
-    // pub(crate) fn allocator(&self) -> &tvma::Allocator {
-    //     &self.inner.allocator
     // }
 
     // pub(crate) fn version(&self) -> u32 {
@@ -277,15 +306,10 @@ impl Device {
     ) -> Self {
         Device {
             inner: Arc::new(Inner {
-                allocator: tvma::Allocator::new(
-                    tvma::Config {
-                        dedicated_treshold_low: 4 * 1024 * 1024,
-                        dedicated_treshold_high: 32 * 1024 * 1024,
-                        line_size: 256 * 1024 * 1024,
-                        min_chunk_block: 256,
-                    },
-                    &properties.memory,
-                ),
+                allocator: Mutex::new(GpuAllocator::new(
+                    gpu_alloc::Config::i_am_prototyping(),
+                    memory_device_properties(&logical, &properties, &features),
+                )),
                 logical,
                 physical,
                 version,
@@ -333,14 +357,31 @@ impl Device {
         &self,
         info: BufferInfo,
     ) -> Result<Buffer, OutOfMemory> {
-        if info.usage.contains(BufferUsage::SHADER_DEVICE_ADDRESS) {
+        self.create_buffer_impl(info, None).map(Into::into)
+    }
+
+    /// Creates buffer with uninitialized content.
+    #[tracing::instrument]
+    pub fn create_mappable_buffer(
+        &self,
+        info: BufferInfo,
+        memory_usage: MemoryUsage,
+    ) -> Result<MappableBuffer, OutOfMemory> {
+        self.create_buffer_impl(info, Some(memory_usage))
+    }
+
+    fn create_buffer_impl(
+        &self,
+        info: BufferInfo,
+        memory_usage: Option<MemoryUsage>,
+    ) -> Result<MappableBuffer, OutOfMemory> {
+        if info.usage.contains(BufferUsage::DEVICE_ADDRESS) {
             assert_ne!(self.inner.features.v12.buffer_device_address, 0);
         }
 
         let handle = unsafe {
             self.inner.logical.create_buffer(
-                &vk1_0::BufferCreateInfo::default()
-                    .into_builder()
+                &vk1_0::BufferCreateInfoBuilder::new()
                     .size(info.size)
                     .usage(info.usage.to_erupt())
                     .sharing_mode(vk1_0::SharingMode::EXCLUSIVE),
@@ -360,25 +401,30 @@ impl Device {
         debug_assert!(reqs.alignment.is_power_of_two());
 
         let block = unsafe {
-            self.inner.allocator.alloc(
-                &self.inner.logical,
-                reqs.size,
-                (reqs.alignment - 1) | info.align,
-                reqs.memory_type_bits,
-                memory_usage_to_tvma(info.memory),
-                tvma::Dedicated::Indifferent,
+            self.inner.allocator.lock().alloc(
+                EruptMemoryDevice::wrap(&self.inner.logical),
+                gpu_alloc::Request {
+                    size: reqs.size,
+                    align_mask: (reqs.alignment - 1) | info.align,
+                    memory_types: reqs.memory_type_bits,
+                    usage: buffer_memory_usage_to_gpu_alloc(
+                        info.usage,
+                        memory_usage,
+                    ),
+                },
             )
         }
-        .map_err(|_| {
+        .map_err(|err| {
             unsafe { self.inner.logical.destroy_buffer(Some(handle), None) }
 
+            tracing::error!("{}", err);
             OutOfMemory
         })?;
 
         let result = unsafe {
             self.inner.logical.bind_buffer_memory(
                 handle,
-                block.memory(),
+                *block.memory(),
                 block.offset(),
             )
         }
@@ -388,18 +434,19 @@ impl Device {
             unsafe {
                 self.inner.logical.destroy_buffer(Some(handle), None);
 
-                self.inner.allocator.dealloc(&self.inner.logical, block);
+                self.inner.allocator.lock().dealloc(
+                    EruptMemoryDevice::wrap(&self.inner.logical),
+                    block,
+                );
             }
 
             return Err(oom_error_from_erupt(err));
         }
 
-        let address = if info.usage.contains(BufferUsage::SHADER_DEVICE_ADDRESS)
-        {
+        let address = if info.usage.contains(BufferUsage::DEVICE_ADDRESS) {
             Some(Option::unwrap(from_erupt(unsafe {
                 self.inner.logical.get_buffer_device_address(
-                    &vk1_2::BufferDeviceAddressInfo::default()
-                        .into_builder()
+                    &vk1_2::BufferDeviceAddressInfoBuilder::new()
                         .buffer(handle),
                 )
             })))
@@ -409,18 +456,19 @@ impl Device {
 
         let buffer_index = self.inner.buffers.lock().insert(handle);
 
-        Ok(Buffer::make(
+        Ok(MappableBuffer::new(
             info,
             self.downgrade(),
             handle,
             address,
-            block,
             buffer_index,
+            block,
+            memory_usage.unwrap_or(MemoryUsage::empty()),
         ))
     }
 
     /// Creates static buffer with preinitialized content from `data`.
-    /// Implies `MemoryUsageFlags::Device`.
+    /// Implies `MemoryUsage::Device`.
     ///
     /// # Panics
     ///
@@ -441,35 +489,41 @@ impl Device {
             panic!(
                 "Buffer size {} does not match data size {}",
                 info.size,
-                data.len()
+                size_of_val(data)
             );
         }
 
-        debug_assert!(arith_eq(info.size, data.len()));
-        assert!(info.memory.intersects(
-            MemoryUsageFlags::HOST_ACCESS
-                | MemoryUsageFlags::UPLOAD
-                | MemoryUsageFlags::DOWNLOAD
-        ));
+        debug_assert!(arith_eq(info.size, size_of_val(data)));
 
-        let buffer = self.create_buffer(info)?;
+        let mut buffer =
+            self.create_mappable_buffer(info, MemoryUsage::UPLOAD)?;
 
         unsafe {
-            match buffer.block(self).map(&self.inner.logical, 0, data.len()) {
+            match buffer.memory_block().map(
+                EruptMemoryDevice::wrap(&self.inner.logical),
+                0,
+                size_of_val(data),
+            ) {
                 Ok(ptr) => {
                     std::ptr::copy_nonoverlapping(
                         data.as_ptr() as *const u8,
                         ptr.as_ptr(),
-                        data.len(),
+                        size_of_val(data),
                     );
 
-                    buffer.block(self).unmap(&self.inner.logical);
+                    buffer
+                        .memory_block()
+                        .unmap(EruptMemoryDevice::wrap(&self.inner.logical));
 
-                    Ok(buffer)
+                    Ok(buffer.into())
                 }
-                Err(tvma::MappingError::OutOfMemory { .. }) => Err(OutOfMemory),
-                Err(tvma::MappingError::NonHostVisible)
-                | Err(tvma::MappingError::OutOfBounds) => unreachable!(),
+                Err(gpu_alloc::MapError::OutOfDeviceMemory) => Err(OutOfMemory),
+                Err(gpu_alloc::MapError::OutOfHostMemory) => {
+                    out_of_host_memory()
+                }
+                Err(gpu_alloc::MapError::NonHostVisible)
+                | Err(gpu_alloc::MapError::AlreadyMapped) => unreachable!(),
+                Err(gpu_alloc::MapError::MapFailed) => panic!("Map failed"),
             }
         }
     }
@@ -480,7 +534,7 @@ impl Device {
     pub fn create_fence(&self) -> Result<Fence, OutOfMemory> {
         let fence = unsafe {
             self.inner.logical.create_fence(
-                &vk1_0::FenceCreateInfo::default().into_builder(),
+                &vk1_0::FenceCreateInfoBuilder::new(),
                 None,
                 None,
             )
@@ -490,7 +544,7 @@ impl Device {
 
         let index = self.inner.fences.lock().insert(fence);
 
-        Ok(Fence::make(FenceInfo, self.downgrade(), fence, index))
+        Ok(Fence::new(self.downgrade(), fence, index))
     }
 
     /// Creates framebuffer for specified render pass from views.
@@ -499,36 +553,36 @@ impl Device {
         &self,
         info: FramebufferInfo,
     ) -> Result<Framebuffer, OutOfMemory> {
-        assert!(
-            info.views.iter().all(|view| view.is_owned_by(&*self)),
-            "Wrong owner"
-        );
+        for view in &info.views {
+            assert_owner!(view, self);
+        }
+
+        assert_owner!(info.render_pass, self);
 
         assert!(
-            info.views
-                .iter()
+            info.views.iter()
                 .all(|view| view.info().view_kind == ImageViewKind::D2),
-            "Image views for Framebuffer must all has `view_kind == ImageViewKind::D2`",
+            "All image views for Framebuffer must have `view_kind == ImageViewKind::D2`",
         );
 
         assert!(
-            info.views
-                .iter()
-                .all(|view| { view.info().image.info().extent.into_2d() >= info.extent }),
-            "Image views for Framebuffer must be at least as large as framebuffer extent",
+            info.views.iter()
+                .all(|view| view.info().image.info().extent.into_2d() >= info.extent),
+            "All image views for Framebuffer must be at least as large as framebuffer extent",
         );
+
+        let render_pass = info.render_pass.handle();
 
         let attachments = info
             .views
             .iter()
-            .map(|view| view.handle(&*self))
+            .map(|view| view.handle())
             .collect::<SmallVec<[_; 16]>>();
 
         let framebuffer = unsafe {
             self.inner.logical.create_framebuffer(
-                &vk1_0::FramebufferCreateInfo::default()
-                    .into_builder()
-                    .render_pass(info.render_pass.handle(&*self))
+                &vk1_0::FramebufferCreateInfoBuilder::new()
+                    .render_pass(render_pass)
                     .attachments(&attachments)
                     .width(info.extent.width)
                     .height(info.extent.height)
@@ -542,12 +596,7 @@ impl Device {
 
         let index = self.inner.framebuffers.lock().insert(framebuffer);
 
-        Ok(Framebuffer::make(
-            info,
-            self.downgrade(),
-            framebuffer,
-            index,
-        ))
+        Ok(Framebuffer::new(info, self.downgrade(), framebuffer, index))
     }
 
     /// Creates graphics pipeline.
@@ -556,6 +605,17 @@ impl Device {
         &self,
         info: GraphicsPipelineInfo,
     ) -> Result<GraphicsPipeline, OutOfMemory> {
+        assert_owner!(info.layout, self);
+        assert_owner!(info.render_pass, self);
+        assert_owner!(info.vertex_shader.module(), self);
+        if let Some(fragment_shader) = info
+            .rasterizer
+            .as_ref()
+            .and_then(|r| r.fragment_shader.as_ref())
+        {
+            assert_owner!(fragment_shader.module(), self);
+        }
+
         let bump = Bump::new();
         let vertex_shader_entry: CString;
         let fragment_shader_entry: CString;
@@ -567,8 +627,7 @@ impl Device {
             .iter()
             .enumerate()
             .map(|(i, vb)| {
-                vk1_0::VertexInputBindingDescription::default()
-                    .into_builder()
+                vk1_0::VertexInputBindingDescriptionBuilder::new()
                     .binding(i.try_into().unwrap())
                     .stride(vb.stride)
                     .input_rate(vb.rate.to_erupt())
@@ -579,8 +638,7 @@ impl Device {
             .vertex_attributes
             .iter()
             .map(|attr| {
-                vk1_0::VertexInputAttributeDescription::default()
-                    .into_builder()
+                vk1_0::VertexInputAttributeDescriptionBuilder::new()
                     .location(attr.location)
                     .binding(attr.binding)
                     .offset(attr.offset)
@@ -589,24 +647,21 @@ impl Device {
             .collect::<SmallVec<[_; 16]>>();
 
         let vertex_input_state =
-            vk1_0::PipelineVertexInputStateCreateInfo::default()
-                .into_builder()
+            vk1_0::PipelineVertexInputStateCreateInfoBuilder::new()
                 .vertex_binding_descriptions(&vertex_binding_descriptions)
                 .vertex_attribute_descriptions(&vertex_attribute_descriptions);
 
         vertex_shader_entry = entry_name_to_cstr(info.vertex_shader.entry());
 
         shader_stages.push(
-            vk1_0::PipelineShaderStageCreateInfo::default()
-                .into_builder()
+            vk1_0::PipelineShaderStageCreateInfoBuilder::new()
                 .stage(vk1_0::ShaderStageFlagBits::VERTEX)
-                .module(info.vertex_shader.module().handle(&*self))
+                .module(info.vertex_shader.module().handle())
                 .name(&*vertex_shader_entry),
         );
 
         let input_assembly_state =
-            vk1_0::PipelineInputAssemblyStateCreateInfo::default()
-                .into_builder()
+            vk1_0::PipelineInputAssemblyStateCreateInfoBuilder::new()
                 .topology(info.primitive_topology.to_erupt())
                 .primitive_restart_enable(info.primitive_restart_enable);
 
@@ -625,8 +680,8 @@ impl Device {
         let mut color_blend_state = None;
 
         let with_rasterizer = if let Some(rasterizer) = &info.rasterizer {
-            let mut builder = vk1_0::PipelineViewportStateCreateInfo::default()
-                .into_builder();
+            let mut builder =
+                vk1_0::PipelineViewportStateCreateInfoBuilder::new();
 
             match &rasterizer.viewport {
                 State::Static { value } => {
@@ -656,8 +711,7 @@ impl Device {
             viewport_state = Some(builder);
 
             rasterization_state =
-                vk1_0::PipelineRasterizationStateCreateInfo::default()
-                    .into_builder()
+                vk1_0::PipelineRasterizationStateCreateInfoBuilder::new()
                     .rasterizer_discard_enable(false)
                     .depth_clamp_enable(rasterizer.depth_clamp)
                     .polygon_mode(rasterizer.polygon_mode.to_erupt())
@@ -666,14 +720,12 @@ impl Device {
                     .line_width(1.0);
 
             multisample_state = Some(
-                vk1_0::PipelineMultisampleStateCreateInfo::default()
-                    .into_builder()
+                vk1_0::PipelineMultisampleStateCreateInfoBuilder::new()
                     .rasterization_samples(vk1_0::SampleCountFlagBits::_1),
             );
 
             let mut builder =
-                vk1_0::PipelineDepthStencilStateCreateInfo::default()
-                    .into_builder();
+                vk1_0::PipelineDepthStencilStateCreateInfoBuilder::new();
 
             if let Some(depth_test) = rasterizer.depth_test {
                 builder = builder
@@ -704,8 +756,7 @@ impl Device {
                 builder = builder
                     .stencil_test_enable(true)
                     .front({
-                        let mut builder = vk1_0::StencilOpState::default()
-                            .into_builder()
+                        let mut builder = vk1_0::StencilOpStateBuilder::new()
                             .fail_op(stencil_tests.front.fail.to_erupt())
                             .pass_op(stencil_tests.front.pass.to_erupt())
                             .depth_fail_op(
@@ -741,8 +792,7 @@ impl Device {
                         *builder
                     })
                     .back({
-                        let mut builder = vk1_0::StencilOpState::default()
-                            .into_builder()
+                        let mut builder = vk1_0::StencilOpStateBuilder::new()
                             .fail_op(stencil_tests.back.fail.to_erupt())
                             .pass_op(stencil_tests.back.pass.to_erupt())
                             .depth_fail_op(
@@ -784,17 +834,15 @@ impl Device {
             if let Some(shader) = &rasterizer.fragment_shader {
                 fragment_shader_entry = entry_name_to_cstr(shader.entry());
                 shader_stages.push(
-                    vk1_0::PipelineShaderStageCreateInfo::default()
-                        .into_builder()
+                    vk1_0::PipelineShaderStageCreateInfoBuilder::new()
                         .stage(vk1_0::ShaderStageFlagBits::FRAGMENT)
-                        .module(shader.module().handle(&*self))
+                        .module(shader.module().handle())
                         .name(&*fragment_shader_entry),
                 );
             }
 
             let mut builder =
-                vk1_0::PipelineColorBlendStateCreateInfo::default()
-                    .into_builder();
+                vk1_0::PipelineColorBlendStateCreateInfoBuilder::new();
 
             builder = match rasterizer.color_blend {
                 ColorBlend::Logic { op } => {
@@ -809,8 +857,7 @@ impl Device {
                         bump.alloc_slice_fill_iter(
                             (0..info.render_pass.info().attachments.len()).map(|_| {
                                 if let Some(blending) = blending {
-                                    vk1_0::PipelineColorBlendAttachmentState::default()
-                                        .into_builder()
+                                    vk1_0::PipelineColorBlendAttachmentStateBuilder::new()
                                         .blend_enable(true)
                                         .src_color_blend_factor(
                                             blending.color_src_factor.to_erupt(),
@@ -827,8 +874,7 @@ impl Device {
                                         )
                                         .alpha_blend_op(blending.alpha_op.to_erupt())
                                 } else {
-                                    vk1_0::PipelineColorBlendAttachmentState::default()
-                                        .into_builder()
+                                    vk1_0::PipelineColorBlendAttachmentStateBuilder::new()
                                         .blend_enable(false)
                                 }
                                 .color_write_mask(write_mask.to_erupt())
@@ -864,29 +910,26 @@ impl Device {
             true
         } else {
             rasterization_state =
-                vk1_0::PipelineRasterizationStateCreateInfo::default()
-                    .into_builder()
+                vk1_0::PipelineRasterizationStateCreateInfoBuilder::new()
                     .rasterizer_discard_enable(true);
 
             false
         };
 
-        let mut builder = vk1_0::GraphicsPipelineCreateInfo::default()
-            .into_builder()
+        let mut builder = vk1_0::GraphicsPipelineCreateInfoBuilder::new()
             .vertex_input_state(&vertex_input_state)
             .input_assembly_state(&input_assembly_state)
             .rasterization_state(&rasterization_state)
             .stages(&shader_stages)
-            .layout(info.layout.handle(&*self))
-            .render_pass(info.render_pass.handle(&*self))
+            .layout(info.layout.handle())
+            .render_pass(info.render_pass.handle())
             .subpass(info.subpass);
 
         let pipeline_dynamic_state;
 
         if !dynamic_states.is_empty() {
             pipeline_dynamic_state =
-                vk1_0::PipelineDynamicStateCreateInfo::default()
-                    .into_builder()
+                vk1_0::PipelineDynamicStateCreateInfoBuilder::new()
                     .dynamic_states(&dynamic_states);
 
             builder = builder.dynamic_state(&pipeline_dynamic_state);
@@ -915,7 +958,7 @@ impl Device {
 
         drop(shader_stages);
 
-        Ok(GraphicsPipeline::make(
+        Ok(GraphicsPipeline::new(
             info,
             self.downgrade(),
             pipeline,
@@ -929,22 +972,23 @@ impl Device {
         &self,
         info: ComputePipelineInfo,
     ) -> Result<ComputePipeline, OutOfMemory> {
+        assert_owner!(info.shader.module(), self);
+        assert_owner!(info.layout, self);
+
         let shader_entry = entry_name_to_cstr(info.shader.entry());
 
         let pipelines = unsafe {
             self.inner.logical.create_compute_pipelines(
                 None,
-                &[vk1_0::ComputePipelineCreateInfo::default()
-                    .into_builder()
+                &[vk1_0::ComputePipelineCreateInfoBuilder::new()
                     .stage(
-                        vk1_0::PipelineShaderStageCreateInfo::default()
-                            .into_builder()
+                        vk1_0::PipelineShaderStageCreateInfoBuilder::new()
                             .stage(vk1_0::ShaderStageFlagBits::COMPUTE)
-                            .module(info.shader.module().handle(self))
+                            .module(info.shader.module().handle())
                             .name(&shader_entry)
                             .build(),
                     )
-                    .layout(info.layout.handle(self))],
+                    .layout(info.layout.handle())],
                 None,
             )
         }
@@ -956,7 +1000,7 @@ impl Device {
         let pipeline = pipelines[0];
         let index = self.inner.pipelines.lock().insert(pipeline);
 
-        Ok(ComputePipeline::make(
+        Ok(ComputePipeline::new(
             info,
             self.downgrade(),
             pipeline,
@@ -972,8 +1016,7 @@ impl Device {
     ) -> Result<Image, CreateImageError> {
         let image = unsafe {
             self.inner.logical.create_image(
-                &vk1_0::ImageCreateInfo::default()
-                    .into_builder()
+                &vk1_0::ImageCreateInfoBuilder::new()
                     .image_type(info.extent.to_erupt())
                     .format(info.format.to_erupt())
                     .extent(info.extent.into_3d().to_erupt())
@@ -1002,17 +1045,20 @@ impl Device {
         let block = unsafe {
             self.inner
                 .allocator
+                .lock()
                 .alloc(
-                    &self.inner.logical,
-                    reqs.size,
-                    reqs.alignment - 1,
-                    reqs.memory_type_bits,
-                    memory_usage_to_tvma(info.memory),
-                    tvma::Dedicated::Indifferent,
+                    EruptMemoryDevice::wrap(&self.inner.logical),
+                    gpu_alloc::Request {
+                        size: reqs.size,
+                        align_mask: reqs.alignment - 1,
+                        memory_types: reqs.memory_type_bits,
+                        usage: image_memory_usage_to_gpu_alloc(info.usage),
+                    },
                 )
-                .map_err(|_| {
+                .map_err(|err| {
                     self.inner.logical.destroy_image(Some(image), None);
 
+                    tracing::error!("{}", err);
                     OutOfMemory
                 })
         }?;
@@ -1020,7 +1066,7 @@ impl Device {
         let result = unsafe {
             self.inner.logical.bind_image_memory(
                 image,
-                block.memory(),
+                *block.memory(),
                 block.offset(),
             )
         }
@@ -1030,7 +1076,7 @@ impl Device {
             Ok(()) => {
                 let index = self.inner.images.lock().insert(image);
 
-                Ok(Image::make(
+                Ok(Image::new(
                     info,
                     self.downgrade(),
                     image,
@@ -1041,7 +1087,10 @@ impl Device {
             Err(err) => {
                 unsafe {
                     self.inner.logical.destroy_image(Some(image), None);
-                    self.inner.allocator.dealloc(&self.inner.logical, block);
+                    self.inner.allocator.lock().dealloc(
+                        EruptMemoryDevice::wrap(&self.inner.logical),
+                        block,
+                    );
                 }
 
                 Err(oom_error_from_erupt(err).into())
@@ -1049,120 +1098,132 @@ impl Device {
         }
     }
 
-    /// Creates static image with preinitialized content from `data`.
-    ///
-    /// # Panics
-    ///
-    /// Function will panic if creating image size does not equal data size.
-    #[tracing::instrument(skip(data))]
-    pub fn create_image_static<T>(
-        &self,
-        info: ImageInfo,
-        data: &[T],
-    ) -> Result<Image, CreateImageError>
-    where
-        T: Pod,
-    {
-        assert!(info.memory.intersects(
-            MemoryUsageFlags::HOST_ACCESS
-                | MemoryUsageFlags::UPLOAD
-                | MemoryUsageFlags::DOWNLOAD
-        ));
+    // /// Creates static image with preinitialized content from `data`.
+    // ///
+    // /// # Panics
+    // ///
+    // /// Function will panic if creating image size does not equal data size.
+    // #[tracing::instrument(skip(data))]
+    // pub fn create_image_static<T>(
+    //     &self,
+    //     info: ImageInfo,
+    //     data: &[T],
+    // ) -> Result<Image, CreateImageError>
+    // where
+    //     T: Pod,
+    // {
+    //     assert!(info.memory.intersects(
+    //         MemoryUsage::HOST_ACCESS
+    //             | MemoryUsage::UPLOAD
+    //             | MemoryUsage::DOWNLOAD
+    //     ));
 
-        let image = unsafe {
-            self.inner.logical.create_image(
-                &vk1_0::ImageCreateInfo::default()
-                    .into_builder()
-                    .image_type(info.extent.to_erupt())
-                    .format(info.format.to_erupt())
-                    .extent(info.extent.into_3d().to_erupt())
-                    .mip_levels(info.levels)
-                    .array_layers(info.layers)
-                    .samples(info.samples.to_erupt())
-                    .tiling(vk1_0::ImageTiling::LINEAR)
-                    .usage(info.usage.to_erupt())
-                    .sharing_mode(vk1_0::SharingMode::EXCLUSIVE)
-                    .initial_layout(vk1_0::ImageLayout::UNDEFINED),
-                None,
-                None,
-            )
-        }
-        .result()
-        .map_err(oom_error_from_erupt)?;
+    //     let image = unsafe {
+    //         self.inner.logical.create_image(
+    //             &vk1_0::ImageCreateInfoBuilder::new()
+    //                 .image_type(info.extent.to_erupt())
+    //                 .format(info.format.to_erupt())
+    //                 .extent(info.extent.into_3d().to_erupt())
+    //                 .mip_levels(info.levels)
+    //                 .array_layers(info.layers)
+    //                 .samples(info.samples.to_erupt())
+    //                 .tiling(vk1_0::ImageTiling::LINEAR)
+    //                 .usage(info.usage.to_erupt())
+    //                 .sharing_mode(vk1_0::SharingMode::EXCLUSIVE)
+    //                 .initial_layout(vk1_0::ImageLayout::UNDEFINED),
+    //             None,
+    //             None,
+    //         )
+    //     }
+    //     .result()
+    //     .map_err(oom_error_from_erupt)?;
 
-        let reqs = unsafe {
-            self.inner
-                .logical
-                .get_image_memory_requirements(image, None)
-        };
+    //     let reqs = unsafe {
+    //         self.inner
+    //             .logical
+    //             .get_image_memory_requirements(image, None)
+    //     };
 
-        debug_assert!(arith_eq(reqs.size, data.len()));
-        debug_assert!(reqs.alignment.is_power_of_two());
+    //     debug_assert!(arith_eq(reqs.size, data.len()));
+    //     debug_assert!(reqs.alignment.is_power_of_two());
 
-        let block = unsafe {
-            self.inner
-                .allocator
-                .alloc(
-                    &self.inner.logical,
-                    reqs.size,
-                    reqs.alignment - 1,
-                    reqs.memory_type_bits,
-                    memory_usage_to_tvma(info.memory),
-                    tvma::Dedicated::Indifferent,
-                )
-                .map_err(|_| {
-                    self.inner.logical.destroy_image(Some(image), None);
+    //     let mut block = unsafe {
+    //         self.inner
+    //             .allocator
+    //             .lock()
+    //             .alloc(
+    //                 EruptMemoryDevice::wrap(&self.inner.logical),
+    //                 gpu_alloc::Request {
+    //                     size: reqs.size,
+    //                     align_mask: reqs.alignment - 1,
+    //                     memory_types: reqs.memory_type_bits,
+    //                     usage: image_memory_usage_to_gpu_alloc(info.usage),
+    //                 },
+    //             )
+    //             .map_err(|err| {
+    //                 self.inner.logical.destroy_image(Some(image), None);
+    //                 tracing::error!("{}", err);
+    //                 OutOfMemory
+    //             })
+    //     }?;
 
-                    OutOfMemory
-                })
-        }?;
+    //     let result = unsafe {
+    //         self.inner.logical.bind_image_memory(
+    //             image,
+    //             *block.memory(),
+    //             block.offset(),
+    //         )
+    //     }
+    //     .result();
 
-        let result = unsafe {
-            self.inner.logical.bind_image_memory(
-                image,
-                block.memory(),
-                block.offset(),
-            )
-        }
-        .result();
+    //     if let Err(err) = result {
+    //         unsafe {
+    //             self.inner.logical.destroy_image(Some(image), None);
+    //             self.inner.allocator.lock().dealloc(
+    //                 EruptMemoryDevice::wrap(&self.inner.logical),
+    //                 block,
+    //             );
+    //         }
+    //         return Err(oom_error_from_erupt(err).into());
+    //     }
 
-        if let Err(err) = result {
-            unsafe {
-                self.inner.logical.destroy_image(Some(image), None);
-                self.inner.allocator.dealloc(&self.inner.logical, block);
-            }
-            return Err(oom_error_from_erupt(err).into());
-        }
+    //     unsafe {
+    //         match block.map(
+    //             EruptMemoryDevice::wrap(&self.inner.logical),
+    //             0,
+    //             size_of_val(data),
+    //         ) {
+    //             Ok(ptr) => {
+    //                 std::ptr::copy_nonoverlapping(
+    //                     data.as_ptr() as *const u8,
+    //                     ptr.as_ptr(),
+    //                     size_of_val(data),
+    //                 );
 
-        unsafe {
-            match block.map(&self.inner.logical, 0, data.len()) {
-                Ok(ptr) => {
-                    std::ptr::copy_nonoverlapping(
-                        data.as_ptr() as *const u8,
-                        ptr.as_ptr(),
-                        data.len(),
-                    );
+    //                 block.unmap(EruptMemoryDevice::wrap(&self.inner.logical));
+    //             }
+    //             Err(gpu_alloc::MapError::OutOfDeviceMemory) => {
+    //                 return Err(OutOfMemory.into())
+    //             }
+    //             Err(gpu_alloc::MapError::OutOfHostMemory) => {
+    //                 out_of_host_memory()
+    //             }
+    //             Err(gpu_alloc::MapError::NonHostVisible)
+    //             | Err(gpu_alloc::MapError::AlreadyMapped) => unreachable!(),
+    //             Err(gpu_alloc::MapError::MapFailed) => panic!("Map failed"),
+    //         }
+    //     }
 
-                    block.unmap(&self.inner.logical);
-                }
-                Err(tvma::MappingError::OutOfMemory { .. }) => {
-                    return Err(OutOfMemory.into());
-                }
-                Err(tvma::MappingError::NonHostVisible)
-                | Err(tvma::MappingError::OutOfBounds) => unreachable!(),
-            }
-        }
+    //     let index = self.inner.images.lock().insert(image);
 
-        let index = self.inner.images.lock().insert(image);
-
-        Ok(Image::make(
-            info,
-            self.downgrade(),
-            image,
-            Some(block),
-            Some(index),
-        ))
-    }
+    //     Ok(Image::new(
+    //         info,
+    //         self.downgrade(),
+    //         image,
+    //         Some(block),
+    //         Some(index),
+    //     ))
+    // }
 
     /// Creates view to an image.
     #[tracing::instrument]
@@ -1170,18 +1231,18 @@ impl Device {
         &self,
         info: ImageViewInfo,
     ) -> Result<ImageView, OutOfMemory> {
+        assert_owner!(info.image, self);
+
         let image = &info.image;
 
         let view = unsafe {
             self.inner.logical.create_image_view(
-                &vk1_0::ImageViewCreateInfo::default()
-                    .into_builder()
-                    .image(image.handle(self))
+                &vk1_0::ImageViewCreateInfoBuilder::new()
+                    .image(image.handle())
                     .format(info.image.info().format.to_erupt())
                     .view_type(info.view_kind.to_erupt())
                     .subresource_range(
-                        vk1_0::ImageSubresourceRange::default()
-                            .into_builder()
+                        vk1_0::ImageSubresourceRangeBuilder::new()
                             .aspect_mask(info.subresource.aspect.to_erupt())
                             .base_mip_level(info.subresource.first_level)
                             .level_count(info.subresource.level_count)
@@ -1198,7 +1259,7 @@ impl Device {
 
         let index = self.inner.image_views.lock().insert(view);
 
-        Ok(ImageView::make(info, self.downgrade(), view, index))
+        Ok(ImageView::new(info, self.downgrade(), view, index))
     }
 
     /// Creates pipeline layout.
@@ -1207,15 +1268,18 @@ impl Device {
         &self,
         info: PipelineLayoutInfo,
     ) -> Result<PipelineLayout, OutOfMemory> {
+        for set in &info.sets {
+            assert_owner!(set, self);
+        }
+
         let pipeline_layout = unsafe {
             self.inner.logical.create_pipeline_layout(
-                &vk1_0::PipelineLayoutCreateInfo::default()
-                    .into_builder()
+                &vk1_0::PipelineLayoutCreateInfoBuilder::new()
                     .set_layouts(
                         &info
                             .sets
                             .iter()
-                            .map(|set| set.handle(self))
+                            .map(|set| set.handle())
                             .collect::<SmallVec<[_; 16]>>(),
                     )
                     .push_constant_ranges(
@@ -1223,8 +1287,7 @@ impl Device {
                             .push_constants
                             .iter()
                             .map(|pc| {
-                                vk1_0::PushConstantRange::default()
-                                    .into_builder()
+                                vk1_0::PushConstantRangeBuilder::new()
                                     .stage_flags(pc.stages.to_erupt())
                                     .offset(pc.offset)
                                     .size(pc.size)
@@ -1240,7 +1303,7 @@ impl Device {
 
         let index = self.inner.pipeline_layouts.lock().insert(pipeline_layout);
 
-        Ok(PipelineLayout::make(
+        Ok(PipelineLayout::new(
             info,
             self.downgrade(),
             pipeline_layout,
@@ -1267,7 +1330,7 @@ impl Device {
                             .iter()
                             .enumerate()
                             .map(|(ci, &c)| -> Result<_, CreateRenderPassError> {
-                                Ok(vk1_0::AttachmentReference::default().into_builder()
+                                Ok(vk1_0::AttachmentReferenceBuilder::new()
                                 .attachment(if c < info.attachments.len() {
                                     Some(c)
                                 } else {
@@ -1290,8 +1353,7 @@ impl Device {
                     let depth_offset = subpass_attachments.len();
                     if let Some(d) = s.depth {
                         subpass_attachments.push(
-                            vk1_0::AttachmentReference::default()
-                                .into_builder()
+                            vk1_0::AttachmentReferenceBuilder::new()
                                 .attachment(
                                     if d < info.attachments.len() {
                                         Some(d)
@@ -1318,8 +1380,7 @@ impl Device {
             .iter()
             .zip(subpasses)
             .map(|(s, (color_offset, depth_offset))| {
-                let builder = vk1_0::SubpassDescription::default()
-                    .into_builder()
+                let builder = vk1_0::SubpassDescriptionBuilder::new()
                     .color_attachments(
                         &subpass_attachments[color_offset..depth_offset],
                     );
@@ -1338,8 +1399,7 @@ impl Device {
             .attachments
             .iter()
             .map(|a| {
-                vk1_0::AttachmentDescription::default()
-                    .into_builder()
+                vk1_0::AttachmentDescriptionBuilder::new()
                     .format(a.format.to_erupt())
                     .load_op(a.load_op.to_erupt())
                     .store_op(a.store_op.to_erupt())
@@ -1353,8 +1413,7 @@ impl Device {
             .dependencies
             .iter()
             .map(|d| {
-                vk1_0::SubpassDependency::default()
-                    .into_builder()
+                vk1_0::SubpassDependencyBuilder::new()
                     .src_subpass(
                         d.src
                             .map(|s| {
@@ -1378,11 +1437,11 @@ impl Device {
             })
             .collect::<SmallVec<[_; 16]>>();
 
-        let render_passs_create_info = vk1_0::RenderPassCreateInfo::default()
-            .into_builder()
-            .attachments(&attachments)
-            .subpasses(&subpasses)
-            .dependencies(&dependencies);
+        let render_passs_create_info =
+            vk1_0::RenderPassCreateInfoBuilder::new()
+                .attachments(&attachments)
+                .subpasses(&subpasses)
+                .dependencies(&dependencies);
 
         let render_pass = unsafe {
             self.inner.logical.create_render_pass(
@@ -1396,7 +1455,7 @@ impl Device {
 
         let index = self.inner.render_passes.lock().insert(render_pass);
 
-        Ok(RenderPass::make(info, self.downgrade(), render_pass, index))
+        Ok(RenderPass::new(info, self.downgrade(), render_pass, index))
     }
 
     pub(crate) fn create_semaphore_raw(
@@ -1404,7 +1463,7 @@ impl Device {
     ) -> Result<(vk1_0::Semaphore, usize), vk1_0::Result> {
         let semaphore = unsafe {
             self.inner.logical.create_semaphore(
-                &vk1_0::SemaphoreCreateInfo::default().into_builder(),
+                &vk1_0::SemaphoreCreateInfoBuilder::new(),
                 None,
                 None,
             )
@@ -1422,12 +1481,7 @@ impl Device {
         let (handle, index) =
             self.create_semaphore_raw().map_err(oom_error_from_erupt)?;
 
-        Ok(Semaphore::make(
-            SemaphoreInfo,
-            self.downgrade(),
-            handle,
-            index,
-        ))
+        Ok(Semaphore::new(self.downgrade(), handle, index))
     }
 
     #[tracing::instrument]
@@ -1508,9 +1562,7 @@ impl Device {
             // FIXME: It is still required to validate SPIR-V.
             // Othewise adheres to valid usage described in spec.
             self.inner.logical.create_shader_module(
-                &vk1_0::ShaderModuleCreateInfo::default()
-                    .into_builder()
-                    .code(code_slice),
+                &vk1_0::ShaderModuleCreateInfoBuilder::new().code(code_slice),
                 None,
                 None,
             )
@@ -1522,7 +1574,7 @@ impl Device {
 
         let index = self.inner.shaders.lock().insert(module);
 
-        Ok(ShaderModule::make(info, self.downgrade(), module, index))
+        Ok(ShaderModule::new(info, self.downgrade(), module, index))
     }
 
     /// Creates swapchain for specified surface.
@@ -1540,9 +1592,13 @@ impl Device {
     /// Fences are moved into unsignalled state.
     #[tracing::instrument]
     pub fn reset_fences(&self, fences: &[&Fence]) {
+        for fence in fences {
+            assert_owner!(fence, self);
+        }
+
         let fences = fences
             .iter()
-            .map(|fence| fence.handle(self))
+            .map(|fence| fence.handle())
             .collect::<SmallVec<[_; 16]>>();
 
         unsafe { self.inner.logical.reset_fences(&fences) }
@@ -1551,7 +1607,8 @@ impl Device {
 
     #[tracing::instrument]
     pub fn is_fence_signalled(&self, fence: &Fence) -> bool {
-        let fence = fence.handle(self);
+        assert_owner!(fence, self);
+        let fence = fence.handle();
 
         match unsafe { self.inner.logical.get_fence_status(fence) }.raw {
             vk1_0::Result::SUCCESS => true,
@@ -1569,9 +1626,13 @@ impl Device {
     /// See `Queue::submit`.
     #[tracing::instrument]
     pub fn wait_fences(&self, fences: &[&Fence], all: bool) {
+        for fence in fences {
+            assert_owner!(fence, self);
+        }
+
         let fences = fences
             .iter()
-            .map(|fence| fence.handle(self))
+            .map(|fence| fence.handle())
             .collect::<SmallVec<[_; 16]>>();
 
         unsafe { self.inner.logical.wait_for_fences(&fences, all, !0) }
@@ -1592,6 +1653,103 @@ impl Device {
         }
     }
 
+    #[tracing::instrument]
+    pub fn get_acceleration_structure_build_sizes(
+        &self,
+        level: AccelerationStructureLevel,
+        flags: AccelerationStructureBuildFlags,
+        geometry: &[AccelerationStructureGeometryInfo],
+    ) -> AccelerationStructureBuildSizesInfo {
+        assert!(
+            self.inner.logical.enabled().khr_acceleration_structure,
+            "`AccelerationStructure` feature is not enabled"
+        );
+
+        assert!(u32::try_from(geometry.len()).is_ok(), "Too many geometry");
+
+        let geometries = geometry.iter().map(|info|
+            match *info {
+                AccelerationStructureGeometryInfo::Triangles { index_type, max_vertex_count, vertex_format, allows_transforms, .. } => {
+                    assert_eq!(level, AccelerationStructureLevel::Bottom, "Triangles must be built into bottom level acceleration structure");
+
+                    vkacc::AccelerationStructureGeometryKHRBuilder::new()
+                        .geometry_type(vkacc::GeometryTypeKHR::TRIANGLES_KHR)
+                        .geometry(vkacc::AccelerationStructureGeometryDataKHR {
+                            triangles: vkacc::AccelerationStructureGeometryTrianglesDataKHRBuilder::new()
+                                .vertex_format(vertex_format.to_erupt())
+                                .max_vertex(max_vertex_count)
+                                .index_type(match index_type {
+                                    Some(IndexType::U16) => vk1_0::IndexType::UINT16,
+                                    Some(IndexType::U32) => vk1_0::IndexType::UINT32,
+                                    None => vk1_0::IndexType::NONE_KHR,
+                                })
+                                .transform_data(vkacc::DeviceOrHostAddressConstKHR { device_address: allows_transforms as u64 })
+                                .build()
+                        })
+                }
+                AccelerationStructureGeometryInfo::AABBs {..} => {
+                    assert_eq!(level, AccelerationStructureLevel::Bottom, "AABBs must be built into bottom level acceleration structure");
+
+                    vkacc::AccelerationStructureGeometryKHRBuilder::new()
+                    .geometry_type(vkacc::GeometryTypeKHR::AABBS_KHR)
+                    .geometry(vkacc::AccelerationStructureGeometryDataKHR {
+                        aabbs: vkacc::AccelerationStructureGeometryAabbsDataKHR::default()
+                    })
+                },
+                AccelerationStructureGeometryInfo::Instances {..} => {
+                    assert_eq!(level, AccelerationStructureLevel::Top, "Instances must be built into bottom level acceleration structure");
+
+                    vkacc::AccelerationStructureGeometryKHRBuilder::new()
+                    .geometry_type(vkacc::GeometryTypeKHR::INSTANCES_KHR)
+                    .geometry(vkacc::AccelerationStructureGeometryDataKHR {
+                        instances: vkacc::AccelerationStructureGeometryInstancesDataKHR::default()
+                    })
+                },
+            }
+        ).collect::<SmallVec<[_; 4]>>();
+
+        let max_primitive_counts = geometry
+            .iter()
+            .map(|info| match *info {
+                AccelerationStructureGeometryInfo::Triangles {
+                    max_primitive_count,
+                    ..
+                } => max_primitive_count,
+                AccelerationStructureGeometryInfo::AABBs {
+                    max_primitive_count,
+                } => max_primitive_count,
+                AccelerationStructureGeometryInfo::Instances {
+                    max_primitive_count,
+                } => max_primitive_count,
+            })
+            .collect::<SmallVec<[_; 4]>>();
+
+        let build_info =
+            vkacc::AccelerationStructureBuildGeometryInfoKHRBuilder::new()
+                ._type(level.to_erupt())
+                .flags(flags.to_erupt())
+                .mode(vkacc::BuildAccelerationStructureModeKHR::BUILD_KHR)
+                .geometries(&geometries);
+
+        let build_sizes = unsafe {
+            self.inner
+                .logical
+                .get_acceleration_structure_build_sizes_khr(
+                    vkacc::AccelerationStructureBuildTypeKHR::DEVICE_KHR,
+                    &build_info,
+                    &max_primitive_counts,
+                    None,
+                )
+        };
+
+        AccelerationStructureBuildSizesInfo {
+            acceleration_structure_size: build_sizes
+                .acceleration_structure_size,
+            update_scratch_size: build_sizes.update_scratch_size,
+            build_scratch_size: build_sizes.build_scratch_size,
+        }
+    }
+
     /// Creates acceleration structure.
     ///
     /// # Panics
@@ -1603,46 +1761,19 @@ impl Device {
         info: AccelerationStructureInfo,
     ) -> Result<AccelerationStructure, OutOfMemory> {
         assert!(
-            self.inner.logical.enabled.khr_ray_tracing,
-            "RayTracing feature is not enabled"
+            self.inner.logical.enabled().khr_acceleration_structure,
+            "`AccelerationStructure` feature is not enabled"
         );
 
-        // assert_ne!(info.geometries.len(), 0);
-
-        assert!(
-            arith_le(
-                info.geometries.len(),
-                self.inner.properties.rt.max_geometry_count
-            ),
-            "Too many gemetries: {}. Limit: {}",
-            info.geometries.len(),
-            self.inner.properties.rt.max_geometry_count
-        );
-
-        let level = info.level;
-
-        let geometries: SmallVec<[_; 16]> = info
-            .geometries
-            .iter()
-            .copied()
-            .inspect(|geometry| match level {
-                AccelerationStructureLevel::Bottom => {
-                    assert!(!geometry.is_instances());
-                }
-                AccelerationStructureLevel::Top => {
-                    assert!(geometry.is_instances());
-                }
-            })
-            .map(|geomery| geomery.to_erupt().into_builder())
-            .collect();
+        assert_owner!(info.region.buffer, self);
 
         let handle = unsafe {
             self.inner.logical.create_acceleration_structure_khr(
-                &vkrt::AccelerationStructureCreateInfoKHR::default()
-                    .into_builder()
+                &vkacc::AccelerationStructureCreateInfoKHRBuilder::new()
                     ._type(info.level.to_erupt())
-                    .flags(info.flags.to_erupt())
-                    .geometry_infos(&geometries),
+                    .offset(info.region.offset)
+                    .size(info.region.size)
+                    .buffer(info.region.buffer.handle()),
                 None,
                 None,
             )
@@ -1656,88 +1787,26 @@ impl Device {
             _ => panic!("Unexpected result {}", result),
         })?;
 
-        let reqs = unsafe {
-            self.inner.logical
-                .get_acceleration_structure_memory_requirements_khr(
-                    &vkrt::AccelerationStructureMemoryRequirementsInfoKHR::default()
-                        .into_builder()
-                        ._type(vkrt::AccelerationStructureMemoryRequirementsTypeKHR::OBJECT_KHR)
-                        .build_type(vkrt::AccelerationStructureBuildTypeKHR(1)) // TODO: Use assocated constant.
-                        .acceleration_structure(handle),
-                    None,
-                )
-        }
-        .memory_requirements;
+        let index = self.inner.acceleration_strucutres.lock().insert(handle);
 
-        tracing::debug!(
-            "Acceleration structure memory requirements {:#?}",
-            reqs
-        );
-
-        let block = unsafe {
-            self.inner.allocator.alloc(
-                &self.inner.logical,
-                reqs.size,
-                reqs.alignment - 1,
-                reqs.memory_type_bits,
-                tvma::UsageFlags::empty(),
-                tvma::Dedicated::Indifferent,
-            )
-        }
-        .map_err(|err| {
-            unsafe {
-                self.inner
-                    .logical
-                    .destroy_acceleration_structure_khr(Some(handle), None);
-            }
-            tracing::error!("{}", err);
-            OutOfMemory
-        })?;
-
-        let result = unsafe {
-            self.inner.logical.bind_acceleration_structure_memory_khr(&[
-                vkrt::BindAccelerationStructureMemoryInfoKHR::default()
-                    .into_builder()
-                    .acceleration_structure(handle)
-                    .memory(block.memory())
-                    .memory_offset(block.offset()),
-            ])
-        }
-        .result();
-
-        match result {
-            Ok(()) => {
-                let index =
-                    self.inner.acceleration_strucutres.lock().insert(handle);
-
-                let address = Option::unwrap(from_erupt(unsafe {
-                    self.inner.logical.get_acceleration_structure_device_address_khr(
-                        &vkrt::AccelerationStructureDeviceAddressInfoKHR::default()
-                            .into_builder()
-                            .acceleration_structure(handle),
+        let address = Option::unwrap(from_erupt(unsafe {
+            self.inner
+                .logical
+                .get_acceleration_structure_device_address_khr(
+                    &vkacc::AccelerationStructureDeviceAddressInfoKHR::default(
                     )
-                }));
+                    .into_builder()
+                    .acceleration_structure(handle),
+                )
+        }));
 
-                Ok(AccelerationStructure::make(
-                    info,
-                    self.downgrade(),
-                    handle,
-                    address,
-                    block,
-                    index,
-                ))
-            }
-            Err(err) => {
-                unsafe {
-                    self.inner
-                        .logical
-                        .destroy_acceleration_structure_khr(Some(handle), None);
-                    self.inner.allocator.dealloc(&self.inner.logical, block);
-                }
-
-                Err(oom_error_from_erupt(err).into())
-            }
-        }
+        Ok(AccelerationStructure::new(
+            info,
+            self.downgrade(),
+            handle,
+            address,
+            index,
+        ))
     }
 
     /// Returns buffers device address.
@@ -1746,15 +1815,13 @@ impl Device {
         &self,
         buffer: &Buffer,
     ) -> Option<DeviceAddress> {
-        if buffer
-            .info()
-            .usage
-            .contains(BufferUsage::SHADER_DEVICE_ADDRESS)
-        {
+        assert_owner!(buffer, self);
+
+        if buffer.info().usage.contains(BufferUsage::DEVICE_ADDRESS) {
             assert_ne!(self.inner.features.v12.buffer_device_address, 0);
 
-            Some(buffer.address(self).expect(
-                "Device address for buffer must be set when `BufferUsage::SHADER_DEVICE_ADDRESS` is specified",
+            Some(buffer.address().expect(
+                "Device address for buffer must be set when `BufferUsage::DEVICE_ADDRESS` is specified",
             ))
         } else {
             None
@@ -1766,47 +1833,8 @@ impl Device {
         &self,
         acceleration_structure: &AccelerationStructure,
     ) -> DeviceAddress {
-        *acceleration_structure.address(self)
-    }
-
-    #[tracing::instrument]
-    pub fn allocate_acceleration_structure_build_scratch(
-        &self,
-        acceleration_structure: &AccelerationStructure,
-        update: bool,
-    ) -> Result<Buffer, OutOfMemory> {
-        assert!(
-            self.inner.logical.enabled.khr_ray_tracing,
-            "RayTracing feature is not enabled"
-        );
-
-        // Collect memory requirements.
-        let size = unsafe {
-            self.inner.logical
-                .get_acceleration_structure_memory_requirements_khr(
-                    &vkrt::AccelerationStructureMemoryRequirementsInfoKHR::default()
-                        .into_builder()
-                        ._type(if update {
-                            vkrt::AccelerationStructureMemoryRequirementsTypeKHR::UPDATE_SCRATCH_KHR
-                        } else {
-                            vkrt::AccelerationStructureMemoryRequirementsTypeKHR::BUILD_SCRATCH_KHR
-                        })
-                        .build_type(vkrt::AccelerationStructureBuildTypeKHR(1)) // TODO: Use assocated constant.
-                        .acceleration_structure(acceleration_structure.handle(self)),
-                    None,
-                )
-        }
-        .memory_requirements
-        .size;
-
-        // Allocate memory.
-        self.create_buffer(BufferInfo {
-            align: 0,
-            size,
-            usage: BufferUsage::RAY_TRACING
-                | BufferUsage::SHADER_DEVICE_ADDRESS,
-            memory: MemoryUsageFlags::empty(),
-        })
+        assert_owner!(acceleration_structure, self);
+        acceleration_structure.address()
     }
 
     #[tracing::instrument]
@@ -1815,9 +1843,15 @@ impl Device {
         info: RayTracingPipelineInfo,
     ) -> Result<RayTracingPipeline, OutOfMemory> {
         assert!(
-            self.inner.logical.enabled.khr_ray_tracing,
-            "RayTracing feature is not enabled"
+            self.inner.logical.enabled().khr_ray_tracing_pipeline,
+            "`RayTracing` feature is not enabled"
         );
+
+        assert_owner!(info.layout, self);
+
+        for shader in &info.shaders {
+            assert_owner!(shader.module(), self);
+        }
 
         let entries: Vec<_> = info
             .shaders
@@ -1831,10 +1865,9 @@ impl Device {
             .shaders
             .iter()
             .map(|shader| {
-                vk1_0::PipelineShaderStageCreateInfo::default()
-                    .into_builder()
+                vk1_0::PipelineShaderStageCreateInfoBuilder::new()
                     .stage(shader.stage().to_erupt())
-                    .module(shader.module.handle(self))
+                    .module(shader.module.handle())
                     .name(entries.next().unwrap())
             })
             .collect();
@@ -1843,29 +1876,50 @@ impl Device {
             .groups
             .iter()
             .map(|group| {
-                let builder = vkrt::RayTracingShaderGroupCreateInfoKHR::default().into_builder();
+                let builder = vkrt::RayTracingShaderGroupCreateInfoKHRBuilder::new();
                 match *group {
-                    RayTracingShaderGroupInfo::Raygen { raygen } => builder
-                        ._type(vkrt::RayTracingShaderGroupTypeKHR::GENERAL_KHR)
-                        .general_shader(raygen)
-                        .any_hit_shader(vkrt::SHADER_UNUSED_KHR)
-                        .closest_hit_shader(vkrt::SHADER_UNUSED_KHR)
-                        .intersection_shader(vkrt::SHADER_UNUSED_KHR),
-                    RayTracingShaderGroupInfo::Miss { miss } => builder
-                        ._type(vkrt::RayTracingShaderGroupTypeKHR::GENERAL_KHR)
-                        .general_shader(miss)
-                        .any_hit_shader(vkrt::SHADER_UNUSED_KHR)
-                        .closest_hit_shader(vkrt::SHADER_UNUSED_KHR)
-                        .intersection_shader(vkrt::SHADER_UNUSED_KHR),
+                    RayTracingShaderGroupInfo::Raygen { raygen } => {
+                        assert_ne!(raygen, vkrt::SHADER_UNUSED_KHR);
+                        assert_eq!(usize::try_from(raygen).ok().and_then(|raygen| info.shaders.get(raygen)).expect("raygen shader index out of bounds").stage(), ShaderStage::Raygen);
+
+                        builder
+                            ._type(vkrt::RayTracingShaderGroupTypeKHR::GENERAL_KHR)
+                            .general_shader(raygen)
+                            .any_hit_shader(vkrt::SHADER_UNUSED_KHR)
+                            .closest_hit_shader(vkrt::SHADER_UNUSED_KHR)
+                            .intersection_shader(vkrt::SHADER_UNUSED_KHR)
+                    }
+                    RayTracingShaderGroupInfo::Miss { miss } => {
+                        assert_ne!(miss, vkrt::SHADER_UNUSED_KHR);
+                        assert_eq!(usize::try_from(miss).ok().and_then(|miss| info.shaders.get(miss)).expect("miss shader index out of bounds").stage(), ShaderStage::Miss);
+
+                        builder
+                            ._type(vkrt::RayTracingShaderGroupTypeKHR::GENERAL_KHR)
+                            .general_shader(miss)
+                            .any_hit_shader(vkrt::SHADER_UNUSED_KHR)
+                            .closest_hit_shader(vkrt::SHADER_UNUSED_KHR)
+                            .intersection_shader(vkrt::SHADER_UNUSED_KHR)
+                    }
                     RayTracingShaderGroupInfo::Triangles {
                         any_hit,
                         closest_hit,
-                    } => builder
-                        ._type(vkrt::RayTracingShaderGroupTypeKHR::TRIANGLES_HIT_GROUP_KHR)
-                        .general_shader(vkrt::SHADER_UNUSED_KHR)
-                        .any_hit_shader(any_hit.unwrap_or(vkrt::SHADER_UNUSED_KHR))
-                        .closest_hit_shader(closest_hit.unwrap_or(vkrt::SHADER_UNUSED_KHR))
-                        .intersection_shader(vkrt::SHADER_UNUSED_KHR),
+                    } => {
+                        if let Some(any_hit) = any_hit {
+                            assert_ne!(any_hit, vkrt::SHADER_UNUSED_KHR);
+                            assert_eq!(usize::try_from(any_hit).ok().and_then(|any_hit| info.shaders.get(any_hit)).expect("any_hit shader index out of bounds").stage(), ShaderStage::AnyHit);
+                        }
+                        if let Some(closest_hit) = closest_hit {
+                            assert_ne!(closest_hit, vkrt::SHADER_UNUSED_KHR);
+                            assert_eq!(usize::try_from(closest_hit).ok().and_then(|closest_hit| info.shaders.get(closest_hit)).expect("closest_hit shader index out of bounds").stage(), ShaderStage::ClosestHit);
+                        }
+
+                        builder
+                            ._type(vkrt::RayTracingShaderGroupTypeKHR::TRIANGLES_HIT_GROUP_KHR)
+                            .general_shader(vkrt::SHADER_UNUSED_KHR)
+                            .any_hit_shader(any_hit.unwrap_or(vkrt::SHADER_UNUSED_KHR))
+                            .closest_hit_shader(closest_hit.unwrap_or(vkrt::SHADER_UNUSED_KHR))
+                            .intersection_shader(vkrt::SHADER_UNUSED_KHR)
+                    }
                 }
             })
             .collect();
@@ -1873,12 +1927,12 @@ impl Device {
         let handles = unsafe {
             self.inner.logical.create_ray_tracing_pipelines_khr(
                 None,
-                &[vkrt::RayTracingPipelineCreateInfoKHR::default()
-                    .into_builder()
+                None,
+                &[vkrt::RayTracingPipelineCreateInfoKHRBuilder::new()
                     .stages(&stages)
                     .groups(&groups)
-                    .max_recursion_depth(info.max_recursion_depth)
-                    .layout(info.layout.handle(self))],
+                    .max_pipeline_ray_recursion_depth(info.max_recursion_depth)
+                    .layout(info.layout.handle())],
                 None,
             )
         }
@@ -1921,7 +1975,7 @@ impl Device {
 
         let index = self.inner.pipelines.lock().insert(handle);
 
-        Ok(RayTracingPipeline::make(
+        Ok(RayTracingPipeline::new(
             info,
             self.downgrade(),
             handle,
@@ -1943,15 +1997,13 @@ impl Device {
 
             unsafe {
                 self.inner.logical.create_descriptor_set_layout(
-                    &vk1_0::DescriptorSetLayoutCreateInfo::default()
-                        .into_builder()
+                    &vk1_0::DescriptorSetLayoutCreateInfoBuilder::new()
                         .bindings(
                             &info
                                 .bindings
                                 .iter()
                                 .map(|binding| {
-                                    vk1_0::DescriptorSetLayoutBinding::default()
-                                        .into_builder()
+                                    vk1_0::DescriptorSetLayoutBindingBuilder::new()
                                         .binding(binding.binding)
                                         .descriptor_count(binding.count)
                                         .descriptor_type(binding.ty.to_erupt())
@@ -1976,8 +2028,7 @@ impl Device {
                     .bindings
                     .iter()
                     .map(|binding| {
-                        vk1_0::DescriptorSetLayoutBinding::default()
-                            .into_builder()
+                        vk1_0::DescriptorSetLayoutBindingBuilder::new()
                             .binding(binding.binding)
                             .descriptor_count(binding.count)
                             .descriptor_type(binding.ty.to_erupt())
@@ -1985,14 +2036,12 @@ impl Device {
                     })
                     .collect::<SmallVec<[_; 16]>>();
                 let mut create_info =
-                    vk1_0::DescriptorSetLayoutCreateInfo::default()
-                        .into_builder()
+                    vk1_0::DescriptorSetLayoutCreateInfoBuilder::new()
                         .bindings(&bindings)
                         .flags(info.flags.to_erupt());
 
                 let mut flags =
-                    vk1_2::DescriptorSetLayoutBindingFlagsCreateInfo::default()
-                        .into_builder()
+                    vk1_2::DescriptorSetLayoutBindingFlagsCreateInfoBuilder::new()
                         .binding_flags(&flags);
 
                 create_info = create_info.extend_from(&mut flags);
@@ -2011,7 +2060,7 @@ impl Device {
 
         let sizes = DescriptorSizes::from_bindings(&info.bindings);
 
-        Ok(DescriptorSetLayout::make(
+        Ok(DescriptorSetLayout::new(
             info,
             self.downgrade(),
             handle,
@@ -2025,7 +2074,7 @@ impl Device {
         &self,
         info: DescriptorSetInfo,
     ) -> Result<DescriptorSet, OutOfMemory> {
-        let layout = &info.layout;
+        assert_owner!(info.layout, self);
         let mut pool_flags = vk1_0::DescriptorPoolCreateFlags::empty();
 
         if info
@@ -2039,10 +2088,9 @@ impl Device {
 
         let pool = unsafe {
             self.inner.logical.create_descriptor_pool(
-                &vk1_0::DescriptorPoolCreateInfo::default()
-                    .into_builder()
+                &vk1_0::DescriptorPoolCreateInfoBuilder::new()
                     .max_sets(1)
-                    .pool_sizes(&layout.sizes(self))
+                    .pool_sizes(&info.layout.sizes())
                     .flags(pool_flags),
                 None,
                 None,
@@ -2053,10 +2101,9 @@ impl Device {
 
         let handles = unsafe {
             self.inner.logical.allocate_descriptor_sets(
-                &vk1_0::DescriptorSetAllocateInfo::default()
-                    .into_builder()
+                &vk1_0::DescriptorSetAllocateInfoBuilder::new()
                     .descriptor_pool(pool)
-                    .set_layouts(&[layout.handle(self)]),
+                    .set_layouts(&[info.layout.handle()]),
             )
         }
         .result()
@@ -2069,7 +2116,7 @@ impl Device {
         // let index = self.inner.descriptor_sets.lock().insert(handle);
         let pool_index = self.inner.descriptor_pools.lock().insert(pool);
 
-        Ok(DescriptorSet::make(
+        Ok(DescriptorSet::new(
             info,
             self.downgrade(),
             handle,
@@ -2085,10 +2132,52 @@ impl Device {
         copies: &[CopyDescriptorSet<'a>],
     ) {
         for write in writes {
-            write.validate();
+            assert_owner!(write.set, self);
+
+            match write.descriptors {
+                Descriptors::Sampler(samplers) => {
+                    for sampler in samplers {
+                        assert_owner!(sampler, self);
+                    }
+                }
+                Descriptors::CombinedImageSampler(combos) => {
+                    for (view, _, sampler) in combos {
+                        assert_owner!(view, self);
+                        assert_owner!(sampler, self);
+                    }
+                }
+                Descriptors::SampledImage(views)
+                | Descriptors::StorageImage(views)
+                | Descriptors::InputAttachment(views) => {
+                    for (view, _) in views {
+                        assert_owner!(view, self);
+                    }
+                }
+                Descriptors::UniformBuffer(buffers)
+                | Descriptors::StorageBuffer(buffers)
+                | Descriptors::UniformBufferDynamic(buffers)
+                | Descriptors::StorageBufferDynamic(buffers) => {
+                    for &(ref buffer, offset, size) in buffers {
+                        assert_owner!(buffer, self);
+                        debug_assert_ne!(
+                            size, 0,
+                            "Cannot write 0 sized buffer range into descriptor"
+                        );
+                        debug_assert!(offset < buffer.info().size);
+                        debug_assert!(size < buffer.info().size - offset);
+                    }
+                }
+                Descriptors::AccelerationStructure(acceleration_structures) => {
+                    for acceleration_structure in acceleration_structures {
+                        assert_owner!(acceleration_structure, self);
+                    }
+                }
+            }
         }
 
-        assert!(copies.is_empty(), "Unimplemented");
+        if !copies.is_empty() {
+            unimplemented!()
+        }
 
         let mut ranges = SmallVec::<[_; 64]>::new();
 
@@ -2108,21 +2197,8 @@ impl Device {
                     let start = images.len();
 
                     images.extend(slice.iter().map(|sampler| {
-                        vk1_0::DescriptorImageInfo::default()
-                            .into_builder()
-                            .sampler(sampler.handle(self))
-                    }));
-
-                    ranges.push(start..images.len());
-                }
-                Descriptors::SampledImage(slice) => {
-                    let start = images.len();
-
-                    images.extend(slice.iter().map(|(view, layout)| {
-                        vk1_0::DescriptorImageInfo::default()
-                            .into_builder()
-                            .image_view(view.handle(self))
-                            .image_layout(layout.to_erupt())
+                        vk1_0::DescriptorImageInfoBuilder::new()
+                            .sampler(sampler.handle())
                     }));
 
                     ranges.push(start..images.len());
@@ -2132,13 +2208,23 @@ impl Device {
 
                     images.extend(slice.iter().map(
                         |(view, layout, sampler)| {
-                            vk1_0::DescriptorImageInfo::default()
-                                .into_builder()
-                                .sampler(sampler.handle(self))
-                                .image_view(view.handle(self))
+                            vk1_0::DescriptorImageInfoBuilder::new()
+                                .sampler(sampler.handle())
+                                .image_view(view.handle())
                                 .image_layout(layout.to_erupt())
                         },
                     ));
+
+                    ranges.push(start..images.len());
+                }
+                Descriptors::SampledImage(slice) => {
+                    let start = images.len();
+
+                    images.extend(slice.iter().map(|(view, layout)| {
+                        vk1_0::DescriptorImageInfoBuilder::new()
+                            .image_view(view.handle())
+                            .image_layout(layout.to_erupt())
+                    }));
 
                     ranges.push(start..images.len());
                 }
@@ -2146,9 +2232,8 @@ impl Device {
                     let start = images.len();
 
                     images.extend(slice.iter().map(|(view, layout)| {
-                        vk1_0::DescriptorImageInfo::default()
-                            .into_builder()
-                            .image_view(view.handle(self))
+                        vk1_0::DescriptorImageInfoBuilder::new()
+                            .image_view(view.handle())
                             .image_layout(layout.to_erupt())
                     }));
 
@@ -2159,9 +2244,8 @@ impl Device {
 
                     buffers.extend(slice.iter().map(
                         |(buffer, offset, size)| {
-                            vk1_0::DescriptorBufferInfo::default()
-                                .into_builder()
-                                .buffer(buffer.handle(self))
+                            vk1_0::DescriptorBufferInfoBuilder::new()
+                                .buffer(buffer.handle())
                                 .offset(*offset)
                                 .range(*size)
                         },
@@ -2174,9 +2258,8 @@ impl Device {
 
                     buffers.extend(slice.iter().map(
                         |(buffer, offset, size)| {
-                            vk1_0::DescriptorBufferInfo::default()
-                                .into_builder()
-                                .buffer(buffer.handle(self))
+                            vk1_0::DescriptorBufferInfoBuilder::new()
+                                .buffer(buffer.handle())
                                 .offset(*offset)
                                 .range(*size)
                         },
@@ -2189,9 +2272,8 @@ impl Device {
 
                     buffers.extend(slice.iter().map(
                         |(buffer, offset, size)| {
-                            vk1_0::DescriptorBufferInfo::default()
-                                .into_builder()
-                                .buffer(buffer.handle(self))
+                            vk1_0::DescriptorBufferInfoBuilder::new()
+                                .buffer(buffer.handle())
                                 .offset(*offset)
                                 .range(*size)
                         },
@@ -2204,9 +2286,8 @@ impl Device {
 
                     buffers.extend(slice.iter().map(
                         |(buffer, offset, size)| {
-                            vk1_0::DescriptorBufferInfo::default()
-                                .into_builder()
-                                .buffer(buffer.handle(self))
+                            vk1_0::DescriptorBufferInfoBuilder::new()
+                                .buffer(buffer.handle())
                                 .offset(*offset)
                                 .range(*size)
                         },
@@ -2218,9 +2299,8 @@ impl Device {
                     let start = images.len();
 
                     images.extend(slice.iter().map(|(view, layout)| {
-                        vk1_0::DescriptorImageInfo::default()
-                            .into_builder()
-                            .image_view(view.handle(self))
+                        vk1_0::DescriptorImageInfoBuilder::new()
+                            .image_view(view.handle())
                             .image_layout(layout.to_erupt())
                     }));
 
@@ -2230,12 +2310,12 @@ impl Device {
                     let start = acceleration_structures.len();
 
                     acceleration_structures
-                        .extend(slice.iter().map(|accs| accs.handle(self)));
+                        .extend(slice.iter().map(|accs| accs.handle()));
 
                     ranges.push(start..acceleration_structures.len());
 
                     write_descriptor_acceleration_structures.push(
-                        vkrt::WriteDescriptorSetAccelerationStructureKHR::default().into_builder(),
+                        vkacc::WriteDescriptorSetAccelerationStructureKHRBuilder::new(),
                     );
                 }
             }
@@ -2249,9 +2329,8 @@ impl Device {
         let writes: SmallVec<[_; 16]> = writes
             .iter()
             .map(|write| {
-                let builder = vk1_0::WriteDescriptorSet::default()
-                    .into_builder()
-                    .dst_set(write.set.handle(self))
+                let builder = vk1_0::WriteDescriptorSetBuilder::new()
+                    .dst_set(write.set.handle())
                     .dst_binding(write.binding)
                     .dst_array_element(write.element);
 
@@ -2295,8 +2374,7 @@ impl Device {
                             write_descriptor_acceleration_structures.next().unwrap();
 
                         *acc_structure_write =
-                            vkrt::WriteDescriptorSetAccelerationStructureKHR::default()
-                                .into_builder()
+                            vkacc::WriteDescriptorSetAccelerationStructureKHRBuilder::new()
                                 .acceleration_structures(&acceleration_structures[range.clone()]);
                         write.extend_from(&mut *acc_structure_write)
                     }
@@ -2314,8 +2392,7 @@ impl Device {
     ) -> Result<Sampler, OutOfMemory> {
         let handle = unsafe {
             self.inner.logical.create_sampler(
-                &vk1_0::SamplerCreateInfo::default()
-                    .into_builder()
+                &vk1_0::SamplerCreateInfoBuilder::new()
                     .mag_filter(info.mag_filter.to_erupt())
                     .min_filter(info.min_filter.to_erupt())
                     .mipmap_mode(info.mipmap_mode.to_erupt())
@@ -2344,15 +2421,17 @@ impl Device {
         .map_err(oom_error_from_erupt)?;
 
         let index = self.inner.samplers.lock().insert(handle);
-        Ok(Sampler::make(info, self.downgrade(), handle, index))
+        Ok(Sampler::new(info, self.downgrade(), handle, index))
     }
 
     #[tracing::instrument]
-    pub fn create_ray_tracing_shader_binding_table(
+    pub fn create_shader_binding_table(
         &self,
         pipeline: &RayTracingPipeline,
         info: ShaderBindingTableInfo,
     ) -> Result<ShaderBindingTable, OutOfMemory> {
+        assert_owner!(pipeline, self);
+
         let group_size =
             u64::from(self.inner.properties.rt.shader_group_handle_size);
         let group_align =
@@ -2382,7 +2461,7 @@ impl Device {
 
         let mut write_offset = 0;
 
-        let group_handlers = &pipeline.group_handlers(self);
+        let group_handlers = pipeline.group_handlers();
 
         let raygen_handlers = copy_group_handlers(
             group_handlers,
@@ -2424,8 +2503,8 @@ impl Device {
             BufferInfo {
                 align: group_align,
                 size: total_size,
-                usage: BufferUsage::RAY_TRACING,
-                memory: MemoryUsageFlags::UPLOAD,
+                usage: BufferUsage::SHADER_BINDING_TABLE
+                    | BufferUsage::DEVICE_ADDRESS,
             },
             &bytes,
         )?;
@@ -2464,53 +2543,55 @@ impl Device {
     #[tracing::instrument]
     pub fn map_memory(
         &self,
-        buffer: &Buffer,
+        buffer: &mut MappableBuffer,
         offset: u64,
         size: usize,
-    ) -> Result<&mut [MaybeUninit<u8>], MappingError> {
-        // FIXME: Track mapped blocks
-        let block = buffer.block(self);
+    ) -> Result<&mut [MaybeUninit<u8>], MapError> {
+        assert_owner!(buffer, self);
 
         Ok(unsafe {
-            let ptr = block.map(&self.inner.logical, offset, size)?;
+            let ptr = buffer.memory_block().map(
+                EruptMemoryDevice::wrap(&self.inner.logical),
+                offset,
+                size,
+            )?;
             std::slice::from_raw_parts_mut(ptr.as_ptr() as _, size)
         })
     }
 
-    pub fn unmap_memory(&self, buffer: &Buffer) {
-        let block = buffer.block(self);
-        unsafe { block.unmap(&self.inner.logical) }
+    pub fn unmap_memory(&self, buffer: &mut MappableBuffer) -> bool {
+        assert_owner!(buffer, self);
+        unsafe {
+            buffer
+                .memory_block()
+                .unmap(EruptMemoryDevice::wrap(&self.inner.logical))
+        }
     }
 
     #[tracing::instrument(skip(data))]
-    pub fn write_memory<T>(
+    pub fn write_buffer<T>(
         &self,
-        buffer: &Buffer,
+        buffer: &mut MappableBuffer,
         offset: u64,
         data: &[T],
-    ) -> Result<(), MappingError> {
+    ) -> Result<(), MapError>
+    where
+        T: Pod,
+    {
+        assert_owner!(buffer, self);
+
         if size_of_val(data) == 0 {
             return Ok(());
         }
 
-        // let size =
-        //     u64::try_from(data.len()).map_err(|_|
-        // MappingError::OutOfBounds)?; let end = offset
-        //     .checked_add(size)
-        //     .ok_or_else(|| MappingError::OutOfBounds)?;
-
-        let memory = self.map_memory(buffer, offset, size_of_val(data))?;
-
         unsafe {
-            std::ptr::copy_nonoverlapping(
-                data.as_ptr() as *const _,
-                memory.as_mut_ptr(),
-                size_of_val(data),
-            );
+            buffer.memory_block().write_bytes(
+                EruptMemoryDevice::wrap(&self.inner.logical),
+                offset,
+                bytemuck::cast_slice(data),
+            )
         }
-
-        self.unmap_memory(buffer);
-        Ok(())
+        .map_err(Into::into)
     }
 }
 
@@ -2594,5 +2675,41 @@ pub(crate) fn create_render_pass_error_from_erupt(
             }
         }
         _ => CreateRenderPassError::UnexpectedVulkanError { result: err },
+    }
+}
+
+fn memory_device_properties(
+    device: &DeviceLoader,
+    properties: &Properties,
+    features: &Features,
+) -> gpu_alloc::DeviceProperties<'static> {
+    let memory_properties = &properties.memory;
+    let limits = &properties.v10.limits;
+
+    gpu_alloc::DeviceProperties {
+        max_memory_allocation_count: limits.max_memory_allocation_count,
+        max_memory_allocation_size: u64::max_value(), // FIXME: Can query this information if instance is v1.1
+
+        non_coherent_atom_size: limits.non_coherent_atom_size,
+        memory_types: memory_properties.memory_types
+            [..memory_properties.memory_type_count as usize]
+            .iter()
+            .map(|memory_type| gpu_alloc::MemoryType {
+                props: gpu_alloc_erupt::memory_properties_from_erupt(
+                    memory_type.property_flags,
+                ),
+                heap: memory_type.heap_index,
+            })
+            .collect(),
+        memory_heaps: memory_properties.memory_heaps
+            [..memory_properties.memory_heap_count as usize]
+            .iter()
+            .map(|&memory_heap| gpu_alloc::MemoryHeap {
+                size: memory_heap.size,
+            })
+            .collect(),
+        buffer_device_address: features.v12.buffer_device_address != 0
+            || device.enabled().khr_buffer_device_address
+            || device.enabled().ext_buffer_device_address,
     }
 }

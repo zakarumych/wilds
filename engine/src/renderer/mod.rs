@@ -58,7 +58,8 @@ pub struct Renderer {
     context: Context,
     blases: HashMap<Mesh, AccelerationStructure>,
     swapchain: Swapchain,
-    blue_noise_buffer: Buffer,
+    blue_noise_buffer_256x256x128: Buffer,
+    blue_noise_sampler_buffer_256spp: Buffer,
     pipeline: RayProbePipeline,
 }
 
@@ -106,13 +107,20 @@ impl Renderer {
         // Initialize device.
         let (device, queue) = physical.create_device(
             &[
-                Feature::RayTracing,
+                Feature::AccelerationStructure,
+                Feature::RayTracingPipeline,
                 Feature::BufferDeviceAddress,
                 Feature::SurfacePresentation,
                 Feature::RuntimeDescriptorArray,
                 Feature::ScalarBlockLayout,
                 Feature::DescriptorBindingUpdateUnusedWhilePending,
                 Feature::DescriptorBindingPartiallyBound,
+                Feature::ShaderSampledImageDynamicIndexing,
+                Feature::ShaderSampledImageNonUniformIndexing,
+                Feature::ShaderUniformBufferDynamicIndexing,
+                Feature::ShaderUniformBufferNonUniformIndexing,
+                Feature::ShaderStorageBufferDynamicIndexing,
+                Feature::ShaderStorageBufferNonUniformIndexing,
             ],
             SingleQueueQuery::GENERAL,
         )?;
@@ -153,16 +161,22 @@ impl Renderer {
             PresentMode::Fifo,
         )?;
 
-        let blue_noise_buffer = load_blue_noise(&mut context)?;
+        let blue_noise_buffer_256x256x128 = load_blue_noise(&mut context)?;
+        let blue_noise_sampler_buffer_256spp =
+            load_blue_noise_sampler(&mut context)?;
 
-        let pipeline =
-            RayProbePipeline::new(&mut context, blue_noise_buffer.clone())?;
+        let pipeline = RayProbePipeline::new(
+            &mut context,
+            blue_noise_buffer_256x256x128.clone(),
+            blue_noise_sampler_buffer_256spp.clone(),
+        )?;
 
         Ok(Renderer {
             blases: HashMap::new(),
             swapchain,
             context,
-            blue_noise_buffer,
+            blue_noise_buffer_256x256x128,
+            blue_noise_sampler_buffer_256spp,
             pipeline,
         })
     }
@@ -270,8 +284,124 @@ fn load_blue_noise(ctx: &mut Context) -> Result<Buffer, OutOfMemory> {
             size: blue_noise.len() as _,
             align: 255,
             usage: BufferUsage::STORAGE,
-            memory: MemoryUsageFlags::empty(),
         },
         &blue_noise[..],
     )
+    .map(Into::into)
+}
+
+// fn load_blue_noise(ctx: &mut Context) -> Result<Buffer, OutOfMemory> {
+//     use std::{convert::TryFrom as _, mem::size_of_val};
+
+//     const KERNAL_DIM: usize = 7;
+
+//     const KERNEL: [[f32; KERNAL_DIM]; KERNAL_DIM] = [
+//         [
+//             0.000036, 0.000363, 0.001446, 0.002291, 0.001446, 0.000363,
+//             0.000036,
+//         ],
+//         [
+//             0.000363, 0.003676, 0.014662, 0.023226, 0.014662, 0.003676,
+//             0.000363,
+//         ],
+//         [
+//             0.001446, 0.014662, 0.058488, 0.092651, 0.058488, 0.014662,
+//             0.001446,
+//         ],
+//         [
+//             0.002291, 0.023226, 0.092651, 0.146768, 0.092651, 0.023226,
+//             0.002291,
+//         ],
+//         [
+//             0.001446, 0.014662, 0.058488, 0.092651, 0.058488, 0.014662,
+//             0.001446,
+//         ],
+//         [
+//             0.000363, 0.003676, 0.014662, 0.023226, 0.014662, 0.003676,
+//             0.000363,
+//         ],
+//         [
+//             0.000036, 0.000363, 0.001446, 0.002291, 0.001446, 0.000363,
+//             0.000036,
+//         ],
+//     ];
+
+//     const DIM: usize = 256;
+//     const COUNT: usize = DIM * DIM;
+//     const STEP: f32 = 1.0 / COUNT as f32;
+
+//     let mut data = [[[0f32; 4]; DIM]; DIM];
+
+//     for c in 0..4 {
+//         for s in 1..COUNT {
+//             // Next value to put.
+//             let v = s as f32 * STEP;
+
+//             let mut lx = 0;
+//             let mut ly = 0;
+//             let mut lb = 1.0;
+
+//             // Search over all pixels.
+//             for x in 0..DIM {
+//                 for y in 0..DIM {
+//                     if data[x][y][c] > 0.0 {
+//                         continue;
+//                     }
+
+//                     let mut b = 0.0;
+
+//                     for wx in 0..=6 {
+//                         for wy in 0..=6 {
+//                             b += data[(x + wx - 3) % DIM][(y + wy - 3) % DIM]
+//                                 [c]
+//                                 * KERNEL[wx][wy];
+//                         }
+//                     }
+
+//                     if lb > b {
+//                         lb = b;
+//                         lx = x;
+//                         ly = y;
+//                     }
+//                 }
+//             }
+
+//             data[lx][ly][c] = v;
+//         }
+//     }
+
+//     ctx.create_buffer_static(
+//         BufferInfo {
+//             size: u64::try_from(size_of_val(&data)).unwrap(),
+//             align: 255,
+//             usage: BufferUsage::STORAGE,
+//
+//         },
+//         &data,
+//     )
+// }
+
+fn load_blue_noise_sampler(ctx: &mut Context) -> Result<Buffer, OutOfMemory> {
+    use {
+        blue_noise_sampler::spp32::*,
+        std::{convert::TryFrom as _, mem::size_of_val},
+    };
+
+    let mut data = Vec::<i32>::with_capacity(
+        RANKING_TILE.len() + SCRAMBLING_TILE.len() + SOBOL.len(),
+    );
+
+    data.extend_from_slice(RANKING_TILE);
+    data.extend_from_slice(SCRAMBLING_TILE);
+    data.extend_from_slice(SOBOL);
+
+    ctx.create_buffer_static(
+        BufferInfo {
+            size: u64::try_from(size_of_val(&data[..])).unwrap(),
+            align: 255,
+            usage: BufferUsage::STORAGE,
+        },
+        &data[..],
+    )
+    .map(Into::into)
 }

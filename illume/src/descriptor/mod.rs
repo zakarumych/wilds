@@ -20,27 +20,6 @@ pub struct WriteDescriptorSet<'a> {
     pub descriptors: Descriptors<'a>,
 }
 
-impl WriteDescriptorSet<'_> {
-    pub fn validate(&self) {
-        match self.descriptors {
-            Descriptors::UniformBuffer(buffers)
-            | Descriptors::StorageBuffer(buffers)
-            | Descriptors::UniformBufferDynamic(buffers)
-            | Descriptors::StorageBufferDynamic(buffers) => {
-                for &(ref buffer, offset, size) in buffers {
-                    debug_assert_ne!(
-                        size, 0,
-                        "Cannot write 0 sized buffer range into descriptor"
-                    );
-                    debug_assert!(offset.checked_add(size).is_some());
-                    debug_assert!(buffer.info().size >= offset + size);
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Descriptors<'a> {
     Sampler(&'a [Sampler]),

@@ -15,13 +15,13 @@ use {
     eyre::Report,
     hecs::World,
     illume::{
-        Buffer, BufferInfo, BufferUsage, ComputePipeline, ComputePipelineInfo,
+        BufferInfo, BufferUsage, ComputePipeline, ComputePipelineInfo,
         ComputeShader, DescriptorBindingFlags, DescriptorSet,
         DescriptorSetInfo, DescriptorSetLayoutBinding,
         DescriptorSetLayoutFlags, DescriptorSetLayoutInfo, DescriptorType,
-        Descriptors, Fence, MemoryUsageFlags, OutOfMemory, PipelineLayout,
-        PipelineLayoutInfo, PipelineStageFlags, PushConstant, Semaphore,
-        ShaderStageFlags, Spirv, WriteDescriptorSet,
+        Descriptors, Fence, MappableBuffer, MemoryUsage, OutOfMemory,
+        PipelineLayout, PipelineLayoutInfo, PipelineStageFlags, PushConstant,
+        Semaphore, ShaderStageFlags, Spirv, WriteDescriptorSet,
     },
     nalgebra as na,
     std::{convert::TryInto as _, mem::size_of_val},
@@ -33,7 +33,7 @@ pub struct PosePass {
     set: DescriptorSet,
     per_frame_sets: [DescriptorSet; 2],
     meshes: SparseDescriptors<Mesh>,
-    joints_buffer: Option<Buffer>,
+    joints_buffer: Option<MappableBuffer>,
     joints_buffer_written: [bool; 2],
 }
 
@@ -259,11 +259,11 @@ impl Pass<'_> for PosePass {
 
         let joints_size = size_of_val_64(&joints[..])?;
 
-        let joints_buffer = match &self.joints_buffer {
+        let joints_buffer = match &mut self.joints_buffer {
             Some(buffer) if buffer.info().size >= joints_size => {
                 if !self.joints_buffer_written[findex] {
                     joints_descriptor =
-                        [(buffer.clone(), 0, buffer.info().size)];
+                        [(buffer.share(), 0, buffer.info().size)];
                     writes.push(WriteDescriptorSet {
                         set: &self.per_frame_sets[findex],
                         binding: 0,
@@ -278,15 +278,16 @@ impl Pass<'_> for PosePass {
             }
             _ => {
                 let size = (joints_size + 4095) & !4095;
-                let buffer = ctx.device.create_buffer(BufferInfo {
-                    size,
-                    align: 255,
-                    usage: BufferUsage::STORAGE,
-                    memory: MemoryUsageFlags::UPLOAD
-                        | MemoryUsageFlags::FAST_DEVICE_ACCESS,
-                })?;
+                let buffer = ctx.device.create_mappable_buffer(
+                    BufferInfo {
+                        size,
+                        align: 255,
+                        usage: BufferUsage::STORAGE,
+                    },
+                    MemoryUsage::UPLOAD | MemoryUsage::FAST_DEVICE_ACCESS,
+                )?;
 
-                joints_descriptor = [(buffer.clone(), 0, size)];
+                joints_descriptor = [(buffer.share(), 0, size)];
                 writes.push(WriteDescriptorSet {
                     set: &self.per_frame_sets[findex],
                     binding: 0,
@@ -299,7 +300,9 @@ impl Pass<'_> for PosePass {
                 self.joints_buffer.get_or_insert(buffer)
             }
         };
-        ctx.device.write_memory(joints_buffer, 0, &joints)?;
+        ctx.device.write_buffer(joints_buffer, 0, unsafe {
+            std::mem::transmute::<&[_], &[u8]>(&joints[..])
+        })?;
         ctx.device.update_descriptor_sets(&writes, &[]);
 
         let sets = [self.set.clone(), self.per_frame_sets[findex].clone()];

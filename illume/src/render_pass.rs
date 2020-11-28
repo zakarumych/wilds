@@ -162,6 +162,7 @@ pub enum ClearValue {
     DepthStencil(f32, u32),
 }
 
+#[cfg(feature = "serde-1")]
 fn is_default<T: Default + Eq>(value: &T) -> bool {
     *value == T::default()
 }

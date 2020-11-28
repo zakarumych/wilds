@@ -183,7 +183,6 @@ impl<'a> Pass<'a> for GaussFilter {
                     layers: 1,
                     samples: Samples1,
                     usage: ImageUsage::COLOR_ATTACHMENT | ImageUsage::SAMPLED,
-                    memory: MemoryUsageFlags::empty(),
                 })?;
 
                 let filtered =

@@ -3,7 +3,7 @@ use {
     goods::{ready, AssetDefaultFormat, Cache, Format, Ready, SyncAsset},
     illume::{
         CreateImageError, ImageExtent, ImageInfo, ImageUsage, ImageView,
-        ImageViewInfo, MemoryUsageFlags, Samples1,
+        ImageViewInfo, MemoryUsage, Samples1,
     },
     image::{
         load_from_memory, DynamicImage, GenericImageView as _, ImageError,
@@ -137,7 +137,6 @@ pub fn image_view_from_dyn_image(
             layers: 1,
             samples: Samples1,
             usage: ImageUsage::SAMPLED,
-            memory: MemoryUsageFlags::empty(),
         },
         0,
         0,

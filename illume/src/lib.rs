@@ -15,112 +15,6 @@ use std::{
     num::TryFromIntError,
 };
 
-macro_rules! define_handle {
-    (
-        $(#[$meta:meta])*
-        pub struct $resource:ident : $inner:ident {
-            pub info: $info:ty,
-            pub owner: $owner:ty,
-            handle: $handle:ty,
-            $($fname:ident: $fty:ty,)*
-        }
-    ) => {
-        pub struct $inner {
-            info: $info,
-            owner: $owner,
-            handle: $handle,
-            $($fname: $fty,)*
-        }
-
-        impl ::std::fmt::Debug for $inner {
-            fn fmt(&self, fmt: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-                if fmt.alternate() {
-                    fmt.debug_struct(stringify!($resource))
-                        .field("handle", &self.handle)
-                        .field("info", &self.info)
-                        .field("owner", &self.owner)
-                        $(
-                            .field(stringify!($fname), &self.$fname)
-                        )*
-                        .finish()
-                } else {
-                    write!(fmt, "{}({:p})", stringify!($resource), self.handle)
-                }
-            }
-        }
-
-        #[derive(Clone)]
-        #[repr(transparent)]
-        $(#[$meta])*
-        pub struct $resource {
-            inner: std::sync::Arc<$inner>,
-        }
-
-        impl ::std::fmt::Debug for $resource {
-            fn fmt(&self, fmt: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-                self.inner.fmt(fmt)
-            }
-        }
-
-        impl std::cmp::PartialEq for $resource {
-            fn eq(&self, other: &Self) -> bool {
-                std::ptr::eq(&*self.inner, &*other.inner)
-            }
-        }
-
-        impl std::cmp::Eq for $resource {}
-
-        impl std::hash::Hash for $resource {
-            fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-                std::ptr::hash(&*self.inner, state)
-            }
-        }
-
-        impl $resource {
-            pub(crate) fn make(
-                info: $info,
-                owner: $owner,
-                handle: $handle,
-                $($fname: $fty,)*
-            ) -> Self {
-                $resource {
-                    inner: std::sync::Arc::new($inner {
-                        info,
-                        owner,
-                        handle,
-                        $($fname,)*
-                    })
-                }
-            }
-
-            pub(crate) fn handle(&self, owner: &impl PartialEq<$owner>) -> $handle {
-                assert!(self.is_owned_by(owner), "Wrong owner");
-                self.inner.handle
-            }
-
-            $(
-                #[allow(dead_code)]
-                pub(crate) fn $fname(&self, owner: &impl PartialEq<$owner>) -> &$fty {
-                    assert!(self.is_owned_by(owner), "Wrong owner");
-                    &self.inner.$fname
-                }
-            )*
-
-            pub fn info(&self) -> &$info {
-                &self.inner.info
-            }
-
-            pub fn owner(&self) -> &$owner {
-                &self.inner.owner
-            }
-
-            pub fn is_owned_by(&self, owner: &impl PartialEq<$owner>) -> bool {
-                *owner == *self.owner()
-            }
-        }
-    };
-}
-
 pub mod backend;
 
 mod accel;
@@ -406,7 +300,7 @@ pub enum CreateImageError {
 
 /// Possible error that may occur during memory mapping.
 #[derive(Clone, Copy, Debug, thiserror::Error)]
-pub enum MappingError {
+pub enum MapError {
     /// Device memory is exhausted.
     #[error(transparent)]
     OutOfMemory {
@@ -418,9 +312,13 @@ pub enum MappingError {
     #[error("Memory is not host-visible")]
     NonHostVisible,
 
-    /// Mapping requests exceeds block size.
-    #[error("Memory map request out of memory block bounds")]
-    OutOfBounds,
+    /// Memory is already mapped
+    #[error("Memory is already mapped")]
+    AlreadyMapped,
+
+    /// Map failed for implementation specific reason
+    #[error("Map failed for implementation specific reason")]
+    MapFailed,
 }
 
 #[doc(hidden)]

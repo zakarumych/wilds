@@ -37,8 +37,8 @@ impl Config {
                 height: 32,
                 depth: 32,
             },
-            probes_dimensions: [640.0, 640.0, 640.0],
-            probes_offset: [-320.0, -320.0, -320.0],
+            probes_dimensions: [32.0, 32.0, 32.0],
+            probes_offset: [-16.0, -16.0, -16.0],
             diffuse_rays: 16,
             shadow_rays: 8,
         }
@@ -75,7 +75,7 @@ pub struct RayProbe {
 
     tlas: AccelerationStructure,
     scratch: Buffer,
-    globals_and_instances: Buffer,
+    globals_and_instances: MappableBuffer,
     probes_data: Option<ImageView>,
     probes_data_bound: [bool; 2],
     probes_compiled: Option<ImageView>,
@@ -96,6 +96,7 @@ impl RayProbe {
     pub fn new(
         ctx: &mut Context,
         blue_noise_buffer_256x256x128: Buffer,
+        blue_noise_sampler_buffer_256spp: Buffer,
     ) -> Result<Self, Report> {
         // Create pipeline.
         let set_layout = ctx.create_descriptor_set_layout(DescriptorSetLayoutInfo {
@@ -150,6 +151,16 @@ impl RayProbe {
                         count: MAX_INSTANCE_COUNT.into(),
                         stages: ShaderStageFlags::CLOSEST_HIT,
                         flags: DescriptorBindingFlags::PARTIALLY_BOUND | DescriptorBindingFlags::UPDATE_UNUSED_WHILE_PENDING,
+                    },
+                    // Blue noise
+                    DescriptorSetLayoutBinding {
+                        binding: 6,
+                        ty: DescriptorType::StorageBuffer,
+                        count: 1,
+                        stages: ShaderStageFlags::RAYGEN
+                            | ShaderStageFlags::CLOSEST_HIT
+                            | ShaderStageFlags::COMPUTE,
+                        flags: DescriptorBindingFlags::empty(),
                     },
                 ],
             })?;
@@ -305,27 +316,25 @@ impl RayProbe {
                 layout: pipeline_layout.clone(),
             })?;
 
-        let probes_binding_table = ctx
-            .create_ray_tracing_shader_binding_table(
-                &pipeline,
-                ShaderBindingTableInfo {
-                    raygen: Some(0),
-                    miss: &[2, 3],
-                    hit: &[4],
-                    callable: &[],
-                },
-            )?;
+        let probes_binding_table = ctx.create_shader_binding_table(
+            &pipeline,
+            ShaderBindingTableInfo {
+                raygen: Some(0),
+                miss: &[2, 3],
+                hit: &[4],
+                callable: &[],
+            },
+        )?;
 
-        let viewport_binding_table = ctx
-            .create_ray_tracing_shader_binding_table(
-                &pipeline,
-                ShaderBindingTableInfo {
-                    raygen: Some(1),
-                    miss: &[2, 3],
-                    hit: &[4],
-                    callable: &[],
-                },
-            )?;
+        let viewport_binding_table = ctx.create_shader_binding_table(
+            &pipeline,
+            ShaderBindingTableInfo {
+                raygen: Some(1),
+                miss: &[2, 3],
+                hit: &[4],
+                callable: &[],
+            },
+        )?;
 
         tracing::trace!("RT pipeline created");
 
@@ -335,34 +344,47 @@ impl RayProbe {
         })?;
 
         // Creating TLAS.
+        let tlas_sizes = ctx.get_acceleration_structure_build_sizes(
+            AccelerationStructureLevel::Top,
+            AccelerationStructureBuildFlags::PREFER_FAST_BUILD,
+            &[AccelerationStructureGeometryInfo::Instances {
+                max_primitive_count: MAX_INSTANCE_COUNT.into(),
+            }],
+        );
+
+        let tlas_buffer = ctx.create_buffer(BufferInfo {
+            align: 255,
+            size: tlas_sizes.acceleration_structure_size,
+            usage: BufferUsage::ACCELERATION_STRUCTURE_STORAGE,
+        })?;
+
         let tlas =
             ctx.create_acceleration_structure(AccelerationStructureInfo {
                 level: AccelerationStructureLevel::Top,
-                flags: AccelerationStructureFlags::empty(),
-                geometries: vec![
-                    AccelerationStructureGeometryInfo::Instances {
-                        max_primitive_count: MAX_INSTANCE_COUNT.into(),
-                    },
-                ],
+                region: BufferRegion::whole(tlas_buffer),
             })?;
 
         tracing::trace!("TLAS created");
         // Allocate scratch memory for TLAS building.
-        let scratch =
-            ctx.allocate_acceleration_structure_build_scratch(&tlas, false)?;
+        let scratch = ctx.create_buffer(BufferInfo {
+            align: 255,
+            size: tlas_sizes.build_scratch_size,
+            usage: BufferUsage::DEVICE_ADDRESS,
+        })?;
 
         tracing::trace!("TLAS scratch allocated");
 
-        let globals_and_instances = ctx.create_buffer(BufferInfo {
-            align: globals_and_instances_align(),
-            size: globals_and_instances_size(),
-            usage: BufferUsage::UNIFORM
-                | BufferUsage::STORAGE
-                | BufferUsage::RAY_TRACING
-                | BufferUsage::SHADER_DEVICE_ADDRESS,
-            memory: MemoryUsageFlags::HOST_ACCESS
-                | MemoryUsageFlags::FAST_DEVICE_ACCESS,
-        })?;
+        let globals_and_instances = ctx.create_mappable_buffer(
+            BufferInfo {
+                align: globals_and_instances_align(),
+                size: globals_and_instances_size(),
+                usage: BufferUsage::UNIFORM
+                    | BufferUsage::STORAGE
+                    | BufferUsage::ACCELERATION_STRUCTURE_BUILD_INPUT
+                    | BufferUsage::DEVICE_ADDRESS,
+            },
+            MemoryUsage::FAST_DEVICE_ACCESS,
+        )?;
 
         tracing::trace!("Main buffer created");
 
@@ -401,11 +423,21 @@ impl RayProbe {
                     )]),
                 },
                 WriteDescriptorSet {
+                    set: &set,
+                    binding: 6,
+                    element: 0,
+                    descriptors: Descriptors::StorageBuffer(&[(
+                        blue_noise_sampler_buffer_256spp.clone(),
+                        0,
+                        blue_noise_sampler_buffer_256spp.info().size,
+                    )]),
+                },
+                WriteDescriptorSet {
                     set: &per_frame_set0,
                     binding: 0,
                     element: 0,
                     descriptors: Descriptors::UniformBuffer(&[(
-                        globals_and_instances.clone(),
+                        globals_and_instances.share(),
                         globals_offset(0),
                         globals_size(),
                     )]),
@@ -415,7 +447,7 @@ impl RayProbe {
                     binding: 0,
                     element: 0,
                     descriptors: Descriptors::UniformBuffer(&[(
-                        globals_and_instances.clone(),
+                        globals_and_instances.share(),
                         globals_offset(1),
                         globals_size(),
                     )]),
@@ -425,7 +457,7 @@ impl RayProbe {
                     binding: 1,
                     element: 0,
                     descriptors: Descriptors::StorageBuffer(&[(
-                        globals_and_instances.clone(),
+                        globals_and_instances.share(),
                         instances_offset(0),
                         instances_size(),
                     )]),
@@ -435,7 +467,7 @@ impl RayProbe {
                     binding: 1,
                     element: 0,
                     descriptors: Descriptors::StorageBuffer(&[(
-                        globals_and_instances.clone(),
+                        globals_and_instances.share(),
                         instances_offset(1),
                         instances_size(),
                     )]),
@@ -445,7 +477,7 @@ impl RayProbe {
                     binding: 2,
                     element: 0,
                     descriptors: Descriptors::StorageBuffer(&[(
-                        globals_and_instances.clone(),
+                        globals_and_instances.share(),
                         pointlight_offset(0),
                         pointlight_size(),
                     )]),
@@ -455,7 +487,7 @@ impl RayProbe {
                     binding: 2,
                     element: 0,
                     descriptors: Descriptors::StorageBuffer(&[(
-                        globals_and_instances.clone(),
+                        globals_and_instances.share(),
                         pointlight_offset(1),
                         pointlight_size(),
                     )]),
@@ -767,7 +799,6 @@ impl<'a> Pass<'a> for RayProbe {
                     layers: 1,
                     samples: Samples1,
                     usage: ImageUsage::STORAGE,
-                    memory: MemoryUsageFlags::empty(),
                 })?;
 
                 let view = ctx.create_image_view(ImageViewInfo::new(image))?;
@@ -798,7 +829,6 @@ impl<'a> Pass<'a> for RayProbe {
                     layers: 1,
                     samples: Samples1,
                     usage: ImageUsage::STORAGE,
-                    memory: MemoryUsageFlags::empty(),
                 })?;
 
                 new_probes_compiled_image = image.clone();
@@ -868,7 +898,6 @@ impl<'a> Pass<'a> for RayProbe {
                     layers: 1,
                     samples: Samples1,
                     usage: ImageUsage::STORAGE | ImageUsage::TRANSFER_SRC,
-                    memory: MemoryUsageFlags::empty(),
                 })?;
 
                 let view = ctx.create_image_view(ImageViewInfo::new(image))?;
@@ -911,14 +940,14 @@ impl<'a> Pass<'a> for RayProbe {
 
         tracing::trace!("Update Globals");
 
-        ctx.write_memory(
-            &self.globals_and_instances,
+        ctx.write_buffer(
+            &mut self.globals_and_instances,
             acc_instances_offset(findex),
             &acc_instances,
         )?;
 
-        ctx.write_memory(
-            &self.globals_and_instances,
+        ctx.write_buffer(
+            &mut self.globals_and_instances,
             instances_offset(findex),
             &instances,
         )?;
@@ -928,6 +957,7 @@ impl<'a> Pass<'a> for RayProbe {
         let infos = bump.alloc([AccelerationStructureBuildGeometryInfo {
             src: None,
             dst: self.tlas.clone(),
+            flags: AccelerationStructureBuildFlags::PREFER_FAST_BUILD,
             geometries: bump.alloc([
                 AccelerationStructureGeometry::Instances {
                     flags: GeometryFlags::OPAQUE,
@@ -966,8 +996,8 @@ impl<'a> Pass<'a> for RayProbe {
                 .take(32),
         );
 
-        ctx.write_memory(
-            &self.globals_and_instances,
+        ctx.write_buffer(
+            &mut self.globals_and_instances,
             pointlight_offset(findex),
             &pointlights,
         )?;
@@ -1025,8 +1055,8 @@ impl<'a> Pass<'a> for RayProbe {
 
         tracing::trace!("Update Globals");
 
-        ctx.write_memory(
-            &self.globals_and_instances,
+        ctx.write_buffer(
+            &mut self.globals_and_instances,
             globals_offset(findex),
             std::slice::from_ref(&globals),
         )?;

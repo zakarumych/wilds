@@ -57,11 +57,18 @@ struct PointLight {
 };
 
 layout(binding = 0, set = 0) uniform accelerationStructureEXT tlas;
-layout(binding = 1, set = 0) buffer BlueNoise { vec4 blue_noise[256*256*128]; };
+layout(binding = 1, set = 0) buffer BlueNoise { vec4 blue_noise[]; };
 layout(binding = 2, set = 0, scalar) buffer Indices { uint i[]; } indices[];
 layout(binding = 3, set = 0, scalar) buffer Vertices { Vertex v[]; } vertices[];
 layout(binding = 4, set = 0) uniform sampler2D albedo[];
 layout(binding = 5, set = 0) uniform sampler2D normal[];
+
+layout(binding = 6, set = 0) buffer BlueNoiseSampler {
+    uint ranking_tile[131072];
+    int scrambling_tile[131072];
+    int sobol[65536];
+} blue_noise_sampler;
+
 
 layout(binding = 0, set = 1, std140) uniform Globals {
     Camera cam;

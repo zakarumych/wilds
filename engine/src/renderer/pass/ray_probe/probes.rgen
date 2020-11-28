@@ -25,7 +25,7 @@ void main()
     );
 
     const vec3 origin = probe_cell_size * probe + globals.probes_offset;
-    vec3 dir = rand_sphere(nice_rand(co));
+    vec3 dir = probe_rand(co);
     prd.result = vec3(0);
     prd.shadow_rays = 1;
     traceRayEXT(tlas, 0, 0xff, 0, 0, 0, origin, 0.0, dir, 1000.0, 0);

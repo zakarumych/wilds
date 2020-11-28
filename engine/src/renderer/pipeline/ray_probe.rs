@@ -30,9 +30,14 @@ pub struct RayProbePipeline {
 impl RayProbePipeline {
     pub fn new(
         ctx: &mut Context,
-        blue_noise_buffer: Buffer,
+        blue_noise_buffer_256x256x128: Buffer,
+        blue_noise_sampler_buffer_256spp: Buffer,
     ) -> Result<Self, Report> {
-        let ray_probe = RayProbe::new(ctx, blue_noise_buffer)?;
+        let ray_probe = RayProbe::new(
+            ctx,
+            blue_noise_buffer_256x256x128,
+            blue_noise_sampler_buffer_256spp,
+        )?;
 
         Ok(RayProbePipeline {
             ray_probe,

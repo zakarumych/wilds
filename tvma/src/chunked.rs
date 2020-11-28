@@ -405,12 +405,10 @@ impl ChunkedAllocator {
         device: &DeviceLoader,
         chunk_size: u64,
     ) -> Option<RawBlockAlloc> {
-        let mut alloc_info = vk1_0::MemoryAllocateInfo::default()
-            .into_builder()
+        let mut alloc_info = vk1_0::MemoryAllocateInfoBuilder::new()
             .allocation_size(chunk_size)
             .memory_type_index(self.memory_type);
-        let mut flags = vk1_1::MemoryAllocateFlagsInfo::default()
-            .into_builder()
+        let mut flags = vk1_1::MemoryAllocateFlagsInfoBuilder::new()
             .flags(vk1_1::MemoryAllocateFlags::DEVICE_ADDRESS);
         alloc_info = alloc_info.extend_from(&mut flags);
 

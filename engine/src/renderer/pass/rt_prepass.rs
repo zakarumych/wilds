@@ -46,7 +46,7 @@ pub struct RtPrepass {
 
     tlas: AccelerationStructure,
     scratch: Buffer,
-    globals_and_instances: Buffer,
+    globals_and_instances: MappableBuffer,
 
     set: DescriptorSet,
     per_frame_sets: [DescriptorSet; 2],
@@ -94,6 +94,7 @@ impl RtPrepass {
         extent: Extent2d,
         ctx: &mut Context,
         blue_noise_buffer_256x256x128: Buffer,
+        blue_noise_sampler_buffer_256spp: Buffer,
     ) -> Result<Self, Report> {
         // Create pipeline.
         let set_layout = ctx.create_descriptor_set_layout(DescriptorSetLayoutInfo {
@@ -147,6 +148,15 @@ impl RtPrepass {
                         count: MAX_INSTANCE_COUNT.into(),
                         stages: ShaderStageFlags::CLOSEST_HIT,
                         flags: DescriptorBindingFlags::PARTIALLY_BOUND | DescriptorBindingFlags::UPDATE_UNUSED_WHILE_PENDING,
+                    },
+                    // Blue noise sampler
+                    DescriptorSetLayoutBinding {
+                        binding: 6,
+                        ty: DescriptorType::StorageBuffer,
+                        count: 1,
+                        stages: ShaderStageFlags::RAYGEN
+                            | ShaderStageFlags::CLOSEST_HIT,
+                        flags: DescriptorBindingFlags::empty(),
                     },
                     // G-Buffer
                     // Albedo
@@ -320,48 +330,60 @@ impl RtPrepass {
                 layout: pipeline_layout.clone(),
             })?;
 
-        let shader_binding_table = ctx
-            .create_ray_tracing_shader_binding_table(
-                &pipeline,
-                ShaderBindingTableInfo {
-                    raygen: Some(0),
-                    miss: &[1, 2, 3],
-                    hit: &[4, 5],
-                    callable: &[],
-                },
-            )?;
+        let shader_binding_table = ctx.create_shader_binding_table(
+            &pipeline,
+            ShaderBindingTableInfo {
+                raygen: Some(0),
+                miss: &[1, 2, 3],
+                hit: &[4, 5],
+                callable: &[],
+            },
+        )?;
 
         tracing::trace!("RT pipeline created");
 
         // Creating TLAS.
+        let tlas_sizes = ctx.get_acceleration_structure_build_sizes(
+            AccelerationStructureLevel::Top,
+            AccelerationStructureBuildFlags::PREFER_FAST_BUILD,
+            &[AccelerationStructureGeometryInfo::Instances {
+                max_primitive_count: MAX_INSTANCE_COUNT.into(),
+            }],
+        );
+
+        let tlas_buffer = ctx.create_buffer(BufferInfo {
+            align: 255,
+            size: tlas_sizes.acceleration_structure_size,
+            usage: BufferUsage::ACCELERATION_STRUCTURE_STORAGE,
+        })?;
+
         let tlas =
             ctx.create_acceleration_structure(AccelerationStructureInfo {
                 level: AccelerationStructureLevel::Top,
-                flags: AccelerationStructureFlags::empty(),
-                geometries: vec![
-                    AccelerationStructureGeometryInfo::Instances {
-                        max_primitive_count: MAX_INSTANCE_COUNT.into(),
-                    },
-                ],
+                region: BufferRegion::whole(tlas_buffer),
             })?;
 
         tracing::trace!("TLAS created");
         // Allocate scratch memory for TLAS building.
-        let scratch =
-            ctx.allocate_acceleration_structure_build_scratch(&tlas, false)?;
+        let scratch = ctx.create_buffer(BufferInfo {
+            align: 255,
+            size: tlas_sizes.build_scratch_size,
+            usage: BufferUsage::DEVICE_ADDRESS,
+        })?;
 
         tracing::trace!("TLAS scratch allocated");
 
-        let globals_and_instances = ctx.create_buffer(BufferInfo {
-            align: globals_and_instances_align(),
-            size: globals_and_instances_size(),
-            usage: BufferUsage::UNIFORM
-                | BufferUsage::STORAGE
-                | BufferUsage::RAY_TRACING
-                | BufferUsage::SHADER_DEVICE_ADDRESS,
-            memory: MemoryUsageFlags::HOST_ACCESS
-                | MemoryUsageFlags::FAST_DEVICE_ACCESS,
-        })?;
+        let globals_and_instances = ctx.create_mappable_buffer(
+            BufferInfo {
+                align: globals_and_instances_align(),
+                size: globals_and_instances_size(),
+                usage: BufferUsage::UNIFORM
+                    | BufferUsage::STORAGE
+                    | BufferUsage::ACCELERATION_STRUCTURE_BUILD_INPUT
+                    | BufferUsage::DEVICE_ADDRESS,
+            },
+            MemoryUsage::FAST_DEVICE_ACCESS,
+        )?;
 
         tracing::trace!("Globals and instances buffer created");
 
@@ -373,7 +395,6 @@ impl RtPrepass {
             layers: 1,
             samples: Samples::Samples1,
             usage: ImageUsage::STORAGE | ImageUsage::SAMPLED,
-            memory: MemoryUsageFlags::empty(),
         })?;
 
         // View for whole image
@@ -388,7 +409,6 @@ impl RtPrepass {
             layers: 1,
             samples: Samples::Samples1,
             usage: ImageUsage::STORAGE | ImageUsage::SAMPLED,
-            memory: MemoryUsageFlags::empty(),
         })?;
 
         // View for whole image
@@ -403,7 +423,6 @@ impl RtPrepass {
             layers: 1,
             samples: Samples::Samples1,
             usage: ImageUsage::STORAGE | ImageUsage::SAMPLED,
-            memory: MemoryUsageFlags::empty(),
         })?;
 
         // View for whole image
@@ -418,7 +437,6 @@ impl RtPrepass {
             layers: 1,
             samples: Samples::Samples1,
             usage: ImageUsage::STORAGE | ImageUsage::SAMPLED,
-            memory: MemoryUsageFlags::empty(),
         })?;
 
         // View for whole image
@@ -433,7 +451,6 @@ impl RtPrepass {
             layers: 1,
             samples: Samples::Samples1,
             usage: ImageUsage::STORAGE | ImageUsage::SAMPLED,
-            memory: MemoryUsageFlags::empty(),
         })?;
 
         // View for whole image
@@ -475,6 +492,16 @@ impl RtPrepass {
                         blue_noise_buffer_256x256x128.clone(),
                         0,
                         blue_noise_buffer_256x256x128.info().size,
+                    )]),
+                },
+                WriteDescriptorSet {
+                    set: &set,
+                    binding: 6,
+                    element: 0,
+                    descriptors: Descriptors::StorageBuffer(&[(
+                        blue_noise_sampler_buffer_256spp.clone(),
+                        0,
+                        blue_noise_sampler_buffer_256spp.info().size,
                     )]),
                 },
                 WriteDescriptorSet {
@@ -882,6 +909,7 @@ impl<'a> Pass<'a> for RtPrepass {
         let infos = bump.alloc([AccelerationStructureBuildGeometryInfo {
             src: None,
             dst: self.tlas.clone(),
+            flags: AccelerationStructureBuildFlags::PREFER_FAST_BUILD,
             geometries: bump.alloc([
                 AccelerationStructureGeometry::Instances {
                     flags: GeometryFlags::OPAQUE,
@@ -899,16 +927,16 @@ impl<'a> Pass<'a> for RtPrepass {
 
         tracing::trace!("Update Globals");
 
-        ctx.write_memory(
-            &self.globals_and_instances,
+        ctx.write_buffer(
+            &mut self.globals_and_instances,
             acc_instances_offset(findex),
             &acc_instances,
         )?;
 
         tracing::trace!("Update Globals");
 
-        ctx.write_memory(
-            &self.globals_and_instances,
+        ctx.write_buffer(
+            &mut self.globals_and_instances,
             instances_offset(findex),
             &instances,
         )?;
@@ -930,8 +958,8 @@ impl<'a> Pass<'a> for RtPrepass {
 
         tracing::trace!("Update Globals");
 
-        ctx.write_memory(
-            &self.globals_and_instances,
+        ctx.write_buffer(
+            &mut self.globals_and_instances,
             pointlight_offset(findex),
             &pointlights,
         )?;
@@ -980,8 +1008,8 @@ impl<'a> Pass<'a> for RtPrepass {
 
         tracing::trace!("Update Globals");
 
-        ctx.write_memory(
-            &self.globals_and_instances,
+        ctx.write_buffer(
+            &mut self.globals_and_instances,
             globals_offset(findex),
             std::slice::from_ref(&globals),
         )?;

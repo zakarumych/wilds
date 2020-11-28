@@ -126,8 +126,7 @@ impl DescriptorSizesBuilder {
     }
 
     pub fn build(self) -> DescriptorSizes {
-        let mut sizes = [vk1_0::DescriptorPoolSize::default()
-            .into_builder()
+        let mut sizes = [vk1_0::DescriptorPoolSizeBuilder::new()
             ._type(vk1_0::DescriptorType::SAMPLER)
             .descriptor_count(0);
             DESCRIPTOR_TYPES_COUNT];

@@ -6,12 +6,11 @@
 #include "descriptors.glsl"
 
 layout(binding = 0, set = 0) uniform accelerationStructureEXT tlas;
-#include "../common/viewport.glsl"
-
 layout(location = 0) rayPayloadEXT PrimaryHitPayload prd;
 
-
 layout(binding = 6, set = 1, rgba8) uniform restrict writeonly image2D result;
+
+#include "../common/viewport.glsl"
 
 void main() {
     prd.result = vec3(0);

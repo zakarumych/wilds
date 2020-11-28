@@ -1,24 +1,51 @@
 pub use crate::backend::AccelerationStructure;
-use crate::{format::Format, DeviceAddress, IndexType};
+use crate::{buffer::BufferRegion, format::Format, DeviceAddress, IndexType};
 
 bitflags::bitflags! {
     /// Bits which can be set in `AccelerationStructureInfo` specifying additional parameters for acceleration structure builds.
     #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
-    pub struct AccelerationStructureFlags: u32 {
+    pub struct AccelerationStructureBuildFlags: u32 {
+        /// Allow acceleration structure update operation.
+        /// Acceleration structure update allows changing internal structure
+        /// without recreating whole `AccelerationStructure` instance.
         const ALLOW_UPDATE      = 0x00000001;
+
+        /// Allow acceleration structure compaction operation.
+        /// Compaction allows to reduce memory consumption.
         const ALLOW_COMPACTION  = 0x00000002;
+
+        /// Hint implementation to make `AcceleractionStructure` faster to trace.
         const PREFER_FAST_TRACE = 0x00000004;
+
+        /// Hint implementation to make `AcceleractionStructure` faster to build.
         const PREFER_FAST_BUILD = 0x00000008;
+
+        /// Hint implementation to use minimal amount of memory.
         const LOW_MEMORY        = 0x00000010;
     }
 }
 
+/// Information required to create an instance of `AccelerationStructure`.
 #[derive(Clone, Debug)]
-#[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
 pub struct AccelerationStructureInfo {
+    /// Acceleration structure level.
+    /// Either top level that refere to bottom level structures.
+    /// Or bottom level that refer to geometry.
     pub level: AccelerationStructureLevel,
-    pub flags: AccelerationStructureFlags,
-    pub geometries: Vec<AccelerationStructureGeometryInfo>,
+
+    /// Region of the buffer that will be used to store `AccelerationStructure`.
+    ///
+    /// Buffer must be created with `ACCELERATION_STRUCTURE_STORAGE` usage flag.
+    /// required size can be queried using `Device::get_acceleration_structure_build_sizes`
+    pub region: BufferRegion,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
+pub struct AccelerationStructureBuildSizesInfo {
+    pub acceleration_structure_size: u64,
+    pub update_scratch_size: u64,
+    pub build_scratch_size: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -101,6 +128,7 @@ bitflags::bitflags! {
 pub struct AccelerationStructureBuildGeometryInfo<'a> {
     pub src: Option<AccelerationStructure>,
     pub dst: AccelerationStructure,
+    pub flags: AccelerationStructureBuildFlags,
     pub geometries: &'a [AccelerationStructureGeometry],
     pub scratch: DeviceAddress,
 }
@@ -112,6 +140,7 @@ pub enum AccelerationStructureGeometry {
         vertex_format: Format,
         vertex_data: DeviceAddress,
         vertex_stride: u64,
+        vertex_count: u32,
         first_vertex: u32,
         primitive_count: u32,
         index_data: Option<IndexData>,

@@ -2,7 +2,6 @@
 
 #ifndef M_PI
 #define M_PI 3.1415926535897932384626433832795
-#define M_FI 
 #endif
 
 
@@ -57,50 +56,50 @@ vec3 nice_rand(uvec4 co) {
     // float z = wave(0.5 + dot(co, alpha.zxy));
     
     const double fi4 = 1.1673039782614186842560458998548421807205603715254890391400824492756519034295270;
-    const double i1fi4 = fi4 * fi4 * fi4 - 1;
-    const double i2fi4 = fi4 * fi4 - i1fi4;
-    const double i3fi4 = fi4 - i2fi4;
-    const double i4fi4 = 1 - i3fi4;
+    // const double i1fi4 = fi4 * fi4 * fi4 - 1;
+    // const double i2fi4 = fi4 * fi4 - i1fi4;
+    // const double i3fi4 = fi4 - i2fi4;
+    // const double i4fi4 = 1 - i3fi4;
 
-    const vec4 alpha = vec4(i1fi4, i2fi4, i3fi4, i4fi4);
-    float x = wave(0.1 + dot(co, alpha));
-    float y = wave(0.2 + dot(co, alpha.yzwx));
-    float z = wave(0.3 + dot(co, alpha.wzyx));
+    // const vec4 alpha = vec4(i1fi4, i2fi4, i3fi4, i4fi4);
+    // float x = wave(0.1 + dot(co, alpha));
+    // float y = wave(0.2 + dot(co, alpha.yzwx));
+    // float z = wave(0.3 + dot(co, alpha.wzyx));
 
-    // // const double fi5 = 1.1347241384015194926054460545064728402796672263828014859251495516682368939998426;
-    // // const double i1fi5 = fi5 * fi5 * fi5 * fi5 - 1;
-    // // const double i2fi5 = fi5 * fi5 * fi5 - i1fi5;
-    // // const double i3fi5 = fi5 * fi5 - i2fi5;
-    // // const double i4fi5 = fi5 - i3fi5;
-    // // const double i5fi5 = 1 - i4fi5;
+    // const double fi5 = 1.1347241384015194926054460545064728402796672263828014859251495516682368939998426;
+    // const double i1fi5 = fi5 * fi5 * fi5 * fi5 - 1;
+    // const double i2fi5 = fi5 * fi5 * fi5 - i1fi5;
+    // const double i3fi5 = fi5 * fi5 - i2fi5;
+    // const double i4fi5 = fi5 - i3fi5;
+    // const double i5fi5 = 1 - i4fi5;
 
-    // // const vec3 alpha = vec3(i1fi3, i1fi4, i1fi5);
-    // // const vec3 beta = vec3(i2fi3, i2fi4, i2fi5);
-    // // const vec3 gamma = vec3(i3fi3, i3fi4, i3fi5);
+    // const vec3 alpha = vec3(i1fi3, i1fi4, i1fi5);
+    // const vec3 beta = vec3(i2fi3, i2fi4, i2fi5);
+    // const vec3 gamma = vec3(i3fi3, i3fi4, i3fi5);
 
-    // // vec3 fco = vec3(co);
-    // // return wave(vec3(dot(fco, alpha), dot(fco, beta), dot(fco, gamma)));
+    // vec3 fco = vec3(co);
+    // return wave(vec3(dot(fco, alpha), dot(fco, beta), dot(fco, gamma)));
 
-    // // const vec3 alpha = vec3(1/M_PL, 1/M_PL/M_PL, 1/M_PL/M_PL/M_PL);
-    // // const vec3 beta = vec3(1/M_FI, 1/M_FI/M_FI, 1/M_FI/M_FI/M_FI);
-    // // const vec3 gamma = vec3(1/M_PX, 1/M_PX/M_PX, 1/M_PX/M_PX/M_PX);
-    // // float x = wave(0.5 + dot(co, alpha));
-    // // float y = wave(0.5 + dot(co, beta));
-    // // float z = wave(0.5 + dot(co, gamma));
+    // const vec3 alpha = vec3(1/M_PL, 1/M_PL/M_PL, 1/M_PL/M_PL/M_PL);
+    // const vec3 beta = vec3(1/M_FI, 1/M_FI/M_FI, 1/M_FI/M_FI/M_FI);
+    // const vec3 gamma = vec3(1/M_PX, 1/M_PX/M_PX, 1/M_PX/M_PX/M_PX);
+    // float x = wave(0.5 + dot(co, alpha));
+    // float y = wave(0.5 + dot(co, beta));
+    // float z = wave(0.5 + dot(co, gamma));
 
-    // // const vec3 alpha = vec3(0.819172513396164439699571188342427040348497832553712965667, 0.6287067210378086337748232573780154909680339260213870955039718150, 0.6180339887498948482045868343656381177203091798057628621354486227);
-    // // const vec3 beta = vec3(0.671043606703789208416815654036199702552744474771178058743, 0.8566748838545028748523248153124343698313999454937526255764128103, 0.3819660112501051517954131656343618822796908201942371378645513772);
-    // // const vec3 gamma = vec3(0.549700477901970266944869695072632211879744611477457155545, 0.7338918566271259904047331700024405296994329007761294712589367538, 0.2360679774997896964091736687312762354406183596115257242708972454);
-    // // float x = fract(0.5 + dot(co, alpha));
-    // // float y = fract(0.5 + dot(co, beta));
-    // // float z = fract(0.5 + dot(co, gamma));
+    // const vec3 alpha = vec3(0.819172513396164439699571188342427040348497832553712965667, 0.6287067210378086337748232573780154909680339260213870955039718150, 0.6180339887498948482045868343656381177203091798057628621354486227);
+    // const vec3 beta = vec3(0.671043606703789208416815654036199702552744474771178058743, 0.8566748838545028748523248153124343698313999454937526255764128103, 0.3819660112501051517954131656343618822796908201942371378645513772);
+    // const vec3 gamma = vec3(0.549700477901970266944869695072632211879744611477457155545, 0.7338918566271259904047331700024405296994329007761294712589367538, 0.2360679774997896964091736687312762354406183596115257242708972454);
+    // float x = fract(0.5 + dot(co, alpha));
+    // float y = fract(0.5 + dot(co, beta));
+    // float z = fract(0.5 + dot(co, gamma));
 
-    // // const vec3 alpha = vec3(1/fi_4, 1/fi_4/fi_4, 1/fi_4/fi_4/fi_4);
-    // // const vec3 beta = vec3(1/fi_4/fi_4, 1/fi_4/fi_4/fi_4, 1/fi_4/fi_4/fi_4/fi_4);
-    // // const vec3 gamma = vec3(1/fi_4/fi_4/fi_4, 1/fi_4/fi_4/fi_4/fi_4, 1/fi_4/fi_4/fi_4/fi_4/fi_4);
-    // // float x = wave(0.5 + dot(co, alpha));
-    // // float y = wave(0.5 + dot(co, beta));
-    // // float z = wave(0.5 + dot(co, gamma));
+    const vec4 alpha = vec4(1/fi4, 1/fi4/fi4, 1/fi4/fi4/fi4, 1/fi4/fi4/fi4/fi4);
+    const vec4 beta = vec4(1/fi4/fi4, 1/fi4/fi4/fi4, 1/fi4/fi4/fi4/fi4, 1/fi4/fi4/fi4/fi4/fi4);
+    const vec4 gamma = vec4(1/fi4/fi4/fi4, 1/fi4/fi4/fi4/fi4, 1/fi4/fi4/fi4/fi4/fi4, 1/fi4/fi4/fi4/fi4/fi4/fi4);
+    float x = wave(0.5 + dot(co, alpha));
+    float y = wave(0.5 + dot(co, beta));
+    float z = wave(0.5 + dot(co, gamma));
     vec3 v = vec3(x, y, z);
 
     return v;
@@ -114,17 +113,46 @@ vec3 nice_rand(uvec4 co) {
 //     return vec3(x, y, z);
 // }
 
-vec3 blue_rand(uvec4 co) {
-    uint x = co.x % 256;
-    uint y = co.y % 256;
-    uint z = (co.z + co.w) % 128;
+float blue_rand_sample(uint i, uint j, uint sample_index, uint sample_dimension) {
+	// xor index based on optimized ranking
+	// jb: 1spp blue noise has all 0 in blue_noise_sampler.ranking_tile so we can skip the load
+	uint ranked_sample_index = sample_index ^ blue_noise_sampler.ranking_tile[sample_dimension & 7 + (i + j * 128) * 8];
 
-    uint index = x + y * 256 + z * 256 * 256;
+	// fetch value in sequence
+	int value = blue_noise_sampler.sobol[sample_dimension + ranked_sample_index * 256];
+
+	// If the dimension is optimized, xor sequence value based on optimized scrambling
+	value = value ^ blue_noise_sampler.scrambling_tile[sample_dimension & 7 + (i + j * 128) * 8];
+
+	// convert to float and return
+	float v = float(value) / 255.0f;
+    return v;
+}
+
+vec3 blue_rand_broken(uvec4 co) {
+    // wrap arguments
+	uint i = co.x & 127;
+    uint j = co.y & 127;
+	uint sample_dimension = co.z & 255;
+	uint sample_index = (co.w * 4) & 255;
+
+    float x = blue_rand_sample(i, j, sample_index + 0, sample_dimension);
+    float y = blue_rand_sample(i, j, sample_index + 1, sample_dimension);
+    float z = blue_rand_sample(i, j, sample_index + 2, sample_dimension);
+
+	return vec3(x, y, z);
+}
+
+vec3 blue_rand(uvec4 co) {
+    uint x = co.x & 255;
+    uint y = co.y & 255;
+    uint z = (co.z + co.w) & 127;
+
+    uint index = x + y * 256 + z * 65536;
     vec4 raw = blue_noise[index];
 
     return raw.xyz;
 }
-
 
 vec2 rand_circle(vec3 rand) {
     float t = rand.x * 2 * M_PI;

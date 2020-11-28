@@ -16,7 +16,7 @@ use {
     futures::future::BoxFuture,
     hecs::{Entity, World},
     illume::{
-        BufferInfo, BufferUsage, IndexType, MemoryUsageFlags, OutOfMemory,
+        BufferInfo, BufferUsage, IndexType, MemoryUsage, OutOfMemory,
         PrimitiveTopology,
     },
     image::{
@@ -150,7 +150,6 @@ pub fn create_terrain_mesh(
             align: 255,
             size: total_size as u64,
             usage: buffer_usage,
-            memory: MemoryUsageFlags::empty(),
         },
         &data,
     )?;
@@ -296,9 +295,9 @@ impl Format<TerrainAsset, AssetKey> for TerrainFormat {
         }
 
         if self.blas {
-            buffer_usage |= BufferUsage::RAY_TRACING
+            buffer_usage |= BufferUsage::ACCELERATION_STRUCTURE_BUILD_INPUT
                 | BufferUsage::STORAGE
-                | BufferUsage::SHADER_DEVICE_ADDRESS;
+                | BufferUsage::DEVICE_ADDRESS;
         }
 
         let factor = info.factor;

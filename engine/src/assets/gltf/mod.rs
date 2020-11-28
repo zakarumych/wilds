@@ -42,9 +42,9 @@ impl GltfFormat {
     pub fn for_raytracing() -> Self {
         GltfFormat {
             mesh_indices_usage: BufferUsage::STORAGE
-                | BufferUsage::SHADER_DEVICE_ADDRESS,
+                | BufferUsage::DEVICE_ADDRESS,
             mesh_vertices_usage: BufferUsage::STORAGE
-                | BufferUsage::SHADER_DEVICE_ADDRESS,
+                | BufferUsage::DEVICE_ADDRESS,
         }
     }
 }

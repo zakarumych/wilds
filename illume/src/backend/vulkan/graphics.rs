@@ -11,7 +11,7 @@ use {
     erupt::{
         extensions::{
             ext_debug_report::{
-                DebugReportCallbackCreateInfoEXT, DebugReportFlagsEXT,
+                DebugReportCallbackCreateInfoEXTBuilder, DebugReportFlagsEXT,
                 DebugReportObjectTypeEXT, EXT_DEBUG_REPORT_EXTENSION_NAME,
             },
             ext_debug_utils::EXT_DEBUG_UTILS_EXTENSION_NAME,
@@ -246,11 +246,9 @@ impl Graphics {
 
         let result = InstanceLoader::new(
             &entry,
-            &vk1_0::InstanceCreateInfo::default()
-                .into_builder()
+            &vk1_0::InstanceCreateInfoBuilder::new()
                 .application_info(
-                    &vk1_0::ApplicationInfo::default()
-                        .into_builder()
+                    &vk1_0::ApplicationInfoBuilder::new()
                         .engine_name(
                             CStr::from_bytes_with_nul(b"Illume\0").unwrap(),
                         )
@@ -276,11 +274,10 @@ impl Graphics {
             Ok(ok) => ok,
         };
 
-        if instance.enabled.ext_debug_report {
+        if instance.enabled().ext_debug_report {
             let _ = unsafe {
                 instance.create_debug_report_callback_ext(
-                    &DebugReportCallbackCreateInfoEXT::default()
-                        .into_builder()
+                    &DebugReportCallbackCreateInfoEXTBuilder::new()
                         .flags(DebugReportFlagsEXT::all())
                         .pfn_callback(Some(debug_report_callback)),
                     None,
@@ -340,7 +337,7 @@ impl Graphics {
         let surface = match window {
             #[cfg(target_os = "android")]
             RawWindowHandle::Android(handle) => {
-                if !self.instance.enabled.khr_android_surface {
+                if !self.instance.enabled().khr_android_surface {
                     return Err(CreateSurfaceError::UnsupportedWindow {
                         window: RawWindowHandleKind::Android,
                         source: Box::new(RequiredExtensionIsNotAvailable {
@@ -376,7 +373,7 @@ impl Graphics {
 
             #[cfg(target_os = "windows")]
             RawWindowHandle::Windows(handle) => {
-                if !self.instance.enabled.khr_win32_surface {
+                if !self.instance.enabled().khr_win32_surface {
                     return Err(CreateSurfaceError::UnsupportedWindow {
                         window: RawWindowHandleKind::Windows,
                         source: Some(Box::new(
@@ -416,7 +413,7 @@ impl Graphics {
                 target_os = "openbsd"
             ))]
             RawWindowHandle::Xcb(handle) => {
-                if !self.instance.enabled.khr_xcb_surface {
+                if !self.instance.enabled().khr_xcb_surface {
                     return Err(CreateSurfaceError::UnsupportedWindow {
                         window: RawWindowHandleKind::Xcb,
                         source: Some(Box::new(
@@ -438,7 +435,7 @@ impl Graphics {
                 target_os = "openbsd"
             ))]
             RawWindowHandle::Xlib(handle) => {
-                if !self.instance.enabled.khr_xlib_surface {
+                if !self.instance.enabled().khr_xlib_surface {
                     return Err(CreateSurfaceError::UnsupportedWindow {
                         window: RawWindowHandleKind::Xlib,
                         source: Some(Box::new(

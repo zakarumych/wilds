@@ -267,7 +267,6 @@ impl<'a> Pass<'a> for ATrousFilter {
                     layers: 1,
                     samples: Samples1,
                     usage: ImageUsage::COLOR_ATTACHMENT | ImageUsage::SAMPLED,
-                    memory: MemoryUsageFlags::empty(),
                 })?;
 
                 let filtered1 = ctx.create_image(ImageInfo {
@@ -277,7 +276,6 @@ impl<'a> Pass<'a> for ATrousFilter {
                     layers: 1,
                     samples: Samples1,
                     usage: ImageUsage::COLOR_ATTACHMENT | ImageUsage::SAMPLED,
-                    memory: MemoryUsageFlags::empty(),
                 })?;
 
                 let filtered0 =
