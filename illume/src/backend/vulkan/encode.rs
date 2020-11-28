@@ -9,7 +9,7 @@ use {
             AccelerationStructureGeometry, AccelerationStructureLevel,
             IndexData,
         },
-        buffer::StridedBufferRegion,
+        buffer::{BufferUsage, StridedBufferRegion},
         encode::*,
         format::{FormatDescription, FormatType, Repr},
         queue::QueueId,
@@ -18,7 +18,13 @@ use {
         },
         IndexType, OutOfMemory,
     },
-    erupt::{extensions::khr_ray_tracing as vkrt, vk1_0},
+    erupt::{
+        extensions::{
+            khr_acceleration_structure as vkacc,
+            khr_ray_tracing_pipeline as vkrt,
+        },
+        vk1_0,
+    },
     smallvec::SmallVec,
     std::{
         convert::TryFrom as _,
@@ -29,7 +35,7 @@ use {
 pub struct CommandBuffer {
     handle: vk1_0::CommandBuffer,
     queue: QueueId,
-    device: WeakDevice,
+    owner: WeakDevice,
     recording: bool,
 }
 
@@ -38,7 +44,7 @@ impl Debug for CommandBuffer {
         if fmt.alternate() {
             fmt.debug_struct("CommandBuffer ")
                 .field("handle", &self.handle)
-                .field("device", &self.device)
+                .field("owner", &self.owner)
                 .field("queue", &self.queue)
                 .finish()
         } else {
@@ -48,22 +54,32 @@ impl Debug for CommandBuffer {
 }
 
 impl CommandBuffer {
-    pub(crate) fn new(
+    pub(super) fn new(
         handle: vk1_0::CommandBuffer,
         queue: QueueId,
-        device: WeakDevice,
+        owner: WeakDevice,
     ) -> Self {
         CommandBuffer {
             handle,
             queue,
-            device,
+            owner,
             recording: false,
         }
     }
 
-    pub(crate) fn handle(&self, device: &Device) -> vk1_0::CommandBuffer {
-        assert!(self.device.is(device));
+    pub(super) fn handle(&self) -> vk1_0::CommandBuffer {
         self.handle
+    }
+
+    pub(super) fn is_owned_by(
+        &self,
+        owner: &impl PartialEq<WeakDevice>,
+    ) -> bool {
+        *owner == self.owner
+    }
+
+    pub(super) fn owner(&self) -> &WeakDevice {
+        &self.owner
     }
 
     pub fn queue(&self) -> QueueId {
@@ -74,7 +90,7 @@ impl CommandBuffer {
         &mut self,
         commands: &[Command<'_>],
     ) -> Result<(), OutOfMemory> {
-        let device = match self.device.upgrade() {
+        let device = match self.owner.upgrade() {
             Some(device) => device,
             None => return Ok(()),
         };
@@ -83,8 +99,7 @@ impl CommandBuffer {
             unsafe {
                 device.logical().begin_command_buffer(
                     self.handle,
-                    &vk1_0::CommandBufferBeginInfo::default()
-                        .into_builder()
+                    &vk1_0::CommandBufferBeginInfoBuilder::new()
                         .flags(vk1_0::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
                 )
             }
@@ -103,6 +118,9 @@ impl CommandBuffer {
                     framebuffer,
                     clears,
                 } => {
+                    assert_owner!(pass, device);
+                    assert_owner!(framebuffer, device);
+
                     let clear_values = pass
                             .info()
                             .attachments
@@ -136,10 +154,9 @@ impl CommandBuffer {
                     unsafe {
                         logical.cmd_begin_render_pass(
                             self.handle,
-                            &vk1_0::RenderPassBeginInfo::default()
-                                .into_builder()
-                                .render_pass(pass.handle(&device))
-                                .framebuffer(framebuffer.handle(&device)) //FIXME: Check `framebuffer` belongs to the
+                            &vk1_0::RenderPassBeginInfoBuilder::new()
+                                .render_pass(pass.handle())
+                                .framebuffer(framebuffer.handle()) //FIXME: Check `framebuffer` belongs to the
                                 // pass.
                                 .render_area(vk1_0::Rect2D {
                                     offset: vk1_0::Offset2D { x: 0, y: 0 },
@@ -157,17 +174,21 @@ impl CommandBuffer {
                     logical.cmd_end_render_pass(self.handle)
                 },
                 Command::BindGraphicsPipeline { pipeline } => unsafe {
+                    assert_owner!(pipeline, device);
+
                     logical.cmd_bind_pipeline(
                         self.handle,
                         vk1_0::PipelineBindPoint::GRAPHICS,
-                        pipeline.handle(&device),
+                        pipeline.handle(),
                     )
                 },
                 Command::BindComputePipeline { pipeline } => unsafe {
+                    assert_owner!(pipeline, device);
+
                     logical.cmd_bind_pipeline(
                         self.handle,
                         vk1_0::PipelineBindPoint::COMPUTE,
-                        pipeline.handle(&device),
+                        pipeline.handle(),
                     )
                 },
                 Command::Draw {
@@ -220,24 +241,28 @@ impl CommandBuffer {
                     data,
                 } => unsafe {
                     assert_eq!(offset % 4, 0);
-
                     assert!(data.len() < 65_536);
+                    assert_owner!(buffer, device);
 
                     logical.cmd_update_buffer(
                         self.handle,
-                        buffer.handle(&device),
+                        buffer.handle(),
                         offset,
                         data.len() as _,
                         data.as_ptr() as _,
                     );
                 },
                 Command::BindVertexBuffers { first, buffers } => unsafe {
+                    for (buffer, _) in buffers {
+                        assert_owner!(buffer, device);
+                    }
+
                     let offsets: SmallVec<[_; 8]> =
                         buffers.iter().map(|&(_, offset)| offset).collect();
 
                     let buffers: SmallVec<[_; 8]> = buffers
                         .iter()
-                        .map(|(buffer, _)| buffer.handle(&device))
+                        .map(|(buffer, _)| buffer.handle())
                         .collect();
 
                     logical.cmd_bind_vertex_buffers(
@@ -248,7 +273,10 @@ impl CommandBuffer {
                     );
                 },
                 Command::BuildAccelerationStructure { infos } => {
-                    assert!(device.logical().enabled.khr_ray_tracing);
+                    assert!(
+                        device.logical().enabled().khr_acceleration_structure,
+                        "`AccelerationStructure` feature is not enabled"
+                    );
 
                     // Vulkan specific checks.
                     assert!(
@@ -280,8 +308,14 @@ impl CommandBuffer {
                     let mut offsets = SmallVec::<[_; 32]>::new();
 
                     let ranges: SmallVec<[_; 32]> = infos.iter().map(|info| {
+                            if let Some(src) = &info.src {
+                                assert_owner!(src, device);
+                            }
+                            assert_owner!(info.dst, device);
+
                             let mut total_primitive_count = 0u64;
                             let offset = geometries.len();
+
                             for geometry in info.geometries {
                                 match geometry {
                                     AccelerationStructureGeometry::Triangles {
@@ -289,20 +323,22 @@ impl CommandBuffer {
                                         vertex_format,
                                         vertex_data,
                                         vertex_stride,
+                                        vertex_count,
                                         first_vertex,
                                         primitive_count,
                                         index_data,
                                         transform_data,
                                     } => {
                                         total_primitive_count += (*primitive_count) as u64;
-                                        geometries.push(vkrt::AccelerationStructureGeometryKHR::default().into_builder()
+                                        geometries.push(vkacc::AccelerationStructureGeometryKHRBuilder::new()
                                             .flags(flags.to_erupt())
-                                            .geometry_type(vkrt::GeometryTypeKHR::TRIANGLES_KHR)
-                                            .geometry(vkrt::AccelerationStructureGeometryDataKHR {
-                                                triangles: vkrt::AccelerationStructureGeometryTrianglesDataKHR::default().into_builder()
+                                            .geometry_type(vkacc::GeometryTypeKHR::TRIANGLES_KHR)
+                                            .geometry(vkacc::AccelerationStructureGeometryDataKHR {
+                                                triangles: vkacc::AccelerationStructureGeometryTrianglesDataKHRBuilder::new()
                                                 .vertex_format(vertex_format.to_erupt())
                                                 .vertex_data(vertex_data.to_erupt())
                                                 .vertex_stride(*vertex_stride)
+                                                .max_vertex(*vertex_count)
                                                 .index_type(match index_data {
                                                     None => vk1_0::IndexType::NONE_KHR,
                                                     Some(IndexData::U16(_)) => vk1_0::IndexType::UINT16,
@@ -317,38 +353,38 @@ impl CommandBuffer {
                                                 .build()
                                             }));
 
-                                        offsets.push(vkrt::AccelerationStructureBuildOffsetInfoKHR::default().into_builder()
+                                        offsets.push(vkacc::AccelerationStructureBuildRangeInfoKHRBuilder::new()
                                             .primitive_count(*primitive_count)
                                             .first_vertex(*first_vertex)
                                         );
                                     }
                                     AccelerationStructureGeometry::AABBs { flags, data, stride, primitive_count } => {
                                         total_primitive_count += (*primitive_count) as u64;
-                                        geometries.push(vkrt::AccelerationStructureGeometryKHR::default().into_builder()
+                                        geometries.push(vkacc::AccelerationStructureGeometryKHRBuilder::new()
                                             .flags(flags.to_erupt())
-                                            .geometry_type(vkrt::GeometryTypeKHR::AABBS_KHR)
-                                            .geometry(vkrt::AccelerationStructureGeometryDataKHR {
-                                                aabbs: vkrt::AccelerationStructureGeometryAabbsDataKHR::default().into_builder()
+                                            .geometry_type(vkacc::GeometryTypeKHR::AABBS_KHR)
+                                            .geometry(vkacc::AccelerationStructureGeometryDataKHR {
+                                                aabbs: vkacc::AccelerationStructureGeometryAabbsDataKHRBuilder::new()
                                                     .data(data.to_erupt())
                                                     .stride(*stride)
                                                     .build()
                                             }));
 
-                                        offsets.push(vkrt::AccelerationStructureBuildOffsetInfoKHR::default().into_builder()
+                                        offsets.push(vkacc::AccelerationStructureBuildRangeInfoKHRBuilder::new()
                                             .primitive_count(*primitive_count)
                                         );
                                     }
                                     AccelerationStructureGeometry::Instances { flags, data, primitive_count } => {
-                                        geometries.push(vkrt::AccelerationStructureGeometryKHR::default().into_builder()
+                                        geometries.push(vkacc::AccelerationStructureGeometryKHRBuilder::new()
                                             .flags(flags.to_erupt())
-                                            .geometry_type(vkrt::GeometryTypeKHR::INSTANCES_KHR)
-                                            .geometry(vkrt::AccelerationStructureGeometryDataKHR {
-                                                instances: vkrt::AccelerationStructureGeometryInstancesDataKHR::default().into_builder()
+                                            .geometry_type(vkacc::GeometryTypeKHR::INSTANCES_KHR)
+                                            .geometry(vkacc::AccelerationStructureGeometryDataKHR {
+                                                instances: vkacc::AccelerationStructureGeometryInstancesDataKHRBuilder::new()
                                                     .data(data.to_erupt())
                                                     .build()
                                             }));
 
-                                        offsets.push(vkrt::AccelerationStructureBuildOffsetInfoKHR::default().into_builder()
+                                        offsets.push(vkacc::AccelerationStructureBuildRangeInfoKHRBuilder::new()
                                             .primitive_count(*primitive_count)
                                         );
                                     }
@@ -356,45 +392,36 @@ impl CommandBuffer {
                             }
 
                             if let AccelerationStructureLevel::Bottom = info.dst.info().level {
-                                assert!(total_primitive_count <= device.properties().rt.max_primitive_count);
+                                assert!(total_primitive_count <= device.properties().acc.max_primitive_count);
                             }
 
                             offset .. geometries.len()
                         }).collect();
 
-                    let geometries_pointers: SmallVec<[_; 32]> = ranges
-                        .iter()
-                        .map(|range| {
-                            &*geometries[range.start]
-                                as *const vkrt::AccelerationStructureGeometryKHR
-                        })
-                        .collect();
-
                     let build_infos: SmallVec<[_; 32]> = infos
                         .iter()
-                        .zip(&geometries_pointers)
                         .zip(&ranges)
-                        .map(|((info, geometry_pointer), range)| {
+                        .map(|(info, range)| {
                             let src = info
                                 .src
                                 .as_ref()
-                                .map(|src| src.handle(&device))
+                                .map(|src| src.handle())
                                 .unwrap_or_default();
-                            let dst = info.dst.handle(&device);
 
-                            let dst_info = info.dst.info();
-                            let mut asbgi = vkrt::AccelerationStructureBuildGeometryInfoKHR::default()
-                                .into_builder()
-                                ._type(dst_info.level.to_erupt())
-                                .flags(dst_info.flags.to_erupt())
-                                .update(info.src.is_some())
+                            vkacc::AccelerationStructureBuildGeometryInfoKHRBuilder::new()
+                                ._type(info.dst.info().level.to_erupt())
+                                .flags(info.flags.to_erupt())
+                                .mode(
+                                    if info.src.is_some() {
+                                        vkacc::BuildAccelerationStructureModeKHR::UPDATE_KHR
+                                    } else {
+                                        vkacc::BuildAccelerationStructureModeKHR::BUILD_KHR
+                                    }
+                                )
                                 .src_acceleration_structure(src)
-                                .dst_acceleration_structure(dst)
-                                .scratch_data(info.scratch.to_erupt());
-                            asbgi.pp_geometries = geometry_pointer;
-                            asbgi.geometry_array_of_pointers = 0;
-                            asbgi.geometry_count = range.len() as u32;
-                            asbgi
+                                .dst_acceleration_structure(info.dst.handle())
+                                .scratch_data(info.scratch.to_erupt()) // TODO: Validate this one.
+                                .geometries(&geometries[range.clone()])
                         })
                         .collect();
 
@@ -404,7 +431,7 @@ impl CommandBuffer {
                         .collect();
 
                     unsafe {
-                        device.logical().cmd_build_acceleration_structure_khr(
+                        device.logical().cmd_build_acceleration_structures_khr(
                             self.handle,
                             &build_infos,
                             &build_offsets,
@@ -416,9 +443,11 @@ impl CommandBuffer {
                     offset,
                     index_type,
                 } => unsafe {
+                    assert_owner!(buffer, device);
+
                     logical.cmd_bind_index_buffer(
                         self.handle,
-                        buffer.handle(&device),
+                        buffer.handle(),
                         offset,
                         match index_type {
                             IndexType::U16 => vk1_0::IndexType::UINT16,
@@ -428,10 +457,12 @@ impl CommandBuffer {
                 },
 
                 Command::BindRayTracingPipeline { pipeline } => unsafe {
+                    assert_owner!(pipeline, device);
+
                     logical.cmd_bind_pipeline(
                         self.handle,
                         vk1_0::PipelineBindPoint::RAY_TRACING_KHR,
-                        pipeline.handle(&device),
+                        pipeline.handle(),
                     )
                 },
 
@@ -441,14 +472,20 @@ impl CommandBuffer {
                     sets,
                     dynamic_offsets,
                 } => unsafe {
+                    assert_owner!(layout, device);
+
+                    for set in sets {
+                        assert_owner!(set, device);
+                    }
+
                     logical.cmd_bind_descriptor_sets(
                         self.handle,
                         vk1_0::PipelineBindPoint::GRAPHICS,
-                        layout.handle(&device),
+                        layout.handle(),
                         first_set,
                         &sets
                             .iter()
-                            .map(|set| set.handle(&device))
+                            .map(|set| set.handle())
                             .collect::<SmallVec<[_; 8]>>(),
                         dynamic_offsets,
                     )
@@ -460,14 +497,20 @@ impl CommandBuffer {
                     sets,
                     dynamic_offsets,
                 } => unsafe {
+                    assert_owner!(layout, device);
+
+                    for set in sets {
+                        assert_owner!(set, device);
+                    }
+
                     logical.cmd_bind_descriptor_sets(
                         self.handle,
                         vk1_0::PipelineBindPoint::COMPUTE,
-                        layout.handle(&device),
+                        layout.handle(),
                         first_set,
                         &sets
                             .iter()
-                            .map(|set| set.handle(&device))
+                            .map(|set| set.handle())
                             .collect::<SmallVec<[_; 8]>>(),
                         dynamic_offsets,
                     )
@@ -479,14 +522,20 @@ impl CommandBuffer {
                     sets,
                     dynamic_offsets,
                 } => unsafe {
+                    assert_owner!(layout, device);
+
+                    for set in sets {
+                        assert_owner!(set, device);
+                    }
+
                     logical.cmd_bind_descriptor_sets(
                         self.handle,
                         vk1_0::PipelineBindPoint::RAY_TRACING_KHR,
-                        layout.handle(&device),
+                        layout.handle(),
                         first_set,
                         &sets
                             .iter()
-                            .map(|set| set.handle(&device))
+                            .map(|set| set.handle())
                             .collect::<SmallVec<[_; 8]>>(),
                         dynamic_offsets,
                     )
@@ -496,19 +545,39 @@ impl CommandBuffer {
                     shader_binding_table,
                     extent,
                 } => {
-                    assert!(device.logical().enabled.khr_ray_tracing);
+                    assert!(
+                        device.logical().enabled().khr_ray_tracing_pipeline
+                    );
+                    if let Some(raygen) = &shader_binding_table.raygen {
+                        assert_owner!(raygen.buffer, device);
+                    }
+                    if let Some(miss) = &shader_binding_table.miss {
+                        assert_owner!(miss.buffer, device);
+                    }
+                    if let Some(hit) = &shader_binding_table.hit {
+                        assert_owner!(hit.buffer, device);
+                    }
+                    if let Some(callable) = &shader_binding_table.callable {
+                        assert_owner!(callable.buffer, device);
+                    }
 
-                    let sbr = vkrt::StridedBufferRegionKHR::default()
-                        .into_builder()
-                        .buffer(vk1_0::Buffer::null());
+                    let sbr = vkrt::StridedDeviceAddressRegionKHR::default();
 
                     let to_erupt = |sbr: &StridedBufferRegion| {
-                        vkrt::StridedBufferRegionKHR {
-                            buffer: sbr.buffer.handle(&device),
-                            offset: sbr.offset,
-                            size: sbr.size,
-                            stride: sbr.stride,
-                        }
+                        assert!(sbr
+                            .buffer
+                            .info()
+                            .usage
+                            .contains(BufferUsage::SHADER_BINDING_TABLE), "Buffers used to store shader binding table must be created with `SHADER_BINDING_TABLE` usage");
+
+                        let device_address =
+                            sbr.buffer.address().expect("Buffers used to store shader binding table must be created with `DEVICE_ADDRESS` usage").0.get();
+
+                        vkrt::StridedDeviceAddressRegionKHRBuilder::new()
+                            .device_address(device_address + sbr.offset)
+                            .stride(sbr.stride)
+                            .size(sbr.size)
+                            .build()
                     };
 
                     unsafe {
@@ -517,19 +586,19 @@ impl CommandBuffer {
                             &shader_binding_table
                                 .raygen
                                 .as_ref()
-                                .map_or(*sbr, to_erupt),
+                                .map_or(sbr, to_erupt),
                             &shader_binding_table
                                 .miss
                                 .as_ref()
-                                .map_or(*sbr, to_erupt),
+                                .map_or(sbr, to_erupt),
                             &shader_binding_table
                                 .hit
                                 .as_ref()
-                                .map_or(*sbr, to_erupt),
+                                .map_or(sbr, to_erupt),
                             &shader_binding_table
                                 .callable
                                 .as_ref()
-                                .map_or(*sbr, to_erupt),
+                                .map_or(sbr, to_erupt),
                             extent.width,
                             extent.height,
                             extent.depth,
@@ -543,11 +612,14 @@ impl CommandBuffer {
                     dst_layout,
                     regions,
                 } => unsafe {
+                    assert_owner!(src_image, device);
+                    assert_owner!(dst_image, device);
+
                     logical.cmd_copy_image(
                         self.handle,
-                        src_image.handle(&device),
+                        src_image.handle(),
                         src_layout.to_erupt(),
-                        dst_image.handle(&device),
+                        dst_image.handle(),
                         dst_layout.to_erupt(),
                         &regions
                             .iter()
@@ -561,10 +633,13 @@ impl CommandBuffer {
                     dst_buffer,
                     regions,
                 } => unsafe {
+                    assert_owner!(src_buffer, device);
+                    assert_owner!(dst_buffer, device);
+
                     logical.cmd_copy_buffer(
                         self.handle,
-                        src_buffer.handle(&device),
-                        dst_buffer.handle(&device),
+                        src_buffer.handle(),
+                        dst_buffer.handle(),
                         &regions
                             .iter()
                             .map(|region| region.to_erupt().into_builder())
@@ -577,10 +652,13 @@ impl CommandBuffer {
                     dst_layout,
                     regions,
                 } => unsafe {
+                    assert_owner!(src_buffer, device);
+                    assert_owner!(dst_image, device);
+
                     logical.cmd_copy_buffer_to_image(
                         self.handle,
-                        src_buffer.handle(&device),
-                        dst_image.handle(&device),
+                        src_buffer.handle(),
+                        dst_image.handle(),
                         dst_layout.to_erupt(),
                         &regions
                             .iter()
@@ -597,11 +675,14 @@ impl CommandBuffer {
                     regions,
                     filter,
                 } => unsafe {
+                    assert_owner!(src_image, device);
+                    assert_owner!(dst_image, device);
+
                     logical.cmd_blit_image(
                         self.handle,
-                        src_image.handle(&device),
+                        src_image.handle(),
                         src_layout.to_erupt(),
-                        dst_image.handle(&device),
+                        dst_image.handle(),
                         dst_layout.to_erupt(),
                         &regions
                             .iter()
@@ -612,22 +693,24 @@ impl CommandBuffer {
                 },
 
                 Command::PipelineBarrier { src, dst, images } => unsafe {
+                    for barrier in images {
+                        assert_owner!(barrier.image, device);
+                    }
+
                     logical.cmd_pipeline_barrier(
                         self.handle,
                         src.to_erupt(),
                         dst.to_erupt(),
                         None,
-                        &[vk1_0::MemoryBarrier::default()
-                            .into_builder()
+                        &[vk1_0::MemoryBarrierBuilder::new()
                             .src_access_mask(supported_access(src.to_erupt()))
                             .dst_access_mask(supported_access(dst.to_erupt()))],
                         &[],
                         &images
                             .iter()
                             .map(|image| {
-                                vk1_0::ImageMemoryBarrier::default()
-                                    .into_builder()
-                                    .image(image.image.handle(&device))
+                                vk1_0::ImageMemoryBarrierBuilder::new()
+                                    .image(image.image.handle())
                                     .src_access_mask(supported_access(
                                         src.to_erupt(),
                                     ))
@@ -667,9 +750,11 @@ impl CommandBuffer {
                     offset,
                     data,
                 } => unsafe {
+                    assert_owner!(layout, device);
+
                     logical.cmd_push_constants(
                         self.handle,
-                        layout.handle(&device),
+                        layout.handle(),
                         stages.to_erupt(),
                         offset,
                         data.len() as u32,

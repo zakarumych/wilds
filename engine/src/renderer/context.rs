@@ -3,13 +3,13 @@ use {
     bytemuck::Pod,
     eyre::Report,
     illume::{
-        arith_ge, Buffer, BufferCopy, BufferImageCopy, BufferInfo, BufferUsage,
+        Buffer, BufferCopy, BufferImageCopy, BufferInfo, BufferUsage,
         CreateImageError, Device, Extent3d, Image, ImageInfo,
         ImageMemoryBarrier, ImageSubresourceLayers, ImageSubresourceRange,
-        ImageUsage, Layout, MappingError, MemoryUsageFlags, Offset3d,
-        OutOfMemory, PipelineStageFlags, Queue,
+        ImageUsage, Layout, MapError, Offset3d, OutOfMemory,
+        PipelineStageFlags, Queue,
     },
-    std::{convert::TryFrom as _, ops::Deref},
+    std::{convert::TryFrom as _, mem::size_of_val, ops::Deref},
 };
 
 pub struct Context {
@@ -51,36 +51,26 @@ impl Context {
         buffer: &Buffer,
         offset: u64,
         data: &[T],
-    ) -> Result<(), MappingError>
+    ) -> Result<(), MapError>
     where
         T: Pod,
     {
-        if buffer.info().memory.intersects(
-            MemoryUsageFlags::HOST_ACCESS
-                | MemoryUsageFlags::UPLOAD
-                | MemoryUsageFlags::DOWNLOAD,
-        ) {
-            self.device.write_memory(buffer, offset, data)?;
-            Ok(())
-        } else {
-            let staging = self.device.create_buffer_static(
-                BufferInfo {
-                    align: 15,
-                    size: u64::try_from(data.len()).map_err(|_| OutOfMemory)?,
-                    usage: BufferUsage::TRANSFER_SRC,
-                    memory: MemoryUsageFlags::UPLOAD,
-                },
-                data,
-            )?;
+        let staging = self.device.create_buffer_static(
+            BufferInfo {
+                align: 15,
+                size: size_of_val(data) as u64,
+                usage: BufferUsage::TRANSFER_SRC,
+            },
+            data,
+        )?;
 
-            self.buffer_uploads.push(BufferUpload {
-                staging,
-                buffer: buffer.clone(),
-                offset,
-            });
+        self.buffer_uploads.push(BufferUpload {
+            staging,
+            buffer: buffer.clone(),
+            offset,
+        });
 
-            Ok(())
-        }
+        Ok(())
     }
 
     pub fn upload_image<T>(
@@ -100,9 +90,9 @@ impl Context {
         let staging = self.device.create_buffer_static(
             BufferInfo {
                 align: 15,
-                size: u64::try_from(data.len()).map_err(|_| OutOfMemory)?,
+                size: u64::try_from(size_of_val(data))
+                    .map_err(|_| OutOfMemory)?,
                 usage: BufferUsage::TRANSFER_SRC,
-                memory: MemoryUsageFlags::UPLOAD,
             },
             data,
         )?;
@@ -121,7 +111,7 @@ impl Context {
         Ok(())
     }
 
-    pub fn create_buffer_static<T>(
+    pub fn create_fast_buffer_static<T>(
         &mut self,
         mut info: BufferInfo,
         data: &[T],
@@ -129,24 +119,11 @@ impl Context {
     where
         T: Pod,
     {
-        assert!(arith_ge(info.size, data.len()));
-        if info.memory.intersects(
-            MemoryUsageFlags::HOST_ACCESS
-                | MemoryUsageFlags::UPLOAD
-                | MemoryUsageFlags::DOWNLOAD,
-        ) {
-            self.device.create_buffer_static(info, data)
-        } else {
-            info.usage |= BufferUsage::TRANSFER_DST;
-            let buffer = self.device.create_buffer(info)?;
-            match self.upload_buffer(&buffer, 0, data) {
-                Ok(()) => {}
-                Err(MappingError::OutOfMemory { .. }) => {
-                    return Err(OutOfMemory)
-                }
-                _ => unreachable!(),
-            }
-            Ok(buffer)
+        let mut buffer = self.device.create_buffer(info)?;
+        match self.upload_buffer(&mut buffer, 0, data) {
+            Ok(()) => Ok(buffer),
+            Err(MapError::OutOfMemory { .. }) => Err(OutOfMemory),
+            _ => unreachable!(),
         }
     }
 

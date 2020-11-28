@@ -2,7 +2,7 @@ pub use {self::Samples::*, crate::backend::Image};
 use {
     crate::{
         format::{AspectFlags, Format},
-        memory::MemoryUsageFlags,
+        memory::MemoryUsage,
         Extent2d, Extent3d, ImageSize, Offset3d,
     },
     std::ops::Range,
@@ -19,6 +19,7 @@ bitflags::bitflags! {
         const DEPTH_STENCIL_ATTACHMENT =    0x020;
         const TRANSIENT_ATTACHMENT =        0x040;
         const INPUT_ATTACHMENT =            0x080;
+        const TRANSIENT =                   0x100;
     }
 }
 
@@ -280,9 +281,6 @@ pub struct ImageInfo {
 
     /// Usage types supported by image.
     pub usage: ImageUsage,
-
-    /// Memory usage pattern.
-    pub memory: MemoryUsageFlags,
 }
 /// Subresorce range of the image.
 /// Used to create `ImageView`s.

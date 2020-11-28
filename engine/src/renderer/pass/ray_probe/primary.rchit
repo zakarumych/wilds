@@ -29,12 +29,12 @@ void query_probe(ivec3 probe, vec3 origin, vec3 normal, inout vec3 result, inout
     vec3 toprobe = probe_location - origin;
 
     vec3 probe_weight = vec3(1, 1, 1) - abs(toprobe) / probe_cell_size;
-    float weight = probe_weight.x * probe_weight.y * probe_weight.z;
+    float weight = max(probe_weight.x * probe_weight.y * probe_weight.z, .0001);
 
     vec3 probe_dir = normalize(toprobe);
     float probe_dist = dot(toprobe, toprobe);
 
-    weight *= dot(normal, probe_dir) + 1;
+    // weight *= dot(normal, probe_dir) + .5;
     // weight *= .01;
 
     // if (dot(normal, probe_dir) > 0.01)
@@ -43,7 +43,7 @@ void query_probe(ivec3 probe, vec3 origin, vec3 normal, inout vec3 result, inout
         traceRayEXT(tlas, shadow_ray_flags, 0xff, 0, 0, 1, origin, 0, probe_dir, probe_dist, 1);
         if (unshadows == 0)
         {
-            weight *= .01;
+            weight *= .0001;
         }
         vec3 p = get_cube_probe_3(normal, probe);
         total_weight += weight;
@@ -77,7 +77,7 @@ void query_probes(vec3 origin, vec3 normal, inout vec3 result, inout float weigh
 vec3 query_diffuse_from_probes(vec3 origin, vec3 normal)
 {
     vec3 result = vec3(0.);
-    float weight = 0.000001;
+    float weight = 0.000000001;
     query_probes(origin, normal, result, weight);
 
     return result / weight;

@@ -1,5 +1,5 @@
-pub use crate::backend::Buffer;
-use crate::{align_up, memory::MemoryUsageFlags};
+use crate::align_up;
+pub use crate::backend::{Buffer, MappableBuffer};
 
 bitflags::bitflags! {
     #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
@@ -14,10 +14,13 @@ bitflags::bitflags! {
         const VERTEX = 0x00000080;
         const INDIRECT = 0x00000100;
         const CONDITIONAL_RENDERING = 0x00000200;
-        const RAY_TRACING = 0x00000400;
-        const TRANSFORM_FEEDBACK = 0x00000800;
-        const TRANSFORM_FEEDBACK_COUNTER = 0x00001000;
-        const SHADER_DEVICE_ADDRESS = 0x00020000;
+        const ACCELERATION_STRUCTURE_BUILD_INPUT = 0x00000400;
+        const ACCELERATION_STRUCTURE_STORAGE = 0x00000800;
+        const SHADER_BINDING_TABLE = 0x00001000;
+        const TRANSFORM_FEEDBACK = 0x00002000;
+        const TRANSFORM_FEEDBACK_COUNTER = 0x00004000;
+        const DEVICE_ADDRESS = 0x0008000;
+        const TRANSIENT = 0x0010000;
     }
 }
 
@@ -33,9 +36,6 @@ pub struct BufferInfo {
 
     /// Usage types supported by buffer.
     pub usage: BufferUsage,
-
-    /// Memory usage pattern.
-    pub memory: MemoryUsageFlags,
 }
 
 impl BufferInfo {
@@ -50,8 +50,25 @@ impl BufferInfo {
     }
 }
 
+/// Buffer region.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct BufferRegion {
+    pub buffer: Buffer,
+    pub offset: u64,
+    pub size: u64,
+}
+
+impl BufferRegion {
+    pub fn whole(buffer: Buffer) -> Self {
+        BufferRegion {
+            offset: 0,
+            size: buffer.info().size,
+            buffer,
+        }
+    }
+}
+
 /// Buffer region with specified stride value.
-/// Currently used in `Encoder::trace_rays`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct StridedBufferRegion {
     pub buffer: Buffer,

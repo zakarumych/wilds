@@ -16,7 +16,7 @@ void main() {
 
     for (int i = 0; i < globals.diffuse_rays; ++i) {
         const uvec4 co = uvec4(gl_GlobalInvocationID.x, i, globals.frame, 0);
-        vec3 dir = rand_sphere(nice_rand(co));
+        vec3 dir = probe_rand(co);
 
         float faces_blend[6];
         float total = .0;

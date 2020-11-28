@@ -20,7 +20,7 @@ use crate::{
     Extent3d, IndexType, Offset3d, Rect2d,
 };
 use bytemuck::{cast_slice, Pod};
-use std::{fmt::Debug, ops::Range};
+use std::{fmt::Debug, mem::size_of_val, ops::Range};
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
@@ -331,6 +331,25 @@ impl<'a> EncoderCommon<'a> {
         self.commands
             .push(Command::PipelineBarrier { src, dst, images });
     }
+
+    pub fn push_constants<T>(
+        &mut self,
+        layout: &'a PipelineLayout,
+        stages: ShaderStageFlags,
+        offset: u32,
+        data: &'a [T],
+    ) where
+        T: Pod,
+    {
+        assert!(arith_le(size_of_val(data), u32::max_value()));
+
+        self.commands.push(Command::PushConstants {
+            layout,
+            stages,
+            offset,
+            data: cast_slice(data),
+        });
+    }
 }
 
 /// Command encoder that can encode commands outside render pass.
@@ -425,7 +444,6 @@ impl<'a> Encoder<'a> {
     }
 
     /// Builds acceleration structures.
-
     pub fn build_acceleration_structure(
         &mut self,
         infos: &'a [AccelerationStructureBuildGeometryInfo<'a>],
@@ -448,24 +466,17 @@ impl<'a> Encoder<'a> {
                 }
             }
 
-            let dst = &info.dst;
-
             for (j, info) in infos[..i].iter().enumerate() {
                 assert_ne!(
                     info.src.as_ref(),
-                    Some(dst),
+                    Some(&info.dst),
                     "`infos[{}].src` and `infos[{}].dst` collision",
                     j,
                     i,
                 );
             }
 
-            assert!(
-                info.geometries.len() <= dst.info().geometries.len(),
-                "Wrong number of geometries supplied to build: {}. Acceleration structure has: {}",
-                info.geometries.len(),
-                dst.info().geometries.len()
-            );
+            // assert!(todo!());
         }
 
         self.inner
@@ -550,25 +561,6 @@ impl<'a> Encoder<'a> {
             regions,
             filter,
         })
-    }
-
-    pub fn push_constants<T>(
-        &mut self,
-        layout: &'a PipelineLayout,
-        stages: ShaderStageFlags,
-        offset: u32,
-        data: &'a [T],
-    ) where
-        T: Pod,
-    {
-        assert!(arith_le(data.len(), u32::max_value()));
-
-        self.commands.push(Command::PushConstants {
-            layout,
-            stages,
-            offset,
-            data: cast_slice(data),
-        });
     }
 
     pub fn dispatch(&mut self, x: u32, y: u32, z: u32) {

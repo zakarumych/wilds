@@ -4,7 +4,6 @@
 #extension GL_EXT_scalar_block_layout : enable
 
 #include "descriptors.glsl"
-#include "../common/viewport.glsl"
 
 layout(location = 0) rayPayloadEXT PrimaryHitPayload prd;
 
@@ -13,6 +12,8 @@ layout(binding = 7, set = 0, rgba32f) uniform image2D output_normals_depth;
 layout(binding = 8, set = 0, rgba32f) uniform image2D output_emissive;
 layout(binding = 9, set = 0, rgba32f) uniform image2D output_direct;
 layout(binding = 10, set = 0, rgba32f) uniform image2D output_diffuse;
+
+#include "../common/viewport.glsl"
 
 void main() {
     prd.normal = vec3(0, 0, 0);

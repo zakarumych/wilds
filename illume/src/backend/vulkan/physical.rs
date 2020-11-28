@@ -14,10 +14,15 @@ use {
         extensions::{
             khr_16bit_storage::KHR_16BIT_STORAGE_EXTENSION_NAME,
             khr_8bit_storage::KHR_8BIT_STORAGE_EXTENSION_NAME,
+            khr_acceleration_structure::{
+                self as vkacc, KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+            },
             khr_deferred_host_operations::KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
             khr_pipeline_library::KHR_PIPELINE_LIBRARY_EXTENSION_NAME,
             khr_push_descriptor::KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
-            khr_ray_tracing::{self as vkrt, KHR_RAY_TRACING_EXTENSION_NAME},
+            khr_ray_tracing_pipeline::{
+                self as vkrt, KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
+            },
             khr_swapchain::KHR_SWAPCHAIN_EXTENSION_NAME,
         },
         vk1_0, vk1_1, vk1_2, DeviceLoader, ExtendableFrom as _, LoaderError,
@@ -35,7 +40,8 @@ pub(crate) struct Properties {
     pub(crate) v10: vk1_0::PhysicalDeviceProperties,
     pub(crate) v11: vk1_2::PhysicalDeviceVulkan11Properties,
     pub(crate) v12: vk1_2::PhysicalDeviceVulkan12Properties,
-    pub(crate) rt: vkrt::PhysicalDeviceRayTracingPropertiesKHR,
+    pub(crate) acc: vkacc::PhysicalDeviceAccelerationStructurePropertiesKHR,
+    pub(crate) rt: vkrt::PhysicalDeviceRayTracingPipelinePropertiesKHR,
 }
 
 // Not auto-implemented because of raw pointer in fields.
@@ -48,7 +54,8 @@ pub(crate) struct Features {
     pub(crate) v10: vk1_0::PhysicalDeviceFeatures,
     pub(crate) v11: vk1_2::PhysicalDeviceVulkan11Features,
     pub(crate) v12: vk1_2::PhysicalDeviceVulkan12Features,
-    pub(crate) rt: vkrt::PhysicalDeviceRayTracingFeaturesKHR,
+    pub(crate) acc: vkacc::PhysicalDeviceAccelerationStructureFeaturesKHR,
+    pub(crate) rt: vkrt::PhysicalDeviceRayTracingPipelineFeaturesKHR,
 }
 
 // Not auto-implemented because of raw pointer in fields.
@@ -75,24 +82,24 @@ unsafe fn collect_propeties_and_features(
 
     let properties10;
     let mut properties11 =
-        vk1_2::PhysicalDeviceVulkan11Properties::default().into_builder();
+        vk1_2::PhysicalDeviceVulkan11PropertiesBuilder::new();
     let mut properties12 =
-        vk1_2::PhysicalDeviceVulkan12Properties::default().into_builder();
+        vk1_2::PhysicalDeviceVulkan12PropertiesBuilder::new();
     let mut properties_rt =
-        vkrt::PhysicalDeviceRayTracingPropertiesKHR::default().into_builder();
+        vkrt::PhysicalDeviceRayTracingPipelinePropertiesKHRBuilder::new();
+    let mut properties_acc =
+        vkacc::PhysicalDeviceAccelerationStructurePropertiesKHRBuilder::new();
     let features10;
-    let mut features11 =
-        vk1_2::PhysicalDeviceVulkan11Features::default().into_builder();
-    let mut features12 =
-        vk1_2::PhysicalDeviceVulkan12Features::default().into_builder();
+    let mut features11 = vk1_2::PhysicalDeviceVulkan11FeaturesBuilder::new();
+    let mut features12 = vk1_2::PhysicalDeviceVulkan12FeaturesBuilder::new();
+    let mut features_acc =
+        vkacc::PhysicalDeviceAccelerationStructureFeaturesKHRBuilder::new();
     let mut features_rt =
-        vkrt::PhysicalDeviceRayTracingFeaturesKHR::default().into_builder();
+        vkrt::PhysicalDeviceRayTracingPipelineFeaturesKHRBuilder::new();
 
     if graphics.version >= vk1_0::make_version(1, 1, 0) {
-        let mut properties2 =
-            vk1_1::PhysicalDeviceProperties2::default().into_builder();
-        let mut features2 =
-            vk1_1::PhysicalDeviceFeatures2::default().into_builder();
+        let mut properties2 = vk1_1::PhysicalDeviceProperties2Builder::new();
+        let mut features2 = vk1_1::PhysicalDeviceFeatures2Builder::new();
 
         properties2 = properties2.extend_from(&mut properties11);
         features2 = features2.extend_from(&mut features11);
@@ -102,7 +109,12 @@ unsafe fn collect_propeties_and_features(
             features2 = features2.extend_from(&mut features12);
         }
 
-        if has_extension(KHR_RAY_TRACING_EXTENSION_NAME) {
+        if has_extension(KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) {
+            properties2 = properties2.extend_from(&mut properties_acc);
+            features2 = features2.extend_from(&mut features_acc);
+        }
+
+        if has_extension(KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME) {
             properties2 = properties2.extend_from(&mut properties_rt);
             features2 = features2.extend_from(&mut features_rt);
         }
@@ -142,6 +154,7 @@ unsafe fn collect_propeties_and_features(
         v10: properties10,
         v11: properties11.build(),
         v12: properties12.build(),
+        acc: properties_acc.build(),
         rt: properties_rt.build(),
     };
 
@@ -149,6 +162,7 @@ unsafe fn collect_propeties_and_features(
         v10: features10,
         v11: features11.build(),
         v12: features12.build(),
+        acc: features_acc.build(),
         rt: features_rt.build(),
     };
 
@@ -203,15 +217,24 @@ impl PhysicalDevice {
     pub fn info(&self) -> DeviceInfo {
         let mut features = Vec::new();
 
-        if self.properties.has_extension(unsafe {
-            CStr::from_ptr(KHR_RAY_TRACING_EXTENSION_NAME)
-        }) && self.features.rt.ray_tracing != 0
-        {
-            features.push(Feature::RayTracing);
-        }
-
         if self.features.v12.buffer_device_address > 0 {
             features.push(Feature::BufferDeviceAddress);
+        }
+
+        if self.properties.has_extension(unsafe {
+            CStr::from_ptr(KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME)
+        }) && self.features.acc.acceleration_structure != 0
+        {
+            assert!(features.contains(&Feature::BufferDeviceAddress));
+            features.push(Feature::AccelerationStructure);
+        }
+
+        if self.properties.has_extension(unsafe {
+            CStr::from_ptr(KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME)
+        }) && self.features.rt.ray_tracing_pipeline != 0
+        {
+            assert!(features.contains(&Feature::AccelerationStructure));
+            features.push(Feature::RayTracingPipeline);
         }
 
         if self.features.v12.scalar_block_layout > 0 {
@@ -290,7 +313,7 @@ impl PhysicalDevice {
             features.push(Feature::DescriptorBindingPartiallyBound);
         }
 
-        if self.graphics().instance.enabled.khr_surface
+        if self.graphics().instance.enabled().khr_surface
             && self.properties.has_extension(unsafe {
                 CStr::from_ptr(KHR_SWAPCHAIN_EXTENSION_NAME)
             })
@@ -347,7 +370,7 @@ impl PhysicalDevice {
         let instance = &self.graphics().instance;
 
         assert!(
-            instance.enabled.khr_surface,
+            instance.enabled().khr_surface,
             "Should be enabled given that there is a Surface"
         );
         let families = unsafe {
@@ -479,8 +502,7 @@ impl PhysicalDevice {
 
         tracing::trace!("Creating device");
 
-        let mut device_create_info =
-            vk1_0::DeviceCreateInfo::default().into_builder();
+        let mut device_create_info = vk1_0::DeviceCreateInfoBuilder::new();
 
         // Convert features into cunsumable type.
         // Before creating device all features must be consumed.
@@ -511,8 +533,7 @@ impl PhysicalDevice {
         let device_queue_create_infos = families_requested
             .iter()
             .map(|(&index, priorities)| {
-                vk1_0::DeviceQueueCreateInfo::default()
-                    .into_builder()
+                vk1_0::DeviceQueueCreateInfoBuilder::new()
                     .queue_family_index(
                         index
                             .try_into()
@@ -526,17 +547,19 @@ impl PhysicalDevice {
             device_create_info.queue_create_infos(&device_queue_create_infos);
 
         // Collect requested features.
-        let features = vk1_0::PhysicalDeviceFeatures::default().into_builder();
-        let mut features2 =
-            vk1_1::PhysicalDeviceFeatures2::default().into_builder();
+        let mut features = vk1_0::PhysicalDeviceFeaturesBuilder::new();
+        let mut features2 = vk1_1::PhysicalDeviceFeatures2Builder::new();
         let mut features11 =
-            vk1_2::PhysicalDeviceVulkan11Features::default().into_builder();
+            vk1_2::PhysicalDeviceVulkan11FeaturesBuilder::new();
         let mut features12 =
-            vk1_2::PhysicalDeviceVulkan12Features::default().into_builder();
+            vk1_2::PhysicalDeviceVulkan12FeaturesBuilder::new();
+        let mut features_acc =
+            vkacc::PhysicalDeviceAccelerationStructureFeaturesKHRBuilder::new();
         let mut features_rt =
-            vkrt::PhysicalDeviceRayTracingFeaturesKHR::default().into_builder();
+            vkrt::PhysicalDeviceRayTracingPipelineFeaturesKHRBuilder::new();
         let include_features11 = false;
         let mut include_features12 = false;
+        let mut include_features_acc = false;
         let mut include_features_rt = false;
 
         // Enable requested extensions.
@@ -557,25 +580,52 @@ impl PhysicalDevice {
             push_ext(KHR_SWAPCHAIN_EXTENSION_NAME);
         }
 
-        if requested_features.take(Feature::RayTracing) {
-            assert!(
-                requested_features.check(Feature::BufferDeviceAddress),
-                "BufferDeviceAddress feature must be enabled when RayTracing feature is enabled"
-            );
-
+        if requested_features.take(Feature::RayTracingPipeline) {
             assert_ne!(
-                self.features.rt.ray_tracing, 0,
+                self.features.rt.ray_tracing_pipeline, 0,
                 "Attempt to enable unsupported feature `RayTracing`"
             );
-            features_rt.ray_tracing = 1;
+            assert!(
+                requested_features.check(Feature::AccelerationStructure),
+                "`AccelerationStructure` feature must be enabled when `RayTracingPipeline` feature is enabled"
+            );
+            features_rt.ray_tracing_pipeline = 1;
             include_features_rt = true;
 
-            push_ext(KHR_RAY_TRACING_EXTENSION_NAME);
+            push_ext(KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+            // push_ext(KHR_PIPELINE_LIBRARY_EXTENSION_NAME);
+            // push_ext(KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+            // push_ext(KHR_8BIT_STORAGE_EXTENSION_NAME);
+            // push_ext(KHR_16BIT_STORAGE_EXTENSION_NAME);
+            // push_ext(KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
+        }
+
+        if requested_features.take(Feature::AccelerationStructure) {
+            assert_ne!(
+                self.features.acc.acceleration_structure, 0,
+                "Attempt to enable unsupported feature `AccelerationStructure`"
+            );
+
+            assert!(
+                requested_features.check(Feature::BufferDeviceAddress),
+                "`BufferDeviceAddress` feature must be enabled when `AccelerationStructure` feature is enabled"
+            );
+
+            features_acc.acceleration_structure = 1;
+            include_features_acc = true;
+
+            push_ext(KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
             push_ext(KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
-            push_ext(KHR_PIPELINE_LIBRARY_EXTENSION_NAME);
-            push_ext(KHR_8BIT_STORAGE_EXTENSION_NAME);
-            push_ext(KHR_16BIT_STORAGE_EXTENSION_NAME);
-            push_ext(KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
+        }
+
+        if requested_features.take(Feature::BufferDeviceAddress) {
+            assert_ne!(
+                self.features.v12.buffer_device_address, 0,
+                "Attempt to enable unsupproted feature `BufferDeviceAddress`"
+            );
+
+            features12.buffer_device_address = 1;
+            include_features12 = true;
         }
 
         if requested_features.take(Feature::ScalarBlockLayout) {
@@ -693,14 +743,99 @@ impl PhysicalDevice {
             include_features12 = true;
         }
 
-        if requested_features.take(Feature::BufferDeviceAddress) {
+        if requested_features
+            .take(Feature::ShaderSampledImageNonUniformIndexing)
+        {
+            assert!(requested_features
+                .check(Feature::ShaderSampledImageDynamicIndexing));
             assert_ne!(
-                self.features.v12.buffer_device_address, 0,
-                "Attempt to enable unsupproted feature `BufferDeviceAddress`"
+                self.features
+                    .v12
+                    .shader_sampled_image_array_non_uniform_indexing,
+                0
             );
-
-            features12.buffer_device_address = 1;
+            features12.shader_sampled_image_array_non_uniform_indexing = 1;
             include_features12 = true;
+        }
+        if requested_features.take(Feature::ShaderSampledImageDynamicIndexing) {
+            assert_ne!(
+                self.features
+                    .v10
+                    .shader_sampled_image_array_dynamic_indexing,
+                0
+            );
+            features.shader_sampled_image_array_dynamic_indexing = 1;
+        }
+        if requested_features
+            .take(Feature::ShaderStorageImageNonUniformIndexing)
+        {
+            assert!(requested_features
+                .check(Feature::ShaderStorageImageDynamicIndexing));
+            assert_ne!(
+                self.features
+                    .v12
+                    .shader_storage_image_array_non_uniform_indexing,
+                0
+            );
+            features12.shader_storage_image_array_non_uniform_indexing = 1;
+            include_features12 = true;
+        }
+        if requested_features.take(Feature::ShaderStorageImageDynamicIndexing) {
+            assert_ne!(
+                self.features
+                    .v10
+                    .shader_storage_image_array_dynamic_indexing,
+                0
+            );
+            features.shader_storage_image_array_dynamic_indexing = 1;
+        }
+        if requested_features
+            .take(Feature::ShaderUniformBufferNonUniformIndexing)
+        {
+            assert!(requested_features
+                .check(Feature::ShaderUniformBufferDynamicIndexing));
+            assert_ne!(
+                self.features
+                    .v12
+                    .shader_uniform_buffer_array_non_uniform_indexing,
+                0
+            );
+            features12.shader_uniform_buffer_array_non_uniform_indexing = 1;
+            include_features12 = true;
+        }
+        if requested_features.take(Feature::ShaderUniformBufferDynamicIndexing)
+        {
+            assert_ne!(
+                self.features
+                    .v10
+                    .shader_uniform_buffer_array_dynamic_indexing,
+                0
+            );
+            features.shader_uniform_buffer_array_dynamic_indexing = 1;
+        }
+        if requested_features
+            .take(Feature::ShaderStorageBufferNonUniformIndexing)
+        {
+            assert!(requested_features
+                .check(Feature::ShaderStorageBufferDynamicIndexing));
+            assert_ne!(
+                self.features
+                    .v12
+                    .shader_storage_buffer_array_non_uniform_indexing,
+                0
+            );
+            features12.shader_storage_buffer_array_non_uniform_indexing = 1;
+            include_features12 = true;
+        }
+        if requested_features.take(Feature::ShaderStorageBufferDynamicIndexing)
+        {
+            assert_ne!(
+                self.features
+                    .v10
+                    .shader_storage_buffer_array_dynamic_indexing,
+                0
+            );
+            features.shader_storage_buffer_array_dynamic_indexing = 1;
         }
 
         device_create_info =
@@ -719,6 +854,11 @@ impl PhysicalDevice {
             }
 
             // Push structure to the list if at least one feature is enabled.
+            if include_features_acc {
+                device_create_info =
+                    device_create_info.extend_from(&mut features_acc);
+            }
+
             if include_features_rt {
                 device_create_info =
                     device_create_info.extend_from(&mut features_rt);
@@ -758,11 +898,7 @@ impl PhysicalDevice {
             )) => out_of_host_memory(),
             Err(LoaderError::VulkanError(
                 vk1_0::Result::ERROR_OUT_OF_DEVICE_MEMORY,
-            )) => {
-                return Err(CreateDeviceError::OutOfMemory {
-                    source: OutOfMemory,
-                })
-            }
+            )) => return Err(OutOfMemory.into()),
             Err(LoaderError::VulkanError(err)) => {
                 return Err(CreateDeviceError::UnexpectedVulkanError {
                     result: err,

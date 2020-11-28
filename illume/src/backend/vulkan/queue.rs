@@ -9,7 +9,7 @@ use {
         stage::PipelineStageFlags,
         OutOfMemory,
     },
-    erupt::{extensions::khr_swapchain::PresentInfoKHR, vk1_0},
+    erupt::{extensions::khr_swapchain::PresentInfoKHRBuilder, vk1_0},
     smallvec::SmallVec,
     std::fmt::{self, Debug},
 };
@@ -79,8 +79,7 @@ impl Queue {
         if self.pool == vk1_0::CommandPool::null() {
             self.pool = unsafe {
                 self.device.logical().create_command_pool(
-                    &vk1_0::CommandPoolCreateInfo::default()
-                        .into_builder()
+                    &vk1_0::CommandPoolCreateInfoBuilder::new()
                         .flags(
                             vk1_0::CommandPoolCreateFlags::RESET_COMMAND_BUFFER,
                         )
@@ -97,8 +96,7 @@ impl Queue {
 
         let mut buffers = unsafe {
             self.device.logical().allocate_command_buffers(
-                &vk1_0::CommandBufferAllocateInfo::default()
-                    .into_builder()
+                &vk1_0::CommandBufferAllocateInfoBuilder::new()
                     .command_pool(self.pool)
                     .level(vk1_0::CommandBufferLevel::PRIMARY)
                     .command_buffer_count(1),
@@ -124,8 +122,22 @@ impl Queue {
         signal: &[Semaphore],
         fence: Option<&Fence>,
     ) {
+        assert_owner!(cbuf, self.device);
         assert_eq!(self.id, cbuf.queue());
-        let cbuf = cbuf.handle(&self.device);
+
+        for (_, semaphore) in wait {
+            assert_owner!(semaphore, self.device);
+        }
+
+        for semaphore in signal {
+            assert_owner!(semaphore, self.device);
+        }
+
+        if let Some(fence) = fence {
+            assert_owner!(fence, self.device);
+        }
+
+        let cbuf = cbuf.handle();
 
         // FIXME: Check semaphore states.
         let (wait_stages, wait_semaphores): (
@@ -133,24 +145,23 @@ impl Queue {
             SmallVec<[_; 8]>,
         ) = wait
             .iter()
-            .map(|(ps, sem)| (ps.to_erupt(), sem.handle(&self.device)))
+            .map(|(ps, sem)| (ps.to_erupt(), sem.handle()))
             .unzip();
 
         let signal_semaphores: SmallVec<[_; 8]> =
-            signal.iter().map(|sem| sem.handle(&self.device)).collect();
+            signal.iter().map(|sem| sem.handle()).collect();
 
         unsafe {
             self.device
                 .logical()
                 .queue_submit(
                     self.handle,
-                    &[vk1_0::SubmitInfo::default()
-                        .into_builder()
+                    &[vk1_0::SubmitInfoBuilder::new()
                         .wait_semaphores(&wait_semaphores)
                         .wait_dst_stage_mask(&wait_stages)
                         .signal_semaphores(&signal_semaphores)
                         .command_buffers(&[cbuf])],
-                    fence.map(|f| f.handle(&self.device)),
+                    fence.map(|f| f.handle()),
                 )
                 .expect("TODO: Handle queue submit error")
         };
@@ -167,16 +178,16 @@ impl Queue {
 
     #[tracing::instrument]
     pub fn present(&mut self, image: SwapchainImage) {
+        assert_owner!(image, self.device);
+
         // FIXME: Check semaphore states.
         assert!(
-            self.device.logical().enabled.khr_swapchain,
+            self.device.logical().enabled().khr_swapchain,
             "Should be enabled given that there is a Swapchain"
         );
 
-        let swapchain_image_info = image.info();
-
         assert!(
-            image.supported_families(&self.device)[self.id.family as usize],
+            image.supported_families()[self.id.family as usize],
             "Family `{}` does not support presentation to swapchain `{:?}`",
             self.id.family,
             image
@@ -187,13 +198,10 @@ impl Queue {
         unsafe {
             self.device.logical().queue_present_khr(
                 self.handle,
-                &PresentInfoKHR::default()
-                    .into_builder()
-                    .wait_semaphores(&[swapchain_image_info
-                        .signal
-                        .handle(&self.device)])
-                    .swapchains(&[image.handle(&self.device)])
-                    .image_indices(&[*image.index(&self.device)])
+                &PresentInfoKHRBuilder::new()
+                    .wait_semaphores(&[image.info().signal.handle()])
+                    .swapchains(&[image.handle()])
+                    .image_indices(&[image.index()])
                     .results(std::slice::from_mut(&mut result)),
             )
         }

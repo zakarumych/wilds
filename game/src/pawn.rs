@@ -59,8 +59,8 @@ impl PawnAsset {
                 .collect();
 
         let usage = BufferUsage::STORAGE
-            | BufferUsage::SHADER_DEVICE_ADDRESS
-            | BufferUsage::RAY_TRACING;
+            | BufferUsage::DEVICE_ADDRESS
+            | BufferUsage::ACCELERATION_STRUCTURE_BUILD_INPUT;
 
         let mesh = MeshData::new(PrimitiveTopology::TriangleList)
             .with_binding(&vertices)

@@ -76,6 +76,9 @@ rand = "0.7"
 # TEMP
 # stats_alloc = "*"
 
+blue-noise-sampler = "0.1"
+bluenoise = "0.1"
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "0.2", features = ["macros", "rt-threaded", "blocking"] }
 

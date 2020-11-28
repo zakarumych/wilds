@@ -10,14 +10,14 @@ void cube_blend(vec3 dir, out float faces[6]) {
 }
 
 
-void cube_blend_strict(vec3 dir, out float faces[6]) {
-    faces[0] = float(dir.x > 0) * (dir.x * dir.x);
-    faces[1] = float(dir.x < 0) * (dir.x * dir.x);
-    faces[2] = float(dir.y > 0) * (dir.y * dir.y);
-    faces[3] = float(dir.y < 0) * (dir.y * dir.y);
-    faces[4] = float(dir.z > 0) * (dir.z * dir.z);
-    faces[5] = float(dir.z < 0) * (dir.z * dir.z);
-}
+// void cube_blend(vec3 dir, out float faces[6]) {
+//     faces[0] = float(dir.x > 0) * (dir.x * dir.x);
+//     faces[1] = float(dir.x < 0) * (dir.x * dir.x);
+//     faces[2] = float(dir.y > 0) * (dir.y * dir.y);
+//     faces[3] = float(dir.y < 0) * (dir.y * dir.y);
+//     faces[4] = float(dir.z > 0) * (dir.z * dir.z);
+//     faces[5] = float(dir.z < 0) * (dir.z * dir.z);
+// }
 
 float get_cube_probe(vec3 dir, uvec3 probe) {
     float faces[6];
@@ -69,4 +69,8 @@ vec3 get_cube_probe_3(vec3 dir, uvec3 probe) {
 
 vec3 probe_cell_size() {
     return globals.probes_dimensions / vec3(globals.probes_extent - uvec3(1, 1, 1));
+}
+
+vec3 probe_rand(uvec4 co) {
+    return rand_sphere(blue_rand(co));
 }

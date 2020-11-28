@@ -32,6 +32,25 @@ impl Local3 {
             scale: na::Vector3::new(1.0, 1.0, 1.0),
         }
     }
+
+    pub fn from_translation(parent: Entity, tr: na::Translation3<f32>) -> Self {
+        Local3 {
+            parent,
+            iso: na::Isometry3::from_parts(tr, na::UnitQuaternion::identity()),
+            scale: na::Vector3::new(1.0, 1.0, 1.0),
+        }
+    }
+
+    pub fn from_rotation(parent: Entity, rot: na::UnitQuaternion<f32>) -> Self {
+        Local3 {
+            parent,
+            iso: na::Isometry3::from_parts(
+                na::Translation3::new(0., 0., 0.),
+                rot,
+            ),
+            scale: na::Vector3::new(1.0, 1.0, 1.0),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

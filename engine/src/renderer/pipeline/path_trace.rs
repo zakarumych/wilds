@@ -33,10 +33,16 @@ pub struct PathTracePipeline {
 impl PathTracePipeline {
     pub fn new(
         ctx: &mut Context,
-        blue_noise_buffer: Buffer,
+        blue_noise_buffer_256x256x128: Buffer,
+        blue_noise_sampler_buffer_256spp: Buffer,
         target_extent: Extent2d,
     ) -> Result<Self, Report> {
-        let rt_prepass = RtPrepass::new(target_extent, ctx, blue_noise_buffer)?;
+        let rt_prepass = RtPrepass::new(
+            target_extent,
+            ctx,
+            blue_noise_buffer_256x256x128,
+            blue_noise_sampler_buffer_256spp,
+        )?;
 
         let combine = CombinePass::new(ctx)?;
         let diffuse_filter = ATrousFilter::new(ctx)?;

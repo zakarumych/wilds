@@ -165,6 +165,7 @@ impl Mesh {
             pos_binding,
             pos_location,
             self.count,
+            self.vertex_count,
             encoder,
             device,
             bump,
@@ -196,6 +197,7 @@ impl Mesh {
             pos_binding,
             pos_location,
             self.count,
+            self.vertex_count,
             encoder,
             device,
             bump,
@@ -372,16 +374,17 @@ impl MeshData<'_> {
                 min_vertex_count = min_vertex_count.min(vertex_count);
 
                 Ok(Binding {
-                    buffer: ctx.create_buffer_static(
-                        BufferInfo {
-                            align: 255,
-                            size: u64::try_from(binding.data.len())
-                                .map_err(|_| OutOfMemory)?,
-                            usage: vertices_usage,
-                            memory: MemoryUsageFlags::empty(),
-                        },
-                        &binding.data,
-                    )?,
+                    buffer: ctx
+                        .create_buffer_static(
+                            BufferInfo {
+                                align: 255,
+                                size: u64::try_from(binding.data.len())
+                                    .map_err(|_| OutOfMemory)?,
+                                usage: vertices_usage,
+                            },
+                            &binding.data,
+                        )?
+                        .into(),
                     offset: 0,
                     layout: binding.layout.clone(),
                 })
@@ -401,16 +404,17 @@ impl MeshData<'_> {
                 count = u32::try_from(index_count).map_err(|_| OutOfMemory)?;
 
                 Ok(Indices {
-                    buffer: ctx.create_buffer_static(
-                        BufferInfo {
-                            align: 255,
-                            size: u64::try_from(indices.data.len())
-                                .map_err(|_| OutOfMemory)?,
-                            usage: indices_usage,
-                            memory: MemoryUsageFlags::empty(),
-                        },
-                        &indices.data,
-                    )?,
+                    buffer: ctx
+                        .create_buffer_static(
+                            BufferInfo {
+                                align: 255,
+                                size: u64::try_from(indices.data.len())
+                                    .map_err(|_| OutOfMemory)?,
+                                usage: indices_usage,
+                            },
+                            &indices.data,
+                        )?
+                        .into(),
                     offset: 0,
                     index_type: indices.index_type,
                 })
@@ -439,8 +443,10 @@ impl MeshData<'_> {
     ) -> Result<Mesh, OutOfMemory> {
         self.build(
             ctx,
-            BufferUsage::RAY_TRACING | BufferUsage::STORAGE,
-            BufferUsage::RAY_TRACING | BufferUsage::STORAGE,
+            BufferUsage::ACCELERATION_STRUCTURE_BUILD_INPUT
+                | BufferUsage::STORAGE,
+            BufferUsage::ACCELERATION_STRUCTURE_BUILD_INPUT
+                | BufferUsage::STORAGE,
         )
     }
 }
@@ -455,22 +461,24 @@ fn topology_triangles() -> PrimitiveTopology {
 
 #[cfg(feature = "genmesh")]
 mod gm {
-    use super::*;
-    use crate::vertex::{
-        Color, Normal3d, Position3d, PositionNormal3d, PositionNormal3dColor,
-        VertexType,
-    };
     use genmesh::{
         generators::{IndexedPolygon, SharedVertex},
         EmitTriangles, Quad, Vertex,
     };
     use std::{convert::TryFrom as _, mem::size_of};
+    use {
+        super::*,
+        crate::renderer::vertex::{
+            Color, Normal3d, Position3d, PositionNormal3d,
+            PositionNormal3dColor, VertexType,
+        },
+    };
 
     impl Mesh {
         pub fn from_generator_pos<G>(
             generator: &G,
             usage: BufferUsage,
-            device: &Device,
+            ctx: &mut Context,
             index_type: IndexType,
         ) -> Result<Self, OutOfMemory>
         where
@@ -479,7 +487,7 @@ mod gm {
             Self::from_generator(
                 generator,
                 usage,
-                device,
+                ctx,
                 index_type,
                 Position3d::from,
             )
@@ -488,7 +496,7 @@ mod gm {
         pub fn from_generator_pos_norm<G>(
             generator: &G,
             usage: BufferUsage,
-            device: &Device,
+            ctx: &mut Context,
             index_type: IndexType,
         ) -> Result<Self, OutOfMemory>
         where
@@ -497,7 +505,7 @@ mod gm {
             Self::from_generator(
                 generator,
                 usage,
-                device,
+                ctx,
                 index_type,
                 PositionNormal3d::from,
             )
@@ -506,14 +514,14 @@ mod gm {
         pub fn from_generator_pos_norm_fixed_color<G>(
             generator: &G,
             usage: BufferUsage,
-            device: &Device,
+            ctx: &mut Context,
             index_type: IndexType,
             color: Color,
         ) -> Result<Self, OutOfMemory>
         where
             G: SharedVertex<Vertex> + IndexedPolygon<Quad<usize>>,
         {
-            Self::from_generator(generator, usage, device, index_type, |v| {
+            Self::from_generator(generator, usage, ctx, index_type, |v| {
                 PositionNormal3dColor {
                     position: v.into(),
                     normal: v.into(),
@@ -647,15 +655,14 @@ mod gm {
                 }
             }
 
-            let buffer = ctx.create_buffer_static(
+            let buffer = Buffer::from(ctx.create_buffer_static(
                 BufferInfo {
                     align: 63,
                     size: u64::try_from(data.len()).map_err(|_| OutOfMemory)?,
                     usage,
-                    memory: MemoryUsageFlags::empty(),
                 },
                 &data[..],
-            )?;
+            )?);
 
             let binding = Binding {
                 buffer: buffer.clone(),
@@ -664,7 +671,7 @@ mod gm {
             };
 
             let indices = Indices {
-                buffer: buffer.clone(),
+                buffer,
                 offset: u64::try_from(indices_offset).unwrap(),
                 index_type,
             };
@@ -718,7 +725,6 @@ impl PoseMesh {
             align: 255,
             size: offset,
             usage,
-            memory: MemoryUsageFlags::empty(),
         })?;
 
         let bindings = prebindings
@@ -743,6 +749,7 @@ fn build_triangles_blas<'a>(
     binding: &Binding,
     location: &VertexLocation,
     count: u32,
+    vertex_count: u32,
     encoder: &mut Encoder<'a>,
     device: &Device,
     bump: &'a Bump,
@@ -758,21 +765,39 @@ fn build_triangles_blas<'a>(
         .offset(binding.offset)
         .offset(location.offset.into());
 
+    let sizes = device.get_acceleration_structure_build_sizes(
+        AccelerationStructureLevel::Bottom,
+        AccelerationStructureBuildFlags::PREFER_FAST_TRACE,
+        &[AccelerationStructureGeometryInfo::Triangles {
+            max_primitive_count: triangle_count,
+            index_type: indices.map(|indices| indices.index_type),
+            max_vertex_count: vertex_count,
+            vertex_format: location.format,
+            allows_transforms: true,
+        }],
+    );
+
+    let acc_buffer = device.create_buffer(BufferInfo {
+        align: 255,
+        size: sizes.acceleration_structure_size,
+        usage: BufferUsage::ACCELERATION_STRUCTURE_STORAGE,
+    })?;
+
     let blas =
         device.create_acceleration_structure(AccelerationStructureInfo {
             level: AccelerationStructureLevel::Bottom,
-            flags: AccelerationStructureFlags::PREFER_FAST_TRACE,
-            geometries: vec![AccelerationStructureGeometryInfo::Triangles {
-                max_primitive_count: triangle_count,
-                index_type: indices.map(|indices| indices.index_type),
-                max_vertex_count: count,
-                vertex_format: location.format,
-                allows_transforms: true,
-            }],
+            region: BufferRegion {
+                buffer: acc_buffer,
+                offset: 0,
+                size: sizes.acceleration_structure_size,
+            },
         })?;
 
-    let blas_scratch =
-        device.allocate_acceleration_structure_build_scratch(&blas, false)?;
+    let blas_scratch = device.create_buffer(BufferInfo {
+        align: 255,
+        size: sizes.build_scratch_size,
+        usage: BufferUsage::DEVICE_ADDRESS,
+    })?;
 
     let blas_scratch_address =
         device.get_buffer_device_address(&blas_scratch).unwrap();
@@ -782,6 +807,7 @@ fn build_triangles_blas<'a>(
         vertex_format: Format::RGB32Sfloat,
         vertex_data: pos_address,
         vertex_stride: binding.layout.stride.into(),
+        vertex_count,
         first_vertex: 0,
         primitive_count: triangle_count,
         index_data: indices.map(|indices| {
@@ -801,6 +827,7 @@ fn build_triangles_blas<'a>(
     let infos = bump.alloc([AccelerationStructureBuildGeometryInfo {
         src: None,
         dst: blas.clone(),
+        flags: AccelerationStructureBuildFlags::PREFER_FAST_TRACE,
         geometries,
         scratch: blas_scratch_address,
     }]);

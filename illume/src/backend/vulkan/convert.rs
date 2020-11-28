@@ -1,20 +1,22 @@
 use crate::{
-    out_of_host_memory, AccelerationStructureFlags,
-    AccelerationStructureGeometryInfo, AccelerationStructureLevel, AspectFlags,
-    AttachmentLoadOp, AttachmentStoreOp, BlendFactor, BlendOp, BorderColor,
-    BufferCopy, BufferImageCopy, BufferUsage, CompareOp, ComponentMask,
-    Culling, DescriptorBindingFlags, DescriptorSetLayoutFlags, DescriptorType,
+    out_of_host_memory, AccelerationStructureBuildFlags,
+    AccelerationStructureLevel, AspectFlags, AttachmentLoadOp,
+    AttachmentStoreOp, BlendFactor, BlendOp, BorderColor, BufferCopy,
+    BufferImageCopy, BufferUsage, CompareOp, ComponentMask, Culling,
+    DescriptorBindingFlags, DescriptorSetLayoutFlags, DescriptorType,
     DeviceAddress, Extent2d, Extent3d, Filter, Format, FrontFace,
     GeometryFlags, ImageBlit, ImageCopy, ImageExtent, ImageSubresource,
     ImageSubresourceLayers, ImageSubresourceRange, ImageUsage, ImageViewKind,
-    IndexType, Layout, LogicOp, MemoryUsageFlags, MipmapMode, Offset2d,
-    Offset3d, OutOfMemory, PipelineStageFlags, PolygonMode, PresentMode,
+    IndexType, Layout, LogicOp, MemoryUsage, MipmapMode, Offset2d, Offset3d,
+    OutOfMemory, PipelineStageFlags, PolygonMode, PresentMode,
     PrimitiveTopology, QueueCapabilityFlags, Rect2d, SamplerAddressMode,
     Samples, ShaderStage, ShaderStageFlags, StencilOp, VertexInputRate,
     Viewport,
 };
 use erupt::{
-    extensions::{khr_ray_tracing as vkrt, khr_surface::PresentModeKHR},
+    extensions::{
+        khr_acceleration_structure as vkacc, khr_surface::PresentModeKHR,
+    },
     vk1_0, vk1_2,
 };
 use std::num::NonZeroU64;
@@ -471,8 +473,18 @@ impl FromErupt<vk1_0::BufferUsageFlags> for BufferUsage {
             result |= BufferUsage::CONDITIONAL_RENDERING;
         }
 
-        if usage.contains(vk1_0::BufferUsageFlags::RAY_TRACING_KHR) {
-            result |= BufferUsage::RAY_TRACING;
+        if usage.contains(vk1_0::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR) {
+            result |= BufferUsage::ACCELERATION_STRUCTURE_BUILD_INPUT;
+        }
+
+        if usage.contains(
+            vk1_0::BufferUsageFlags::ACCELERATION_STRUCTURE_STORAGE_KHR,
+        ) {
+            result |= BufferUsage::ACCELERATION_STRUCTURE_STORAGE;
+        }
+
+        if usage.contains(vk1_0::BufferUsageFlags::SHADER_BINDING_TABLE_KHR) {
+            result |= BufferUsage::SHADER_BINDING_TABLE;
         }
 
         if usage
@@ -488,7 +500,7 @@ impl FromErupt<vk1_0::BufferUsageFlags> for BufferUsage {
         }
 
         if usage.contains(vk1_0::BufferUsageFlags::SHADER_DEVICE_ADDRESS) {
-            result |= BufferUsage::SHADER_DEVICE_ADDRESS;
+            result |= BufferUsage::DEVICE_ADDRESS;
         }
 
         result
@@ -539,8 +551,17 @@ impl ToErupt<vk1_0::BufferUsageFlags> for BufferUsage {
             result |= vk1_0::BufferUsageFlags::CONDITIONAL_RENDERING_EXT;
         }
 
-        if self.contains(BufferUsage::RAY_TRACING) {
-            result |= vk1_0::BufferUsageFlags::RAY_TRACING_KHR;
+        if self.contains(BufferUsage::ACCELERATION_STRUCTURE_BUILD_INPUT) {
+            result |= vk1_0::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR;
+        }
+
+        if self.contains(BufferUsage::ACCELERATION_STRUCTURE_STORAGE) {
+            result |=
+                vk1_0::BufferUsageFlags::ACCELERATION_STRUCTURE_STORAGE_KHR;
+        }
+
+        if self.contains(BufferUsage::SHADER_BINDING_TABLE) {
+            result |= vk1_0::BufferUsageFlags::SHADER_BINDING_TABLE_KHR;
         }
 
         if self.contains(BufferUsage::TRANSFORM_FEEDBACK) {
@@ -552,7 +573,7 @@ impl ToErupt<vk1_0::BufferUsageFlags> for BufferUsage {
                 vk1_0::BufferUsageFlags::TRANSFORM_FEEDBACK_COUNTER_BUFFER_EXT;
         }
 
-        if self.contains(BufferUsage::SHADER_DEVICE_ADDRESS) {
+        if self.contains(BufferUsage::DEVICE_ADDRESS) {
             result |= vk1_0::BufferUsageFlags::SHADER_DEVICE_ADDRESS;
         }
 
@@ -1084,72 +1105,75 @@ impl ToErupt<vk1_0::SampleCountFlagBits> for Samples {
     }
 }
 
-pub(crate) fn memory_usage_to_tvma(
-    usage: MemoryUsageFlags,
-) -> tvma::UsageFlags {
-    tvma::UsageFlags::from_bits_truncate(usage.bits())
+// pub(crate) fn memory_usage_to_tvma(
+//     usage: MemoryUsage,
+// ) -> tvma::UsageFlags {
+//     tvma::UsageFlags::from_bits_truncate(usage.bits())
+// }
+
+pub(crate) fn buffer_memory_usage_to_gpu_alloc(
+    buffer_usage: BufferUsage,
+    memory_usage: Option<MemoryUsage>,
+) -> gpu_alloc::UsageFlags {
+    use gpu_alloc::UsageFlags;
+
+    let mut result = gpu_alloc::UsageFlags::empty();
+
+    if buffer_usage.contains(BufferUsage::TRANSIENT) {
+        result |= UsageFlags::TRANSIENT;
+    }
+    if buffer_usage.contains(BufferUsage::DEVICE_ADDRESS) {
+        result |= UsageFlags::DEVICE_ADDRESS;
+    }
+    if let Some(memory_usage) = memory_usage {
+        result |= UsageFlags::HOST_ACCESS;
+        if memory_usage.contains(MemoryUsage::UPLOAD) {
+            result |= UsageFlags::UPLOAD;
+        }
+        if memory_usage.contains(MemoryUsage::DOWNLOAD) {
+            result |= UsageFlags::DOWNLOAD;
+        }
+        if memory_usage.contains(MemoryUsage::FAST_DEVICE_ACCESS) {
+            result |= UsageFlags::FAST_DEVICE_ACCESS;
+        }
+    }
+    result
 }
 
-impl ToErupt<vkrt::AccelerationStructureTypeKHR>
+pub(crate) fn image_memory_usage_to_gpu_alloc(
+    image_usage: ImageUsage,
+) -> gpu_alloc::UsageFlags {
+    use gpu_alloc::UsageFlags;
+
+    let mut result = gpu_alloc::UsageFlags::empty();
+
+    if image_usage.contains(ImageUsage::TRANSIENT) {
+        result |= UsageFlags::TRANSIENT;
+    }
+    result
+}
+
+impl ToErupt<vkacc::AccelerationStructureTypeKHR>
     for AccelerationStructureLevel
 {
-    fn to_erupt(self) -> vkrt::AccelerationStructureTypeKHR {
+    fn to_erupt(self) -> vkacc::AccelerationStructureTypeKHR {
         match self {
             AccelerationStructureLevel::Bottom => {
-                vkrt::AccelerationStructureTypeKHR::BOTTOM_LEVEL_KHR
+                vkacc::AccelerationStructureTypeKHR::BOTTOM_LEVEL_KHR
             }
             AccelerationStructureLevel::Top => {
-                vkrt::AccelerationStructureTypeKHR::TOP_LEVEL_KHR
+                vkacc::AccelerationStructureTypeKHR::TOP_LEVEL_KHR
             }
         }
     }
 }
 
-impl ToErupt<vkrt::BuildAccelerationStructureFlagsKHR>
-    for AccelerationStructureFlags
+impl ToErupt<vkacc::BuildAccelerationStructureFlagsKHR>
+    for AccelerationStructureBuildFlags
 {
-    fn to_erupt(self) -> vkrt::BuildAccelerationStructureFlagsKHR {
-        vkrt::BuildAccelerationStructureFlagsKHR::from_bits(self.bits())
+    fn to_erupt(self) -> vkacc::BuildAccelerationStructureFlagsKHR {
+        vkacc::BuildAccelerationStructureFlagsKHR::from_bits(self.bits())
             .unwrap()
-    }
-}
-
-impl ToErupt<vkrt::AccelerationStructureCreateGeometryTypeInfoKHR>
-    for AccelerationStructureGeometryInfo
-{
-    fn to_erupt(self) -> vkrt::AccelerationStructureCreateGeometryTypeInfoKHR {
-        let builder =
-            vkrt::AccelerationStructureCreateGeometryTypeInfoKHR::default()
-                .into_builder();
-
-        *match self {
-            AccelerationStructureGeometryInfo::AABBs {
-                max_primitive_count,
-            } => builder
-                .geometry_type(vkrt::GeometryTypeKHR::AABBS_KHR)
-                .max_primitive_count(max_primitive_count),
-            AccelerationStructureGeometryInfo::Instances {
-                max_primitive_count,
-            } => builder
-                .geometry_type(vkrt::GeometryTypeKHR::INSTANCES_KHR)
-                .max_primitive_count(max_primitive_count),
-            AccelerationStructureGeometryInfo::Triangles {
-                max_primitive_count,
-                index_type,
-                max_vertex_count,
-                vertex_format,
-                allows_transforms,
-            } => builder
-                .geometry_type(vkrt::GeometryTypeKHR::TRIANGLES_KHR)
-                .max_primitive_count(max_primitive_count)
-                .index_type(
-                    index_type
-                        .map_or(vk1_0::IndexType::NONE_KHR, ToErupt::to_erupt),
-                )
-                .max_vertex_count(max_vertex_count)
-                .vertex_format(vertex_format.to_erupt())
-                .allows_transforms(allows_transforms),
-        }
     }
 }
 
@@ -1162,33 +1186,33 @@ impl ToErupt<vk1_0::IndexType> for IndexType {
     }
 }
 
-impl ToErupt<vkrt::DeviceOrHostAddressConstKHR> for DeviceAddress {
-    fn to_erupt(self) -> vkrt::DeviceOrHostAddressConstKHR {
-        vkrt::DeviceOrHostAddressConstKHR {
+impl ToErupt<vkacc::DeviceOrHostAddressConstKHR> for DeviceAddress {
+    fn to_erupt(self) -> vkacc::DeviceOrHostAddressConstKHR {
+        vkacc::DeviceOrHostAddressConstKHR {
             device_address: self.0.get(),
         }
     }
 }
 
-impl ToErupt<vkrt::DeviceOrHostAddressKHR> for DeviceAddress {
-    fn to_erupt(self) -> vkrt::DeviceOrHostAddressKHR {
-        vkrt::DeviceOrHostAddressKHR {
+impl ToErupt<vkacc::DeviceOrHostAddressKHR> for DeviceAddress {
+    fn to_erupt(self) -> vkacc::DeviceOrHostAddressKHR {
+        vkacc::DeviceOrHostAddressKHR {
             device_address: self.0.get(),
         }
     }
 }
 
-impl ToErupt<vkrt::GeometryFlagsKHR> for GeometryFlags {
-    fn to_erupt(self) -> vkrt::GeometryFlagsKHR {
-        let mut result = vkrt::GeometryFlagsKHR::empty();
+impl ToErupt<vkacc::GeometryFlagsKHR> for GeometryFlags {
+    fn to_erupt(self) -> vkacc::GeometryFlagsKHR {
+        let mut result = vkacc::GeometryFlagsKHR::empty();
 
         if self.contains(GeometryFlags::OPAQUE) {
-            result |= vkrt::GeometryFlagsKHR::OPAQUE_KHR
+            result |= vkacc::GeometryFlagsKHR::OPAQUE_KHR
         }
 
         if self.contains(GeometryFlags::NO_DUPLICATE_ANY_HIT_INVOCATION) {
             result |=
-                vkrt::GeometryFlagsKHR::NO_DUPLICATE_ANY_HIT_INVOCATION_KHR
+                vkacc::GeometryFlagsKHR::NO_DUPLICATE_ANY_HIT_INVOCATION_KHR
         }
 
         result
@@ -1231,8 +1255,6 @@ impl ToErupt<vk1_0::DescriptorType> for DescriptorType {
         }
     }
 }
-
-// sampler::{BorderColor, CompareOp, Filter, MipmapMode, SamplerAddressMode},
 
 impl ToErupt<vk1_0::BorderColor> for BorderColor {
     fn to_erupt(self) -> vk1_0::BorderColor {

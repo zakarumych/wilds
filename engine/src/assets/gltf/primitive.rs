@@ -62,7 +62,6 @@ pub fn load_gltf_primitive(
             size: u64::try_from(loaded_data.len()).map_err(|_| OutOfMemory)?,
             usage: repr.config.mesh_indices_usage
                 | repr.config.mesh_vertices_usage,
-            memory: MemoryUsageFlags::empty(),
         },
         &loaded_data,
     )?;

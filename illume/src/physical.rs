@@ -51,6 +51,17 @@ pub enum DeviceKind {
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
 pub enum Feature {
     BufferDeviceAddress,
+
+    ShaderSampledImageDynamicIndexing,
+    ShaderStorageImageDynamicIndexing,
+    ShaderUniformBufferDynamicIndexing,
+    ShaderStorageBufferDynamicIndexing,
+
+    ShaderSampledImageNonUniformIndexing,
+    ShaderStorageImageNonUniformIndexing,
+    ShaderUniformBufferNonUniformIndexing,
+    ShaderStorageBufferNonUniformIndexing,
+
     DescriptorBindingSampledImageUpdateAfterBind,
     DescriptorBindingStorageImageUpdateAfterBind,
     DescriptorBindingStorageBufferUpdateAfterBind,
@@ -59,7 +70,8 @@ pub enum Feature {
     DescriptorBindingUniformTexelBufferUpdateAfterBind,
     DescriptorBindingUpdateUnusedWhilePending,
     DescriptorBindingPartiallyBound,
-    RayTracing,
+    AccelerationStructure,
+    RayTracingPipeline,
     RuntimeDescriptorArray,
     ScalarBlockLayout,
     SurfacePresentation,
