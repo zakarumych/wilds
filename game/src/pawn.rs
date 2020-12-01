@@ -1,6 +1,5 @@
 use {
     bytemuck::cast_slice,
-    goods::SyncAsset,
     hecs::{Entity, World},
     nalgebra as na,
     ncollide3d::{
@@ -11,7 +10,7 @@ use {
     },
     std::sync::Arc,
     wilds::{
-        assets::Prefab,
+        assets::{Prefab, SyncAsset},
         physics::{ColliderDesc, Colliders, RigidBodyDesc},
         renderer::{
             BufferUsage, Context, Material, Mesh, MeshData, Normal3d,

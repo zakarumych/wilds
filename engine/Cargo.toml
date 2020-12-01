@@ -13,7 +13,7 @@ readme = "../README.md"
 
 [dependencies]
 # Assets
-goods = { version = "0.6", features = ["fs", "tokio-spawn", "data-url", "trace"] }
+goods = { version = "0.6", features = ["fs", "tokio-spawn", "data-url", "trace", "ron-format"] }
 gltf = "0.15"
 
 # Physics
