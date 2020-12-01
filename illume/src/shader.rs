@@ -245,7 +245,7 @@ pub enum InvalidShader {
 
 #[derive(Debug, thiserror::Error)]
 pub enum CreateShaderModuleError {
-    #[error("{source}")]
+    #[error(transparent)]
     OutOfMemoryError {
         #[from]
         source: OutOfMemory,

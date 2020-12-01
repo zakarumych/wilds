@@ -357,7 +357,7 @@ impl IndexType {
 
 #[derive(Debug, thiserror::Error)]
 pub enum CreateDeviceError<E: Error + 'static> {
-    #[error("{source}")]
+    #[error(transparent)]
     OutOfMemory {
         #[from]
         source: OutOfMemory,
@@ -366,7 +366,7 @@ pub enum CreateDeviceError<E: Error + 'static> {
     #[error("Non-existed families are requested")]
     BadFamiliesRequested,
 
-    #[error("{source}")]
+    #[error(transparent)]
     CannotFindRequeredQueues { source: E },
 
     /// Implementation specific error.
@@ -381,7 +381,7 @@ pub enum CreateDeviceError<E: Error + 'static> {
 /// Possible error which can be returned from `create_buffer_*`.
 #[derive(Debug, thiserror::Error)]
 pub enum CreateBufferError {
-    #[error("{source}")]
+    #[error(transparent)]
     OutOfMemory {
         #[from]
         source: OutOfMemory,
@@ -394,7 +394,7 @@ pub enum CreateBufferError {
 /// Possible error which can be returned from `create_image_*)`.
 #[derive(Debug, thiserror::Error)]
 pub enum CreateImageError {
-    #[error("{source}")]
+    #[error(transparent)]
     OutOfMemory {
         #[from]
         source: OutOfMemory,
@@ -408,7 +408,7 @@ pub enum CreateImageError {
 #[derive(Clone, Copy, Debug, thiserror::Error)]
 pub enum MappingError {
     /// Device memory is exhausted.
-    #[error("{source}")]
+    #[error(transparent)]
     OutOfMemory {
         #[from]
         source: OutOfMemory,
