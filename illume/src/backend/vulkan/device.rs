@@ -2516,7 +2516,7 @@ impl Device {
 
 #[derive(Debug, thiserror::Error)]
 pub enum CreateRenderPassError {
-    #[error("{source}")]
+    #[error(transparent)]
     OutOfMemory {
         #[from]
         source: OutOfMemory,

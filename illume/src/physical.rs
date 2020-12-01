@@ -4,7 +4,7 @@ use crate::{assert_error, queue::FamilyInfo, OutOfMemory};
 /// Error occured during device enumeration.
 #[derive(Debug, thiserror::Error)]
 pub enum EnumerateDeviceError {
-    #[error("{source}")]
+    #[error(transparent)]
     OutOfMemory {
         #[from]
         source: OutOfMemory,

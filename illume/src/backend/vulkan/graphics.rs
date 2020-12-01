@@ -89,7 +89,7 @@ impl Debug for Graphics {
 
 #[derive(Debug, thiserror::Error)]
 pub enum InitError {
-    #[error("{source}")]
+    #[error(transparent)]
     EntryLoaderError {
         #[from]
         source: EntryLoaderError,
@@ -98,7 +98,7 @@ pub enum InitError {
     #[error("Failed to load functions from vulkan library")]
     FunctionLoadFailed,
 
-    #[error("{source}")]
+    #[error(transparent)]
     VulkanError {
         #[from]
         source: vk1_0::Result,

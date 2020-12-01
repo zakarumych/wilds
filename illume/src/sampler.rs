@@ -37,11 +37,23 @@ pub enum Filter {
     // Cubic,
 }
 
+impl Default for Filter {
+    fn default() -> Self {
+        Filter::Nearest
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
 pub enum MipmapMode {
     Nearest,
     Linear,
+}
+
+impl Default for MipmapMode {
+    fn default() -> Self {
+        MipmapMode::Nearest
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -52,6 +64,12 @@ pub enum SamplerAddressMode {
     ClampToEdge,
     ClampToBorder,
     MirrorClampToEdge,
+}
+
+impl Default for SamplerAddressMode {
+    fn default() -> Self {
+        SamplerAddressMode::Repeat
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -65,26 +83,45 @@ pub enum BorderColor {
     IntOpaqueWhite,
 }
 
+impl Default for BorderColor {
+    fn default() -> Self {
+        BorderColor::FloatTransparentBlack
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde-1", derive(serde::Serialize, serde::Deserialize))]
 pub struct SamplerInfo {
+    #[cfg_attr(feature = "serde-1", serde(default))]
     pub mag_filter: Filter,
+    #[cfg_attr(feature = "serde-1", serde(default))]
     pub min_filter: Filter,
+    #[cfg_attr(feature = "serde-1", serde(default))]
     pub mipmap_mode: MipmapMode,
+    #[cfg_attr(feature = "serde-1", serde(default))]
     pub address_mode_u: SamplerAddressMode,
+    #[cfg_attr(feature = "serde-1", serde(default))]
     pub address_mode_v: SamplerAddressMode,
+    #[cfg_attr(feature = "serde-1", serde(default))]
     pub address_mode_w: SamplerAddressMode,
+    #[cfg_attr(feature = "serde-1", serde(default))]
     pub mip_lod_bias: OrderedFloat<f32>,
+    #[cfg_attr(feature = "serde-1", serde(default))]
     pub max_anisotropy: Option<OrderedFloat<f32>>,
+    #[cfg_attr(feature = "serde-1", serde(default))]
     pub compare_op: Option<CompareOp>,
+    #[cfg_attr(feature = "serde-1", serde(default))]
     pub min_lod: OrderedFloat<f32>,
+    #[cfg_attr(feature = "serde-1", serde(default = "defaults::max_lod"))]
     pub max_lod: OrderedFloat<f32>,
+    #[cfg_attr(feature = "serde-1", serde(default))]
     pub border_color: BorderColor,
+    #[cfg_attr(feature = "serde-1", serde(default))]
     pub unnormalized_coordinates: bool,
 }
 
-impl Default for SamplerInfo {
-    fn default() -> Self {
+impl SamplerInfo {
+    pub const fn new() -> Self {
         SamplerInfo {
             mag_filter: Filter::Nearest,
             min_filter: Filter::Nearest,
@@ -92,13 +129,28 @@ impl Default for SamplerInfo {
             address_mode_u: SamplerAddressMode::Repeat,
             address_mode_v: SamplerAddressMode::Repeat,
             address_mode_w: SamplerAddressMode::Repeat,
-            mip_lod_bias: 0.0.into(),
+            mip_lod_bias: OrderedFloat(0.0),
             max_anisotropy: None,
             compare_op: None,
-            min_lod: 0.0.into(),
-            max_lod: 1000.0.into(),
-            border_color: BorderColor::FloatOpaqueBlack,
+            min_lod: OrderedFloat(0.0),
+            max_lod: OrderedFloat(1000.0),
+            border_color: BorderColor::FloatTransparentBlack,
             unnormalized_coordinates: false,
         }
+    }
+}
+
+impl Default for SamplerInfo {
+    fn default() -> Self {
+        SamplerInfo::new()
+    }
+}
+
+#[cfg(feature = "serde-1")]
+mod defaults {
+    use ordered_float::OrderedFloat;
+
+    pub const fn max_lod() -> OrderedFloat<f32> {
+        OrderedFloat(1000.0)
     }
 }

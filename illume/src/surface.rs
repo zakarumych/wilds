@@ -9,7 +9,7 @@ use {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SurfaceError {
-    #[error("{source}")]
+    #[error(transparent)]
     OutOfMemory {
         #[from]
         source: OutOfMemory,
@@ -110,7 +110,7 @@ impl RawWindowHandleKind {
 
 #[derive(Debug, thiserror::Error)]
 pub enum CreateSurfaceError {
-    #[error("{source}")]
+    #[error(transparent)]
     OutOfMemory {
         #[from]
         source: OutOfMemory,

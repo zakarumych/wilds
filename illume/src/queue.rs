@@ -186,7 +186,7 @@ pub struct QueueId {
 
 #[derive(Debug, thiserror::Error)]
 pub enum CreateEncoderError {
-    #[error("{source}")]
+    #[error(transparent)]
     OutOfMemory {
         #[from]
         source: OutOfMemory,
