@@ -1,11 +1,14 @@
 mod gltf;
+mod image;
+mod material;
 mod terrain;
-mod texture;
 
-pub use self::{gltf::*, terrain::*, texture::*};
+pub use {
+    self::{gltf::*, image::*, material::*, terrain::*},
+    goods::*,
+};
 
 use {
-    goods::{Cache, Format},
     hecs::{Entity, World},
     std::{path::Path, sync::Arc},
 };

@@ -5,13 +5,15 @@ use {
     self::pawn::*,
     bumpalo::Bump,
     color_eyre::Report,
-    goods::RonFormat,
     hecs::{Entity, EntityBuilder, World},
     nalgebra as na,
     std::{alloc::System, cmp::max, time::Duration},
     wilds::{
         animate::Pose,
-        assets::{GltfAsset, GltfFormat, Prefab, TerrainAsset, TerrainFormat},
+        assets::{
+            GltfAsset, GltfFormat, Prefab, RonFormat, TerrainAsset,
+            TerrainFormat,
+        },
         camera::{
             following::{FollowingCamera, FollowingCameraSystem},
             free::{FreeCamera, FreeCameraSystem},
@@ -44,6 +46,8 @@ const WINDOW_EXTENT: Extent2d = Extent2d {
 };
 
 fn main() -> Result<(), Report> {
+    color_eyre::install()?;
+
     tracing_subscriber::fmt::init();
     tracing::info!("App started");
 
@@ -66,12 +70,10 @@ fn main() -> Result<(), Report> {
         let mut renderer = Renderer::new(&window)?;
         let mut clocks = Clocks::new();
 
-        let sunlight = na::Vector3::new(255.0, 207.0, 72.0);
-        // .map(|c| c * 5.0);
+        let sunlight = na::Vector3::new(255.0, 207.0, 72.0) / 255.0;
 
-        let skyradiance = na::Vector3::new(117.0, 187.0, 253.0)
-            .map(|c| c / 255.0)
-            .map(|c| c / (1.1 - c));
+        let skyradiance = (na::Vector3::new(117.0, 187.0, 253.0) / 255.0)
+            .map(|c| c / (1.2 - c));
 
         engine.world.spawn((
             DirectionalLight {
@@ -131,22 +133,20 @@ fn main() -> Result<(), Report> {
         //     }
         // });
 
-        let scene = engine.load_prefab_with_format::<GltfAsset, _>(
-            "sponza/glTF/Sponza.gltf".into(),
-            Global3::from_scale(1.0),
-            GltfFormat::for_raytracing(),
-        );
-
-        // let _terrain = TerrainAsset::load(
-        //     &engine,
-        //     "terrain/0001.png".into(),
-        //     TerrainFormat {
-        //         raster: false,
-        //         blas: true,
-        //         factor: 3.0,
-        //     },
-        //     na::Isometry3::identity(),
+        // let scene = engine.load_prefab_with_format::<GltfAsset, _>(
+        //     "sponza2/sponza2.gltf".into(),
+        //     Global3::from_scale(1.0),
+        //     GltfFormat::for_raytracing(),
         // );
+
+        let _terrain = engine.load_prefab_with_format(
+            "terrain/island.ron".into(),
+            Global3::from_scale(1.0),
+            TerrainFormat {
+                raster: false,
+                blas: true,
+            },
+        );
 
         // let pawn = PawnAsset::load(
         //     &engine,

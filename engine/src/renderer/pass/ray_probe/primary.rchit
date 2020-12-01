@@ -85,7 +85,10 @@ vec3 query_diffuse_from_probes(vec3 origin, vec3 normal)
 
 void main()
 {
-    const uvec4 co = uvec4(gl_LaunchIDEXT, globals.frame);
+    if (gl_HitKindEXT != gl_HitKindFrontFacingTriangleEXT)
+        return;
+
+    const uvec4 co = uvec4(gl_LaunchIDEXT, globals.frame * globals.diffuse_rays) + uvec4(0, 0, prd.cozw);
     const vec3 back = gl_WorldRayDirectionEXT * 0.001;
 
     uint shadow_rays = prd.shadow_rays;

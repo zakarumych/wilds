@@ -45,7 +45,7 @@ impl Material {
             emissive: None,
             emissive_factor: [OrderedFloat(0.0); 3],
             normal: None,
-            normal_factor: OrderedFloat(0.0),
+            normal_factor: OrderedFloat(1.0),
         }
     }
 
