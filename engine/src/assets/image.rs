@@ -12,15 +12,18 @@ use {
 
 /// Image asset.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Texture(pub ImageView);
+#[repr(transparent)]
+pub struct ImageAsset {
+    pub image: ImageView,
+}
 
-impl Texture {
+impl ImageAsset {
     pub fn into_inner(self) -> ImageView {
-        self.0
+        self.image
     }
 }
 
-impl SyncAsset for Texture {
+impl SyncAsset for ImageAsset {
     type Context = Context;
     type Error = CreateImageError;
     type Repr = DynamicImage;
@@ -29,9 +32,9 @@ impl SyncAsset for Texture {
         image: DynamicImage,
         ctx: &mut Context,
     ) -> Result<Self, CreateImageError> {
-        let image = image.to_rgba();
+        let image = image.to_rgba8();
         image_view_from_dyn_image(&DynamicImage::ImageRgba8(image), ctx)
-            .map(Texture)
+            .map(|image| ImageAsset { image })
     }
 }
 
@@ -39,7 +42,7 @@ impl SyncAsset for Texture {
 #[derive(Debug, Default)]
 pub struct GuessImageFormat;
 
-impl<K> Format<Texture, K> for GuessImageFormat {
+impl<K> Format<ImageAsset, K> for GuessImageFormat {
     type DecodeFuture = Ready<Result<DynamicImage, ImageError>>;
     type Error = ImageError;
 
@@ -53,7 +56,7 @@ impl<K> Format<Texture, K> for GuessImageFormat {
     }
 }
 
-impl<K> AssetDefaultFormat<K> for Texture {
+impl<K> AssetDefaultFormat<K> for ImageAsset {
     type DefaultFormat = GuessImageFormat;
 }
 

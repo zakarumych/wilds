@@ -1,5 +1,9 @@
 use {
-    super::{AssetKey, Assets, Prefab},
+    super::{
+        append_key,
+        material::{MaterialInfo, MaterialRepr},
+        ready, Asset, AssetKey, Assets, Format, Prefab,
+    },
     crate::{
         physics::{BodyStatus, Colliders, RigidBodyDesc},
         renderer::{
@@ -9,7 +13,7 @@ use {
         },
         scene::Global3,
     },
-    goods::{ready, Format, Ready, SyncAsset},
+    futures::future::BoxFuture,
     hecs::{Entity, World},
     illume::{
         BufferInfo, BufferUsage, IndexType, MemoryUsageFlags, OutOfMemory,
@@ -28,7 +32,7 @@ use {
 pub fn create_terrain_shape(
     width: u32,
     depth: u32,
-    heightmap: impl Fn(u32, u32) -> f32,
+    height: impl Fn(u32, u32) -> f32,
 ) -> HeightField<f32> {
     let mut matrix: na::DMatrix<f32> = na::DMatrix::zeros_generic(
         na::Dynamic::new(depth as usize),
@@ -37,7 +41,7 @@ pub fn create_terrain_shape(
 
     for x in 0..width {
         for y in 0..depth {
-            matrix[(y as usize, x as usize)] = heightmap(x, y);
+            matrix[(y as usize, x as usize)] = height(x, y);
         }
     }
 
@@ -47,88 +51,142 @@ pub fn create_terrain_shape(
 pub fn create_terrain_mesh(
     width: u32,
     depth: u32,
-    heightmap: impl Fn(u32, u32) -> f32,
+    height: impl Fn(u32, u32) -> f32,
     buffer_usage: BufferUsage,
     ctx: &mut Context,
 ) -> Result<Mesh, OutOfMemory> {
     let mut data: Vec<u8> = Vec::new();
-    let mut indices_offset = 0;
 
-    let xoff = (width - 1) as f32 * 0.5;
-    let zoff = (depth - 1) as f32 * 0.5;
+    let xoff = width as f32 * 0.5;
+    let zoff = depth as f32 * 0.5;
 
-    if width > 1 && depth > 1 {
-        for z in 0..depth - 1 {
-            for x in 0..width - 1 {
-                let xf = x as f32 - xoff;
-                let zf = z as f32 - zoff;
+    for z in 0..depth {
+        for x in 0..width {
+            let h = height(x, z);
+            let h_n = if z == depth - 1 { h } else { height(x, z + 1) };
+            let h_s = if z == 0 { h } else { height(x, z - 1) };
+            let h_w = if x == 0 { h } else { height(x - 1, z) };
+            let h_e = if x == width - 1 { h } else { height(x + 1, z) };
 
-                let pos = na::Vector3::from([xf, heightmap(x, z), zf]);
-                let posx =
-                    na::Vector3::from([xf + 1.0, heightmap(x + 1, z), zf]);
-                let posy =
-                    na::Vector3::from([xf, heightmap(x, z + 1), zf + 1.0]);
-                let posxy = na::Vector3::from([
-                    xf + 1.0,
-                    heightmap(x + 1, z + 1),
-                    zf + 1.0,
-                ]);
+            let h_ne = match (width - x, depth - z) {
+                (1, 1) => h,
+                (1, _) => h_n,
+                (_, 1) => h_e,
+                _ => height(x + 1, z + 1),
+            };
+            let h_se = match (width - x, z) {
+                (1, 0) => h,
+                (1, _) => h_s,
+                (_, 0) => h_e,
+                _ => height(x + 1, z - 1),
+            };
+            let h_nw = match (x, depth - z) {
+                (0, 1) => h,
+                (0, _) => h_n,
+                (_, 1) => h_w,
+                _ => height(x - 1, z + 1),
+            };
+            let h_sw = match (x, z) {
+                (0, 0) => h,
+                (0, _) => h_s,
+                (_, 0) => h_w,
+                _ => height(x - 1, z - 1),
+            };
 
-                let n1 = (pos - posx).cross(&(posy - pos));
-                let n2 = (posy - posxy).cross(&(posxy - posx));
-                let n3 = (pos - posx).cross(&(posxy - posx));
-                let n4 = (posy - posxy).cross(&(posy - pos));
+            let shift_n = na::Vector3::from([0.0, h_n - h, 1.0]);
+            let shift_s = na::Vector3::from([0.0, h_s - h, -1.0]);
+            let shift_w = na::Vector3::from([-1.0, h_w - h, 0.0]);
+            let shift_e = na::Vector3::from([1.0, h_e - h, 0.0]);
 
-                let normal = (n1 + n2 + n3 + n4).normalize();
-                let tangent = Tangent3d([1.0, 0.0, 0.0, 1.0]);
+            let shift_ne = na::Vector3::from([1.0, h_ne - h, 1.0]);
+            let shift_se = na::Vector3::from([1.0, h_se - h, -1.0]);
+            let shift_nw = na::Vector3::from([-1.0, h_nw - h, 1.0]);
+            let shift_sw = na::Vector3::from([-1.0, h_sw - h, -1.0]);
 
-                data.extend_from_slice(bytemuck::cast_slice(&[
-                    PositionNormalTangent3dUV {
-                        position: Position3d(pos.into()),
-                        normal: Normal3d(normal.into()),
-                        uv: UV([xf, zf]),
-                        tangent,
-                    },
-                    PositionNormalTangent3dUV {
-                        position: Position3d(posx.into()),
-                        normal: Normal3d(normal.into()),
-                        uv: UV([xf + 1.0, zf]),
-                        tangent,
-                    },
-                    PositionNormalTangent3dUV {
-                        position: Position3d(posy.into()),
-                        normal: Normal3d(normal.into()),
-                        uv: UV([xf, zf + 1.0]),
-                        tangent,
-                    },
-                    PositionNormalTangent3dUV {
-                        position: Position3d(posxy.into()),
-                        normal: Normal3d(normal.into()),
-                        uv: UV([xf + 1.0, zf + 1.0]),
-                        tangent,
-                    },
-                ]));
-            }
+            let normal_ne = (shift_n.cross(&shift_e)
+                + (shift_ne - shift_e).cross(&(shift_ne - shift_n)))
+            .normalize();
+
+            let normal_nw = (shift_w.cross(&shift_n)
+                + (shift_nw - shift_n).cross(&(shift_nw - shift_w)))
+            .normalize();
+
+            let normal_se = (shift_e.cross(&shift_s)
+                + (shift_se - shift_s).cross(&(shift_se - shift_e)))
+            .normalize();
+
+            let normal_sw = (shift_s.cross(&shift_w)
+                + (shift_sw - shift_w).cross(&(shift_sw - shift_s)))
+            .normalize();
+
+            let tangent = Tangent3d([1.0, 0.0, 0.0, 1.0]);
+
+            let xf = x as f32 - xoff;
+            let zf = z as f32 - zoff;
+
+            let u = x as f32;
+            let v = z as f32;
+
+            data.extend_from_slice(bytemuck::cast_slice(&[
+                PositionNormalTangent3dUV {
+                    position: Position3d([
+                        xf - 0.5,
+                        (h + h_s + h_w + h_sw) / 4.0,
+                        zf - 0.5,
+                    ]),
+                    normal: Normal3d(normal_sw.into()),
+                    uv: UV([u, v]),
+                    tangent,
+                },
+                PositionNormalTangent3dUV {
+                    position: Position3d([
+                        xf + 0.5,
+                        (h + h_s + h_e + h_se) / 4.0,
+                        zf - 0.5,
+                    ]),
+                    normal: Normal3d(normal_se.into()),
+                    uv: UV([u + 1.0, v]),
+                    tangent,
+                },
+                PositionNormalTangent3dUV {
+                    position: Position3d([
+                        xf - 0.5,
+                        (h + h_n + h_w + h_nw) / 4.0,
+                        zf + 0.5,
+                    ]),
+                    normal: Normal3d(normal_nw.into()),
+                    uv: UV([u, v + 1.0]),
+                    tangent,
+                },
+                PositionNormalTangent3dUV {
+                    position: Position3d([
+                        xf + 0.5,
+                        (h + h_n + h_e + h_ne) / 4.0,
+                        zf + 0.5,
+                    ]),
+                    normal: Normal3d(normal_ne.into()),
+                    uv: UV([u + 1.0, v + 1.0]),
+                    tangent,
+                },
+            ]));
         }
+    }
 
-        indices_offset = data.len();
+    let indices_offset = u64::try_from(data.len()).map_err(|_| OutOfMemory)?;
 
-        let mut index: u32 = 0;
-        for _ in 0..depth - 1 {
-            for _ in 0..width - 1 {
-                data.extend_from_slice(bytemuck::cast_slice(&[
-                    index + 0,
-                    index + 2,
-                    index + 3,
-                    index + 3,
-                    index + 1,
-                    index + 0,
-                ]));
-                index += 4;
-            }
+    let mut index: u32 = 0;
+    for _ in 0..depth {
+        for _ in 0..width {
+            data.extend_from_slice(bytemuck::cast_slice(&[
+                index + 0,
+                index + 2,
+                index + 3,
+                index + 3,
+                index + 1,
+                index + 0,
+            ]));
+            index += 4;
         }
-    } else {
-        tracing::warn!("Generating empty terrain mesh");
     }
 
     let data_size = u64::try_from(data.len()).map_err(|_| OutOfMemory)?;
@@ -143,18 +201,14 @@ pub fn create_terrain_mesh(
         &data,
     )?;
 
-    let squares = if width > 1 && depth > 1 {
-        (depth - 1) * (width - 1)
-    } else {
-        0
-    };
+    let squares = width * depth;
 
     let vertex_count = squares * 4;
     let index_count = squares * 6;
 
     let mesh = MeshBuilder::with_topology(PrimitiveTopology::TriangleList)
         .with_binding(buffer.clone(), 0, PositionNormalTangent3dUV::layout())
-        .with_indices(buffer.clone(), indices_offset as u64, IndexType::U32)
+        .with_indices(buffer.clone(), indices_offset, IndexType::U32)
         .build(index_count, vertex_count);
 
     Ok(mesh)
@@ -170,7 +224,7 @@ pub fn image_heightmap<P: Pixel>(
         let min = P::Subpixel::min_value().to_f32().unwrap_or(0.0);
         let max = P::Subpixel::max_value().to_f32().unwrap_or(1.0);
 
-        factor * (pixel - min) / (max - min)
+        std::f32::consts::E.powf(factor * (pixel - min) / (max - min))
     })
 }
 
@@ -191,80 +245,146 @@ pub fn image_heightmap_alpha<P: Pixel>(
 }
 
 pub struct TerrainRepr {
-    image: DynamicImage,
+    heightmap: DynamicImage,
+    material: MaterialRepr,
     buffer_usage: BufferUsage,
     factor: f32,
 }
 
-impl SyncAsset for TerrainAsset {
+#[derive(Debug, thiserror::Error)]
+pub enum TerrainError {
+    #[error(transparent)]
+    ImageError(#[from] ImageError),
+
+    #[error("Failed to deserialize `TerrainInfo`: `{source}`")]
+    TerrainInfo {
+        #[from]
+        source: ron::Error,
+    },
+
+    #[error("Out of device memory")]
+    OutOfMemory,
+
+    #[error("Failed to load texture: `{source}`")]
+    TextureError {
+        #[from]
+        source: goods::Error,
+    },
+}
+
+impl From<OutOfMemory> for TerrainError {
+    fn from(_: OutOfMemory) -> Self {
+        TerrainError::OutOfMemory
+    }
+}
+
+impl Asset for TerrainAsset {
     type Context = Context;
-    type Error = OutOfMemory;
+    type Error = TerrainError;
     type Repr = TerrainRepr;
+
+    type BuildFuture = BoxFuture<'static, Result<Self, TerrainError>>;
 
     fn build(
         repr: TerrainRepr,
         ctx: &mut Context,
-    ) -> Result<Self, OutOfMemory> {
-        let (w, h, f) = image_heightmap(&repr.image, repr.factor);
-        let mesh = create_terrain_mesh(w, h, &f, repr.buffer_usage, ctx)?;
+    ) -> BoxFuture<'static, Result<Self, TerrainError>> {
+        let (w, h, f) = image_heightmap(&repr.heightmap, repr.factor);
         let shape = Arc::new(create_terrain_shape(w, h, &f));
 
-        Ok(TerrainAsset { mesh, shape })
+        let mesh = create_terrain_mesh(w, h, &f, repr.buffer_usage, ctx);
+        let material = repr.material.prebuild(ctx);
+
+        Box::pin(async move {
+            Ok(TerrainAsset {
+                mesh: mesh?,
+                shape,
+                material: material?.finish().await?,
+            })
+        })
     }
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct TerrainInfo {
+    heightmap: String,
+
+    #[serde(flatten)]
+    material: MaterialInfo,
+
+    factor: f32,
 }
 
 #[derive(Debug)]
 pub struct TerrainFormat {
     pub raster: bool,
     pub blas: bool,
-    pub factor: f32,
 }
 
 impl Format<TerrainAsset, AssetKey> for TerrainFormat {
-    type DecodeFuture = Ready<Result<TerrainRepr, ImageError>>;
-    type Error = ImageError;
+    type DecodeFuture = BoxFuture<'static, Result<TerrainRepr, TerrainError>>;
+    type Error = TerrainError;
 
     fn decode(
         self,
-        _: AssetKey,
+        key: AssetKey,
         bytes: Vec<u8>,
-        _: &Assets,
-    ) -> Self::DecodeFuture {
+        assets: &Assets,
+    ) -> BoxFuture<'static, Result<TerrainRepr, TerrainError>> {
+        let info = match ron::de::from_bytes::<TerrainInfo>(&bytes) {
+            Ok(info) => info,
+            Err(err) => return Box::pin(ready(Err(err.into()))),
+        };
+
+        let heightmap_bytes =
+            assets.load::<Box<[u8]>>(append_key(&key, &info.heightmap));
+        let material = info.material.load(Some(&key), assets);
+
         let mut buffer_usage = BufferUsage::empty();
+
         if self.raster {
             buffer_usage |= BufferUsage::VERTEX | BufferUsage::INDEX;
         }
+
         if self.blas {
             buffer_usage |= BufferUsage::RAY_TRACING
                 | BufferUsage::STORAGE
                 | BufferUsage::SHADER_DEVICE_ADDRESS;
         }
 
-        ready(load_from_memory(&bytes).map(|image| TerrainRepr {
-            image,
-            buffer_usage,
-            factor: self.factor,
-        }))
+        let factor = info.factor;
+
+        Box::pin(async move {
+            let heightmap = load_from_memory(&heightmap_bytes.await?)?;
+
+            Ok(TerrainRepr {
+                heightmap,
+                material,
+                buffer_usage,
+                factor,
+            })
+        })
     }
 }
 
 #[derive(Clone)]
 pub struct TerrainAsset {
     pub mesh: Mesh,
+    pub material: Material,
     pub shape: Arc<HeightField<f32>>,
 }
 
 /// Terrain entity consists of terrain marker and optionally
 /// mesh, material and collider components.
 ///
-/// Both mesh and collider can be created from same heightmap image.
+/// Both mesh and collider can be created from same height image.
 #[derive(Clone, Copy, Debug)]
 pub struct Terrain;
 
 impl Prefab for TerrainAsset {
-    type Info = na::Isometry3<f32>;
+    type Info = Global3;
 
-    fn spawn(self, iso: na::Isometry3<f32>, world: &mut World, entity: Entity) {
+    fn spawn(self, global: Global3, world: &mut World, entity: Entity) {
         let rigid_body = RigidBodyDesc::<f32>::new()
             .status(BodyStatus::Static)
             .build();
@@ -274,7 +394,7 @@ impl Prefab for TerrainAsset {
             (
                 Renderable {
                     mesh: self.mesh,
-                    material: Material::color([0.3, 0.5, 0.7, 1.0]),
+                    material: self.material,
                     // transform: None,
                 },
                 rigid_body,
@@ -282,7 +402,7 @@ impl Prefab for TerrainAsset {
                     ColliderDesc::new(ShapeHandle::from_arc(self.shape))
                         .margin(0.01),
                 ),
-                Global3::from_iso(iso),
+                global,
                 Terrain,
             ),
         );

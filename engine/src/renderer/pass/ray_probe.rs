@@ -37,8 +37,8 @@ impl Config {
                 height: 32,
                 depth: 32,
             },
-            probes_dimensions: [35.0, 35.0, 35.0],
-            probes_offset: [-17.5, -17.5, -17.5],
+            probes_dimensions: [640.0, 640.0, 640.0],
+            probes_offset: [-320.0, -320.0, -320.0],
             diffuse_rays: 256,
             shadow_rays: 8,
         }

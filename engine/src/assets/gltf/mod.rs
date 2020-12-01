@@ -12,8 +12,8 @@ use {
         primitive::load_gltf_primitive, sampler::load_gltf_sampler,
         texture::load_gltf_texture,
     },
-    super::{append_key, AssetKey, Assets, Format},
-    crate::renderer::{Context, Material, Mesh, Renderable, Texture},
+    super::{append_key, image::ImageAsset, AssetKey, Assets, Format},
+    crate::renderer::{Context, Renderable},
     ::image::ImageError,
     futures::{
         future::{try_join_all, BoxFuture},
@@ -159,9 +159,11 @@ impl Format<GltfAsset, AssetKey> for GltfFormat {
                         |b| match b.source() {
                             gltf::image::Source::View { .. } => None,
                             gltf::image::Source::Uri { uri, .. } => {
-                                Some(assets.load::<crate::assets::Texture>(
-                                    append_key(&key, uri),
-                                ))
+                                Some(
+                                    assets.load::<ImageAsset>(append_key(
+                                        &key, uri,
+                                    )),
+                                )
                             }
                         },
                     ));
@@ -202,7 +204,7 @@ impl Format<GltfAsset, AssetKey> for GltfFormat {
 
 #[derive(Debug, thiserror::Error)]
 pub enum GltfLoadingError {
-    #[error("{source}")]
+    #[error(transparent)]
     GltfError {
         #[from]
         source: gltf::Error,
@@ -211,13 +213,13 @@ pub enum GltfLoadingError {
     #[error("GLTF with no scenes")]
     NoScenes,
 
-    #[error("{source}")]
+    #[error(transparent)]
     AssetError {
         #[from]
         source: goods::Error,
     },
 
-    #[error("{source}")]
+    #[error(transparent)]
     OutOfMemory {
         #[from]
         source: OutOfMemory,
