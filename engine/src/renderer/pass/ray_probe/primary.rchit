@@ -40,10 +40,10 @@ void query_probe(ivec3 probe, vec3 origin, vec3 normal, inout vec3 result, inout
     // if (dot(normal, probe_dir) > 0.01)
     {
         unshadows = 0;
-        traceRayEXT(tlas, shadow_ray_flags, 0xff, 0, 0, 1, origin, 0, probe_dir, .1, 1);
+        traceRayEXT(tlas, shadow_ray_flags, 0xff, 0, 0, 1, origin, 0, probe_dir, probe_dist, 1);
         if (unshadows == 0)
         {
-            weight *= .1;
+            weight *= .01;
         }
         vec3 p = get_cube_probe_3(normal, probe);
         total_weight += weight;
@@ -85,9 +85,6 @@ vec3 query_diffuse_from_probes(vec3 origin, vec3 normal)
 
 void main()
 {
-    if (gl_HitKindEXT != gl_HitKindFrontFacingTriangleEXT)
-        return;
-
     const uvec4 co = uvec4(gl_LaunchIDEXT, globals.frame);
     const vec3 back = gl_WorldRayDirectionEXT * 0.001;
 
@@ -108,7 +105,7 @@ void main()
     vec3 normal = normalize(v0.norm * barycentrics.x + v1.norm * barycentrics.y + v2.norm * barycentrics.z);
     vec4 tangh = v0.tangh * barycentrics.x + v1.tangh * barycentrics.y + v2.tangh * barycentrics.z;
     normal = local_normal(normal, tangh, uv);
-    normal *= gl_HitKindEXT == gl_HitKindFrontFacingTriangleEXT ? 1 : -1;
+    // normal *= gl_HitKindEXT == gl_HitKindFrontFacingTriangleEXT ? 1 : -1;
     vec3 world_space_normal = normalize((gl_ObjectToWorldEXT * vec4(normal, 0.0)));
 
     vec3 radiance = vec3(0);
@@ -156,5 +153,5 @@ void main()
     radiance += query_diffuse_from_probes(world_space_pos - back + world_space_normal * 0.001, world_space_normal);
     radiance *= sample_albedo(uv).rgb;
 
-    prd.result += radiance;
+    prd.result = radiance;
 }
