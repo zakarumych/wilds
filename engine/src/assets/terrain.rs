@@ -55,7 +55,37 @@ pub fn create_terrain_mesh(
     buffer_usage: BufferUsage,
     ctx: &mut Context,
 ) -> Result<Mesh, OutOfMemory> {
-    let mut data: Vec<u8> = Vec::new();
+    if width.checked_mul(depth).is_none() {
+        return Err(OutOfMemory);
+    }
+
+    let vertex_count = width * depth;
+
+    let vertex_total_size = usize::try_from(vertex_count)
+        .ok()
+        .and_then(|count| {
+            std::alloc::Layout::array::<PositionNormalTangent3dUV>(count).ok()
+        })
+        .expect("Terrain is too large")
+        .size();
+
+    let index_count = (width.saturating_sub(1) * depth.saturating_sub(1))
+        .checked_mul(6)
+        .expect("Terrain is too large");
+
+    let index_total_size = usize::try_from(index_count)
+        .ok()
+        .and_then(|count| std::alloc::Layout::array::<u32>(count).ok())
+        .expect("Terrain is too large")
+        .size();
+
+    let total_size = vertex_total_size
+        .checked_add(index_total_size)
+        .expect("Terrain is too large");
+
+    u64::try_from(total_size).expect("Terrain is too large");
+
+    let mut data: Vec<u8> = Vec::with_capacity(total_size);
 
     let xoff = width as f32 * 0.5;
     let zoff = depth as f32 * 0.5;
@@ -68,55 +98,15 @@ pub fn create_terrain_mesh(
             let h_w = if x == 0 { h } else { height(x - 1, z) };
             let h_e = if x == width - 1 { h } else { height(x + 1, z) };
 
-            let h_ne = match (width - x, depth - z) {
-                (1, 1) => h,
-                (1, _) => h_n,
-                (_, 1) => h_e,
-                _ => height(x + 1, z + 1),
-            };
-            let h_se = match (width - x, z) {
-                (1, 0) => h,
-                (1, _) => h_s,
-                (_, 0) => h_e,
-                _ => height(x + 1, z - 1),
-            };
-            let h_nw = match (x, depth - z) {
-                (0, 1) => h,
-                (0, _) => h_n,
-                (_, 1) => h_w,
-                _ => height(x - 1, z + 1),
-            };
-            let h_sw = match (x, z) {
-                (0, 0) => h,
-                (0, _) => h_s,
-                (_, 0) => h_w,
-                _ => height(x - 1, z - 1),
-            };
-
             let shift_n = na::Vector3::from([0.0, h_n - h, 1.0]);
             let shift_s = na::Vector3::from([0.0, h_s - h, -1.0]);
             let shift_w = na::Vector3::from([-1.0, h_w - h, 0.0]);
             let shift_e = na::Vector3::from([1.0, h_e - h, 0.0]);
 
-            let shift_ne = na::Vector3::from([1.0, h_ne - h, 1.0]);
-            let shift_se = na::Vector3::from([1.0, h_se - h, -1.0]);
-            let shift_nw = na::Vector3::from([-1.0, h_nw - h, 1.0]);
-            let shift_sw = na::Vector3::from([-1.0, h_sw - h, -1.0]);
-
-            let normal_ne = (shift_n.cross(&shift_e)
-                + (shift_ne - shift_e).cross(&(shift_ne - shift_n)))
-            .normalize();
-
-            let normal_nw = (shift_w.cross(&shift_n)
-                + (shift_nw - shift_n).cross(&(shift_nw - shift_w)))
-            .normalize();
-
-            let normal_se = (shift_e.cross(&shift_s)
-                + (shift_se - shift_s).cross(&(shift_se - shift_e)))
-            .normalize();
-
-            let normal_sw = (shift_s.cross(&shift_w)
-                + (shift_sw - shift_w).cross(&(shift_sw - shift_s)))
+            let normal = (shift_n.cross(&shift_e)
+                + shift_e.cross(&shift_s)
+                + shift_s.cross(&shift_w)
+                + shift_w.cross(&shift_n))
             .normalize();
 
             let tangent = Tangent3d([1.0, 0.0, 0.0, 1.0]);
@@ -129,86 +119,45 @@ pub fn create_terrain_mesh(
 
             data.extend_from_slice(bytemuck::cast_slice(&[
                 PositionNormalTangent3dUV {
-                    position: Position3d([
-                        xf - 0.5,
-                        (h + h_s + h_w + h_sw) / 4.0,
-                        zf - 0.5,
-                    ]),
-                    normal: Normal3d(normal_sw.into()),
+                    position: Position3d([xf, h, zf]),
+                    normal: Normal3d(normal.into()),
                     uv: UV([u, v]),
                     tangent,
                 },
-                PositionNormalTangent3dUV {
-                    position: Position3d([
-                        xf + 0.5,
-                        (h + h_s + h_e + h_se) / 4.0,
-                        zf - 0.5,
-                    ]),
-                    normal: Normal3d(normal_se.into()),
-                    uv: UV([u + 1.0, v]),
-                    tangent,
-                },
-                PositionNormalTangent3dUV {
-                    position: Position3d([
-                        xf - 0.5,
-                        (h + h_n + h_w + h_nw) / 4.0,
-                        zf + 0.5,
-                    ]),
-                    normal: Normal3d(normal_nw.into()),
-                    uv: UV([u, v + 1.0]),
-                    tangent,
-                },
-                PositionNormalTangent3dUV {
-                    position: Position3d([
-                        xf + 0.5,
-                        (h + h_n + h_e + h_ne) / 4.0,
-                        zf + 0.5,
-                    ]),
-                    normal: Normal3d(normal_ne.into()),
-                    uv: UV([u + 1.0, v + 1.0]),
-                    tangent,
-                },
             ]));
         }
     }
 
-    let indices_offset = u64::try_from(data.len()).map_err(|_| OutOfMemory)?;
+    debug_assert_eq!(data.len(), vertex_total_size);
 
-    let mut index: u32 = 0;
-    for _ in 0..depth {
-        for _ in 0..width {
-            data.extend_from_slice(bytemuck::cast_slice(&[
-                index + 0,
-                index + 2,
-                index + 3,
-                index + 3,
-                index + 1,
-                index + 0,
+    for z in 1..depth {
+        for x in 1..width {
+            data.extend_from_slice(bytemuck::cast_slice::<u32, _>(&[
+                (x - 1) + (z - 1) * width,
+                (x - 1) + (z - 0) * width,
+                (x - 0) + (z - 0) * width,
+                (x - 0) + (z - 0) * width,
+                (x - 0) + (z - 1) * width,
+                (x - 1) + (z - 1) * width,
             ]));
-            index += 4;
         }
     }
 
-    let data_size = u64::try_from(data.len()).map_err(|_| OutOfMemory)?;
+    debug_assert_eq!(data.len(), total_size);
 
     let buffer = ctx.create_buffer_static(
         BufferInfo {
             align: 255,
-            size: data_size,
+            size: total_size as u64,
             usage: buffer_usage,
             memory: MemoryUsageFlags::empty(),
         },
         &data,
     )?;
 
-    let squares = width * depth;
-
-    let vertex_count = squares * 4;
-    let index_count = squares * 6;
-
     let mesh = MeshBuilder::with_topology(PrimitiveTopology::TriangleList)
         .with_binding(buffer.clone(), 0, PositionNormalTangent3dUV::layout())
-        .with_indices(buffer.clone(), indices_offset, IndexType::U32)
+        .with_indices(buffer.clone(), vertex_total_size as u64, IndexType::U32)
         .build(index_count, vertex_count);
 
     Ok(mesh)
