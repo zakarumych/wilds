@@ -39,7 +39,7 @@ impl Config {
             },
             probes_dimensions: [640.0, 640.0, 640.0],
             probes_offset: [-320.0, -320.0, -320.0],
-            diffuse_rays: 256,
+            diffuse_rays: 16,
             shadow_rays: 8,
         }
     }
