@@ -113,36 +113,6 @@ vec3 nice_rand(uvec4 co) {
 //     return vec3(x, y, z);
 // }
 
-float blue_rand_sample(uint i, uint j, uint sample_index, uint sample_dimension) {
-	// xor index based on optimized ranking
-	// jb: 1spp blue noise has all 0 in blue_noise_sampler.ranking_tile so we can skip the load
-	uint ranked_sample_index = sample_index ^ blue_noise_sampler.ranking_tile[sample_dimension & 7 + (i + j * 128) * 8];
-
-	// fetch value in sequence
-	int value = blue_noise_sampler.sobol[sample_dimension + ranked_sample_index * 256];
-
-	// If the dimension is optimized, xor sequence value based on optimized scrambling
-	value = value ^ blue_noise_sampler.scrambling_tile[sample_dimension & 7 + (i + j * 128) * 8];
-
-	// convert to float and return
-	float v = float(value) / 255.0f;
-    return v;
-}
-
-vec3 blue_rand_broken(uvec4 co) {
-    // wrap arguments
-	uint i = co.x & 127;
-    uint j = co.y & 127;
-	uint sample_dimension = co.z & 255;
-	uint sample_index = (co.w * 4) & 255;
-
-    float x = blue_rand_sample(i, j, sample_index + 0, sample_dimension);
-    float y = blue_rand_sample(i, j, sample_index + 1, sample_dimension);
-    float z = blue_rand_sample(i, j, sample_index + 2, sample_dimension);
-
-	return vec3(x, y, z);
-}
-
 vec3 blue_rand(uvec4 co) {
     uint x = co.x & 255;
     uint y = co.y & 255;

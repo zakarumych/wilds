@@ -1,3 +1,5 @@
+use crate::AttachmentInfo;
+
 use {
     super::{
         access::supported_access,
@@ -121,33 +123,43 @@ impl CommandBuffer {
                     assert_owner!(pass, device);
                     assert_owner!(framebuffer, device);
 
+                    let mut clears = clears.into_iter();
+
                     let clear_values = pass
                             .info()
                             .attachments
                             .iter()
-                            .filter(|a| a.load_op == AttachmentLoadOp::Clear)
-                            .zip(clears)
-                            .map(|(attachment, clear)| {
+                            .map(|attachment| {
                                 use FormatDescription::*;
-                                match clear {
-                                    &ClearValue::Color(r, g, b, a) => vk1_0::ClearValue {
-                                    color: match attachment.format.description() {
-                                        R(repr)|RG(repr)|RGB(repr)|RGBA(repr)|BGR(repr)|BGRA(repr) => colors_f32_to_value(r, g, b, a, repr),
-                                        _ => panic!("Attempt to clear depth-stencil attachment with color value"),
-                                    }
-                                },
-                                &ClearValue::DepthStencil(depth, stencil) => {
-                                    assert!(
-                                        attachment.format.is_depth()
-                                            || attachment.format.is_stencil()
-                                    );
+
+                                if attachment.load_op == AttachmentLoadOp::Clear {       
+                                    let clear = clears.next().expect("Not enough clear values");
+                                    match clear {
+                                        &ClearValue::Color(r, g, b, a) => vk1_0::ClearValue {
+                                        color: match attachment.format.description() {
+                                            R(repr)|RG(repr)|RGB(repr)|RGBA(repr)|BGR(repr)|BGRA(repr) => colors_f32_to_value(r, g, b, a, repr),
+                                            _ => panic!("Attempt to clear depth-stencil attachment with color value"),
+                                        }
+                                    },
+                                    &ClearValue::DepthStencil(depth, stencil) => {
+                                        assert!(
+                                            attachment.format.is_depth()
+                                                || attachment.format.is_stencil()
+                                        );
+                                        vk1_0::ClearValue {
+                                            depth_stencil: vk1_0::ClearDepthStencilValue {
+                                                depth,
+                                                stencil,
+                                            },
+                                        }
+                                    }}
+                                } else {
                                     vk1_0::ClearValue {
-                                        depth_stencil: vk1_0::ClearDepthStencilValue {
-                                            depth,
-                                            stencil,
-                                        },
+                                        color: vk1_0::ClearColorValue {
+                                            uint32: [0; 4],
+                                        }
                                     }
-                                }}
+                                }
                             })
                             .collect::<SmallVec<[_; RENDERPASS_SMALLVEC_ATTACHMENTS]>>();
 

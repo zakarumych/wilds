@@ -96,7 +96,6 @@ impl RayProbe {
     pub fn new(
         ctx: &mut Context,
         blue_noise_buffer_256x256x128: Buffer,
-        blue_noise_sampler_buffer_256spp: Buffer,
     ) -> Result<Self, Report> {
         // Create pipeline.
         let set_layout = ctx.create_descriptor_set_layout(DescriptorSetLayoutInfo {
@@ -420,16 +419,6 @@ impl RayProbe {
                         blue_noise_buffer_256x256x128.clone(),
                         0,
                         blue_noise_buffer_256x256x128.info().size,
-                    )]),
-                },
-                WriteDescriptorSet {
-                    set: &set,
-                    binding: 6,
-                    element: 0,
-                    descriptors: Descriptors::StorageBuffer(&[(
-                        blue_noise_sampler_buffer_256spp.clone(),
-                        0,
-                        blue_noise_sampler_buffer_256spp.info().size,
                     )]),
                 },
                 WriteDescriptorSet {

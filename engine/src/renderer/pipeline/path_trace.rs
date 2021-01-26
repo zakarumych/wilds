@@ -34,15 +34,10 @@ impl PathTracePipeline {
     pub fn new(
         ctx: &mut Context,
         blue_noise_buffer_256x256x128: Buffer,
-        blue_noise_sampler_buffer_256spp: Buffer,
-        target_extent: Extent2d,
+        extent: Extent2d,
     ) -> Result<Self, Report> {
-        let rt_prepass = RtPrepass::new(
-            target_extent,
-            ctx,
-            blue_noise_buffer_256x256x128,
-            blue_noise_sampler_buffer_256spp,
-        )?;
+        let rt_prepass =
+            RtPrepass::new(extent, ctx, blue_noise_buffer_256x256x128)?;
 
         let combine = CombinePass::new(ctx)?;
         let diffuse_filter = ATrousFilter::new(ctx)?;
@@ -90,7 +85,6 @@ impl Pipeline for PathTracePipeline {
 
         let rt_prepass_output = self.rt_prepass.draw(
             rt_prepass::Input {
-                extent: target.info().extent.into_2d(),
                 camera_global,
                 camera_projection,
                 blases,

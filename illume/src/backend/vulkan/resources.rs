@@ -30,8 +30,8 @@ use {
 
 struct BufferInner {
     info: BufferInfo,
-    owner: WeakDevice,
     handle: vk1_0::Buffer,
+    owner: WeakDevice,
     address: Option<DeviceAddress>,
     index: usize,
     memory_handle: vk1_0::DeviceMemory,
@@ -68,28 +68,32 @@ impl Hash for Buffer {
 
 impl Debug for Buffer {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        #[derive(Debug)]
-        struct Memory {
-            handle: vk1_0::DeviceMemory,
-            offset: u64,
-            size: u64,
-        }
+        if fmt.alternate() {
+            #[derive(Debug)]
+            struct Memory {
+                handle: vk1_0::DeviceMemory,
+                offset: u64,
+                size: u64,
+            }
 
-        fmt.debug_struct("Buffer")
-            .field("info", &self.inner.info)
-            .field("owner", &self.inner.owner)
-            .field("handle", &self.inner.handle)
-            .field("address", &self.inner.address)
-            .field("index", &self.inner.index)
-            .field(
-                "memory",
-                &Memory {
-                    handle: self.inner.memory_handle,
-                    offset: self.inner.memory_offset,
-                    size: self.inner.memory_size,
-                },
-            )
-            .finish()
+            fmt.debug_struct("Buffer")
+                .field("info", &self.inner.info)
+                .field("owner", &self.inner.owner)
+                .field("handle", &self.inner.handle)
+                .field("address", &self.inner.address)
+                .field("index", &self.inner.index)
+                .field(
+                    "memory",
+                    &Memory {
+                        handle: self.inner.memory_handle,
+                        offset: self.inner.memory_offset,
+                        size: self.inner.memory_size,
+                    },
+                )
+                .finish()
+        } else {
+            write!(fmt, "Buffer({:p})", self.inner.handle)
+        }
     }
 }
 
@@ -148,30 +152,34 @@ impl Hash for MappableBuffer {
 
 impl Debug for MappableBuffer {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        #[derive(Debug)]
-        struct Memory {
-            handle: vk1_0::DeviceMemory,
-            offset: u64,
-            size: u64,
-            usage: MemoryUsage,
-        }
+        if fmt.alternate() {
+            #[derive(Debug)]
+            struct Memory {
+                handle: vk1_0::DeviceMemory,
+                offset: u64,
+                size: u64,
+                usage: MemoryUsage,
+            }
 
-        fmt.debug_struct("Buffer")
-            .field("info", &self.inner.info)
-            .field("owner", &self.inner.owner)
-            .field("handle", &self.inner.handle)
-            .field("address", &self.inner.address)
-            .field("index", &self.inner.index)
-            .field(
-                "memory",
-                &Memory {
-                    handle: self.inner.memory_handle,
-                    offset: self.inner.memory_offset,
-                    size: self.inner.memory_size,
-                    usage: self.memory_usage,
-                },
-            )
-            .finish()
+            fmt.debug_struct("Buffer")
+                .field("info", &self.inner.info)
+                .field("owner", &self.inner.owner)
+                .field("handle", &self.inner.handle)
+                .field("address", &self.inner.address)
+                .field("index", &self.inner.index)
+                .field(
+                    "memory",
+                    &Memory {
+                        handle: self.inner.memory_handle,
+                        offset: self.inner.memory_offset,
+                        size: self.inner.memory_size,
+                        usage: self.memory_usage,
+                    },
+                )
+                .finish()
+        } else {
+            write!(fmt, "MappableBuffer({:p})", self.inner.handle)
+        }
     }
 }
 
@@ -228,11 +236,10 @@ impl MappableBuffer {
     }
 }
 
-#[derive(Debug)]
 struct ImageInner {
     info: ImageInfo,
-    owner: WeakDevice,
     handle: vk1_0::Image,
+    owner: WeakDevice,
     memory_block: Option<MemoryBlock<vk1_0::DeviceMemory>>,
     index: Option<usize>,
 }
@@ -261,7 +268,17 @@ impl Hash for Image {
 
 impl Debug for Image {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.inner.fmt(fmt)
+        if fmt.alternate() {
+            fmt.debug_struct("Image")
+                .field("info", &self.inner.info)
+                .field("owner", &self.inner.owner)
+                .field("handle", &self.inner.handle)
+                .field("memory_block", &self.inner.memory_block)
+                .field("index", &self.inner.index)
+                .finish()
+        } else {
+            write!(fmt, "Image({:p})", self.inner.handle)
+        }
     }
 }
 
@@ -304,12 +321,26 @@ impl Image {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ImageView {
     info: ImageViewInfo,
-    owner: WeakDevice,
     handle: vk1_0::ImageView,
+    owner: WeakDevice,
     index: usize,
+}
+
+impl Debug for ImageView {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if fmt.alternate() {
+            fmt.debug_struct("ImageView")
+                .field("info", &self.info)
+                .field("handle", &self.handle)
+                .field("owner", &self.owner)
+                .finish()
+        } else {
+            write!(fmt, "ImageView({:p})", self.handle)
+        }
+    }
 }
 
 impl PartialEq for ImageView {
@@ -364,11 +395,24 @@ impl ImageView {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Fence {
-    owner: WeakDevice,
     handle: vk1_0::Fence,
+    owner: WeakDevice,
     index: usize,
+}
+
+impl Debug for Fence {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if fmt.alternate() {
+            fmt.debug_struct("Fence")
+                .field("handle", &self.handle)
+                .field("owner", &self.owner)
+                .finish()
+        } else {
+            write!(fmt, "Fence({:p})", self.handle)
+        }
+    }
 }
 
 impl PartialEq for Fence {
@@ -417,11 +461,24 @@ impl Fence {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Semaphore {
-    owner: WeakDevice,
     handle: vk1_0::Semaphore,
+    owner: WeakDevice,
     index: usize,
+}
+
+impl Debug for Semaphore {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if fmt.alternate() {
+            fmt.debug_struct("Semaphore")
+                .field("handle", &self.handle)
+                .field("owner", &self.owner)
+                .finish()
+        } else {
+            write!(fmt, "Semaphore({:p})", self.handle)
+        }
+    }
 }
 
 impl PartialEq for Semaphore {
@@ -475,12 +532,25 @@ impl Semaphore {
 /// and describes how they are used over the course of the subpasses.
 ///
 /// This value is handle to a render pass resource.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct RenderPass {
     info: RenderPassInfo,
-    owner: WeakDevice,
     handle: vk1_0::RenderPass,
+    owner: WeakDevice,
     index: usize,
+}
+
+impl Debug for RenderPass {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if fmt.alternate() {
+            fmt.debug_struct("RenderPass")
+                .field("handle", &self.handle)
+                .field("owner", &self.owner)
+                .finish()
+        } else {
+            write!(fmt, "RenderPass({:p})", self.handle)
+        }
+    }
 }
 
 impl PartialEq for RenderPass {
@@ -535,12 +605,25 @@ impl RenderPass {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Sampler {
     info: SamplerInfo,
-    owner: WeakDevice,
     handle: vk1_0::Sampler,
+    owner: WeakDevice,
     index: usize,
+}
+
+impl Debug for Sampler {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if fmt.alternate() {
+            fmt.debug_struct("Sampler")
+                .field("handle", &self.handle)
+                .field("owner", &self.owner)
+                .finish()
+        } else {
+            write!(fmt, "Sampler({:p})", self.handle)
+        }
+    }
 }
 
 impl PartialEq for Sampler {
@@ -598,12 +681,25 @@ impl Sampler {
 /// Framebuffer is a collection of attachments for render pass.
 /// Images format and sample count should match attachment definitions.
 /// All image views must be 2D with 1 mip level and 1 array level.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Framebuffer {
     info: FramebufferInfo,
-    owner: WeakDevice,
     handle: vk1_0::Framebuffer,
+    owner: WeakDevice,
     index: usize,
+}
+
+impl Debug for Framebuffer {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if fmt.alternate() {
+            fmt.debug_struct("Framebuffer")
+                .field("handle", &self.handle)
+                .field("owner", &self.owner)
+                .finish()
+        } else {
+            write!(fmt, "Framebuffer({:p})", self.handle)
+        }
+    }
 }
 
 impl PartialEq for Framebuffer {
@@ -659,12 +755,25 @@ impl Framebuffer {
 }
 
 /// Resource that describes layout for descriptor sets.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ShaderModule {
     info: ShaderModuleInfo,
-    owner: WeakDevice,
     handle: vk1_0::ShaderModule,
+    owner: WeakDevice,
     index: usize,
+}
+
+impl Debug for ShaderModule {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if fmt.alternate() {
+            fmt.debug_struct("ShaderModule")
+                .field("handle", &self.handle)
+                .field("owner", &self.owner)
+                .finish()
+        } else {
+            write!(fmt, "ShaderModule({:p})", self.handle)
+        }
+    }
 }
 
 impl PartialEq for ShaderModule {
@@ -720,13 +829,26 @@ impl ShaderModule {
 }
 
 /// Resource that describes layout for descriptor sets.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct DescriptorSetLayout {
     info: DescriptorSetLayoutInfo,
-    owner: WeakDevice,
     handle: vk1_0::DescriptorSetLayout,
+    owner: WeakDevice,
     sizes: DescriptorSizes,
     index: usize,
+}
+
+impl Debug for DescriptorSetLayout {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if fmt.alternate() {
+            fmt.debug_struct("DescriptorSetLayout")
+                .field("handle", &self.handle)
+                .field("owner", &self.owner)
+                .finish()
+        } else {
+            write!(fmt, "DescriptorSetLayout({:p})", self.handle)
+        }
+    }
 }
 
 impl PartialEq for DescriptorSetLayout {
@@ -788,13 +910,27 @@ impl DescriptorSetLayout {
 }
 
 /// Set of descriptors with specific layout.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct DescriptorSet {
     info: DescriptorSetInfo,
-    owner: WeakDevice,
     handle: vk1_0::DescriptorSet,
+    owner: WeakDevice,
     pool: vk1_0::DescriptorPool,
     pool_index: usize,
+}
+
+impl Debug for DescriptorSet {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if fmt.alternate() {
+            fmt.debug_struct("DescriptorSet")
+                .field("handle", &self.handle)
+                .field("owner", &self.owner)
+                .field("pool", &self.pool)
+                .finish()
+        } else {
+            write!(fmt, "DescriptorSet({:p})", self.handle)
+        }
+    }
 }
 
 impl PartialEq for DescriptorSet {
@@ -852,12 +988,25 @@ impl DescriptorSet {
 }
 
 /// Resource that describes layout of a pipeline.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct PipelineLayout {
     info: PipelineLayoutInfo,
-    owner: WeakDevice,
     handle: vk1_0::PipelineLayout,
+    owner: WeakDevice,
     index: usize,
+}
+
+impl Debug for PipelineLayout {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if fmt.alternate() {
+            fmt.debug_struct("PipelineLayout")
+                .field("handle", &self.handle)
+                .field("owner", &self.owner)
+                .finish()
+        } else {
+            write!(fmt, "PipelineLayout({:p})", self.handle)
+        }
+    }
 }
 
 impl PartialEq for PipelineLayout {
@@ -913,12 +1062,25 @@ impl PipelineLayout {
 }
 
 /// Resource that describes whole compute pipeline state.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ComputePipeline {
     info: ComputePipelineInfo,
-    owner: WeakDevice,
     handle: vk1_0::Pipeline,
+    owner: WeakDevice,
     index: usize,
+}
+
+impl Debug for ComputePipeline {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if fmt.alternate() {
+            fmt.debug_struct("ComputePipeline")
+                .field("handle", &self.handle)
+                .field("owner", &self.owner)
+                .finish()
+        } else {
+            write!(fmt, "ComputePipeline({:p})", self.handle)
+        }
+    }
 }
 
 impl PartialEq for ComputePipeline {
@@ -974,12 +1136,25 @@ impl ComputePipeline {
 }
 
 /// Resource that describes whole graphics pipeline state.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct GraphicsPipeline {
     info: GraphicsPipelineInfo,
-    owner: WeakDevice,
     handle: vk1_0::Pipeline,
+    owner: WeakDevice,
     index: usize,
+}
+
+impl Debug for GraphicsPipeline {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if fmt.alternate() {
+            fmt.debug_struct("GraphicsPipeline")
+                .field("handle", &self.handle)
+                .field("owner", &self.owner)
+                .finish()
+        } else {
+            write!(fmt, "GraphicsPipeline({:p})", self.handle)
+        }
+    }
 }
 
 impl PartialEq for GraphicsPipeline {
@@ -1035,13 +1210,27 @@ impl GraphicsPipeline {
 }
 
 /// Bottom-level acceleration structure.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct AccelerationStructure {
     info: AccelerationStructureInfo,
-    owner: WeakDevice,
     handle: vkacc::AccelerationStructureKHR,
+    owner: WeakDevice,
     address: DeviceAddress,
     index: usize,
+}
+
+impl Debug for AccelerationStructure {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if fmt.alternate() {
+            fmt.debug_struct("AccelerationStructure")
+                .field("handle", &self.handle)
+                .field("owner", &self.owner)
+                .field("address", &self.address)
+                .finish()
+        } else {
+            write!(fmt, "AccelerationStructure({:p})", self.handle)
+        }
+    }
 }
 
 impl PartialEq for AccelerationStructure {
@@ -1103,13 +1292,26 @@ impl AccelerationStructure {
 }
 
 /// Resource that describes whole ray-tracing pipeline state.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct RayTracingPipeline {
     info: RayTracingPipelineInfo,
-    owner: WeakDevice,
     handle: vk1_0::Pipeline,
+    owner: WeakDevice,
     group_handlers: Arc<[u8]>,
     index: usize,
+}
+
+impl Debug for RayTracingPipeline {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if fmt.alternate() {
+            fmt.debug_struct("RayTracingPipeline")
+                .field("handle", &self.handle)
+                .field("owner", &self.owner)
+                .finish()
+        } else {
+            write!(fmt, "RayTracingPipeline({:p})", self.handle)
+        }
+    }
 }
 
 impl PartialEq for RayTracingPipeline {

@@ -8,6 +8,7 @@ use {
     hecs::{Entity, EntityBuilder, World},
     nalgebra as na,
     std::{alloc::System, cmp::max, time::Duration},
+    tracing_subscriber::layer::SubscriberExt as _,
     wilds::{
         animate::Pose,
         assets::{
@@ -49,7 +50,14 @@ const WINDOW_EXTENT: Extent2d = Extent2d {
 fn main() -> Result<(), Report> {
     color_eyre::install()?;
 
-    tracing_subscriber::fmt::init();
+    tracing::subscriber::set_global_default(
+        tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .pretty()
+            .finish()
+            .with(tracing_error::ErrorLayer::default()),
+    )?;
+
     tracing::info!("App started");
 
     Engine::run(|mut engine| async move {

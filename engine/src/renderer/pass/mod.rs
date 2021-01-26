@@ -2,12 +2,14 @@ pub mod atrous;
 pub mod combine;
 pub mod gauss_filter;
 pub mod pose;
+pub mod raster;
 pub mod ray_probe;
 pub mod rt_prepass;
 
 pub use self::{
     atrous::ATrousFilter, combine::CombinePass, gauss_filter::GaussFilter,
-    pose::PosePass, ray_probe::RayProbe, rt_prepass::RtPrepass,
+    pose::PosePass, raster::RasterPass, ray_probe::RayProbe,
+    rt_prepass::RtPrepass,
 };
 
 use {
@@ -70,19 +72,6 @@ where
                     (*entry.insert(self.next - 1), true)
                 }
             }
-        }
-    }
-
-    fn _remove(&mut self, resource: &T) -> Option<u32> {
-        if let Some(value) = self.resources.remove(resource) {
-            if value == self.next - 1 {
-                self.next -= 1;
-            } else {
-                self.bitset.set(value);
-            }
-            Some(value)
-        } else {
-            None
         }
     }
 }

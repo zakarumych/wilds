@@ -49,13 +49,6 @@ layout(binding = 3, set = 0, scalar) buffer Vertices { Vertex v[]; } vertices[];
 layout(binding = 4, set = 0) uniform sampler2D albedo[];
 layout(binding = 5, set = 0) uniform sampler2D normal[];
 
-layout(binding = 6, set = 0, scalar) buffer BlueNoiseSampler {
-    uint ranking_tile[131072];
-    int scrambling_tile[131072];
-    int sobol[65536];
-} blue_noise_sampler;
-
-
 layout(binding = 0, set = 1, std140) uniform Globals {
     Camera cam;
     DirLight dirlight;
