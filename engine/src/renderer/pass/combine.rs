@@ -93,7 +93,11 @@ impl CombinePass {
         let pipeline_layout =
             ctx.create_pipeline_layout(PipelineLayoutInfo {
                 sets: vec![set_layout.clone()],
-                push_constants: Vec::new(),
+                push_constants: vec![PushConstant {
+                    stages: ShaderStageFlags::FRAGMENT,
+                    offset: 0,
+                    size: 8,
+                }],
             })?;
 
         let vert = VertexShader::with_main(
@@ -119,7 +123,7 @@ impl CombinePass {
         })?;
 
         let sampler = ctx.create_sampler(SamplerInfo {
-            unnormalized_coordinates: true,
+            unnormalized_coordinates: false,
             min_lod: 0.0.into(),
             max_lod: 0.0.into(),
             address_mode_u: SamplerAddressMode::ClampToEdge,
@@ -397,6 +401,14 @@ impl<'a> Pass<'a> for CombinePass {
             0,
             std::slice::from_ref(set),
             &[],
+        );
+
+        let extent_push_constant = [extent.width, extent.height];
+        render_pass_encoder.push_constants(
+            &self.pipeline_layout,
+            ShaderStageFlags::VERTEX,
+            0,
+            &extent_push_constant,
         );
         render_pass_encoder.set_viewport(Viewport {
             x: Bounds {

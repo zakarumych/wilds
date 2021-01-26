@@ -100,7 +100,7 @@ where
     Q: IntoIterator<Item = (usize, usize)>,
     E: Error + 'static,
 {
-    type Collector = fn(Vec<Family>) -> Vec<Family>;
+    type Collector = ();
     type Error = E;
     type Query = Vec<(usize, usize)>;
     type Queues = Vec<Family>;
@@ -109,17 +109,11 @@ where
         self,
         families: &[FamilyInfo],
     ) -> Result<(Self::Query, Self::Collector), E> {
-        Ok((
-            (self.0)(families)?.into_iter().collect(),
-            std::convert::identity,
-        ))
+        Ok(((self.0)(families)?.into_iter().collect(), ()))
     }
 
-    fn collect(
-        collector: Self::Collector,
-        families: Vec<Family>,
-    ) -> Self::Queues {
-        collector(families)
+    fn collect(_collector: (), families: Vec<Family>) -> Self::Queues {
+        families
     }
 }
 
@@ -154,7 +148,7 @@ impl std::fmt::Display for QueueNotFound {
 impl std::error::Error for QueueNotFound {}
 
 impl QueuesQuery for SingleQueueQuery {
-    type Collector = usize;
+    type Collector = ();
     type Error = QueueNotFound;
     type Query = [(usize, usize); 1];
     type Queues = Queue;
@@ -162,18 +156,20 @@ impl QueuesQuery for SingleQueueQuery {
     fn query(
         self,
         families: &[FamilyInfo],
-    ) -> Result<([(usize, usize); 1], usize), QueueNotFound> {
+    ) -> Result<([(usize, usize); 1], ()), QueueNotFound> {
         for (index, family) in families.iter().enumerate() {
             if family.count > 0 && family.capabilities.contains(self.0) {
-                return Ok(([(index, 1)], index));
+                return Ok(([(index, 1)], ()));
             }
         }
 
         Err(QueueNotFound(self.0))
     }
 
-    fn collect(index: usize, mut families: Vec<Family>) -> Queue {
-        families.remove(index).queues.remove(0)
+    fn collect(_collector: (), mut families: Vec<Family>) -> Queue {
+        assert_eq!(families.len(), 1);
+        assert_eq!(families[0].queues.len(), 1);
+        families.remove(0).queues.remove(0)
     }
 }
 

@@ -20,7 +20,7 @@ use {
         time::Duration,
     },
     tokio::{
-        runtime::{Handle as TokioHandle, Runtime},
+        runtime::{self, Handle as TokioHandle},
         task::yield_now,
     },
     type_map::TypeMap,
@@ -242,7 +242,9 @@ impl Engine {
         F: FnOnce(Self) -> A,
         A: Future<Output = Result<(), Report>> + 'static,
     {
-        let mut runtime = Runtime::new()?;
+        let mut runtime = runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
 
         let config = runtime.block_on(Self::load_config())?;
 

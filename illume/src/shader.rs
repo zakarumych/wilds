@@ -74,8 +74,10 @@ impl Debug for ShaderModuleInfo {
             match std::str::from_utf8(&self.code) {
                 Ok(code) => ds.field("code", &code),
                 Err(_) => ds.field("code", &"<binary>"),
-            };
-        }
+            }
+        } else {
+            ds.field("code", &"..")
+        };
         ds.finish()
     }
 }

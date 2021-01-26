@@ -13,12 +13,12 @@ readme = "../README.md"
 
 [dependencies]
 # Assets
-goods = { version = "0.6", features = ["fs", "tokio-spawn", "data-url", "trace", "ron-format"] }
+goods = { version = "0.7", features = ["fs", "tokio-spawn", "data-url", "trace", "ron-format"] }
 gltf = "0.15"
 
 # Physics
-ncollide3d = "=0.24"
-nphysics3d = "0.17"
+ncollide3d = "=0.27"
+nphysics3d = "0.19"
 
 # Graphics
 illume = { path = "../illume", features = ["serde-1"] }
@@ -28,13 +28,16 @@ image = { version = "0.23", features = ["png"] }
 png = "0.16"
 
 # ECS
-hecs = "0.2"
+hecs = "0.3"
 
 # Linear algebra
-nalgebra = "=0.22"
+nalgebra = "=0.24"
+
+# Inverse Kinematics
+# ik = { version = "*", path = "../ik" }
 
 # Windowing
-winit = "0.22" # "0.22.2"
+winit = "0.24"
 
 # Low-Level
 bytemuck = "1.4"
@@ -59,32 +62,25 @@ tracing = { version = "0.1", features = ["log"] }
 
 # Support
 fastbitset = { path = "../fastbitset", features = ["boxed", "bump"] }
-cfg-if = "0.1"
+cfg-if = "1.0"
 futures = "0.3"
 lazy_static = "1.4"
-flume = { version = "0.9", features = ["async"] }
+flume = { version = "0.10", features = ["async"] }
 ordered-float = "2.0"
 num-traits = "0.2"
 smallvec = "1.4"
 bitflags = "1.2"
-ahash = "0.4"
-type-map = "0.3"
+ahash = "0.6"
+type-map = "0.4"
 lru = "0.6"
-url = "2.1"
-rand = "0.7"
-
-# TEMP
-# stats_alloc = "*"
-
-blue-noise-sampler = "0.1"
-bluenoise = "0.1"
+url = "2.0"
+rand = "0.8"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tokio = { version = "0.2", features = ["macros", "rt-threaded", "blocking"] }
-
+tokio = { version = "1.0", features = ["macros", "rt"] }
 
 [build-dependencies]
 eyre = "0.6"
 tracing = "0.1"
 image = "0.23"
-bytemuck = "1.4"
+bytemuck = "1.5"

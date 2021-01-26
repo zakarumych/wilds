@@ -24,7 +24,6 @@ use {
 const MAX_INSTANCE_COUNT: u16 = 1024 * 32;
 
 pub struct Input<'a> {
-    pub extent: Extent2d,
     pub camera_global: Global3,
     pub camera_projection: na::Projective3<f32>,
     pub blases: &'a HashMap<Mesh, AccelerationStructure>,
@@ -94,7 +93,6 @@ impl RtPrepass {
         extent: Extent2d,
         ctx: &mut Context,
         blue_noise_buffer_256x256x128: Buffer,
-        blue_noise_sampler_buffer_256spp: Buffer,
     ) -> Result<Self, Report> {
         // Create pipeline.
         let set_layout = ctx.create_descriptor_set_layout(DescriptorSetLayoutInfo {
@@ -148,15 +146,6 @@ impl RtPrepass {
                         count: MAX_INSTANCE_COUNT.into(),
                         stages: ShaderStageFlags::CLOSEST_HIT,
                         flags: DescriptorBindingFlags::PARTIALLY_BOUND | DescriptorBindingFlags::UPDATE_UNUSED_WHILE_PENDING,
-                    },
-                    // Blue noise sampler
-                    DescriptorSetLayoutBinding {
-                        binding: 6,
-                        ty: DescriptorType::StorageBuffer,
-                        count: 1,
-                        stages: ShaderStageFlags::RAYGEN
-                            | ShaderStageFlags::CLOSEST_HIT,
-                        flags: DescriptorBindingFlags::empty(),
                     },
                     // G-Buffer
                     // Albedo
@@ -498,16 +487,6 @@ impl RtPrepass {
                     set: &set,
                     binding: 6,
                     element: 0,
-                    descriptors: Descriptors::StorageBuffer(&[(
-                        blue_noise_sampler_buffer_256spp.clone(),
-                        0,
-                        blue_noise_sampler_buffer_256spp.info().size,
-                    )]),
-                },
-                WriteDescriptorSet {
-                    set: &set,
-                    binding: 6,
-                    element: 0,
                     descriptors: Descriptors::StorageImage(&[
                         (output_albedo_view.clone(), Layout::General),
                         (output_normal_depth_view.clone(), Layout::General),
@@ -622,8 +601,6 @@ impl<'a> Pass<'a> for RtPrepass {
         tracing::trace!("RtPrepass::draw");
 
         let findex = (frame & 1) as u32;
-
-        assert_eq!(self.output_albedo_image.info().extent, input.extent);
 
         let storage_buffers = BumpaloCellList::new();
         let combined_image_samples = BumpaloCellList::new();
@@ -1072,7 +1049,10 @@ impl<'a> Pass<'a> for RtPrepass {
         );
 
         // Perform ray-trace operation.
-        encoder.trace_rays(&self.shader_binding_table, input.extent.into_3d());
+        encoder.trace_rays(
+            &self.shader_binding_table,
+            self.output_albedo_image.info().extent.into_3d(),
+        );
 
         // Sync storage image access from last frame.
         let images = [

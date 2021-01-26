@@ -59,8 +59,7 @@ pub struct Renderer {
     blases: HashMap<Mesh, AccelerationStructure>,
     swapchain: Swapchain,
     blue_noise_buffer_256x256x128: Buffer,
-    blue_noise_sampler_buffer_256spp: Buffer,
-    pipeline: RayProbePipeline,
+    pipeline: PathTracePipeline,
 }
 
 impl Deref for Renderer {
@@ -162,13 +161,14 @@ impl Renderer {
         )?;
 
         let blue_noise_buffer_256x256x128 = load_blue_noise(&mut context)?;
-        let blue_noise_sampler_buffer_256spp =
-            load_blue_noise_sampler(&mut context)?;
 
-        let pipeline = RayProbePipeline::new(
+        let pipeline = PathTracePipeline::new(
             &mut context,
             blue_noise_buffer_256x256x128.clone(),
-            blue_noise_sampler_buffer_256spp.clone(),
+            Extent2d {
+                width: 640,
+                height: 480,
+            },
         )?;
 
         Ok(Renderer {
@@ -176,7 +176,6 @@ impl Renderer {
             swapchain,
             context,
             blue_noise_buffer_256x256x128,
-            blue_noise_sampler_buffer_256spp,
             pipeline,
         })
     }
@@ -380,28 +379,3 @@ fn load_blue_noise(ctx: &mut Context) -> Result<Buffer, OutOfMemory> {
 //         &data,
 //     )
 // }
-
-fn load_blue_noise_sampler(ctx: &mut Context) -> Result<Buffer, OutOfMemory> {
-    use {
-        blue_noise_sampler::spp32::*,
-        std::{convert::TryFrom as _, mem::size_of_val},
-    };
-
-    let mut data = Vec::<i32>::with_capacity(
-        RANKING_TILE.len() + SCRAMBLING_TILE.len() + SOBOL.len(),
-    );
-
-    data.extend_from_slice(RANKING_TILE);
-    data.extend_from_slice(SCRAMBLING_TILE);
-    data.extend_from_slice(SOBOL);
-
-    ctx.create_buffer_static(
-        BufferInfo {
-            size: u64::try_from(size_of_val(&data[..])).unwrap(),
-            align: 255,
-            usage: BufferUsage::STORAGE,
-        },
-        &data[..],
-    )
-    .map(Into::into)
-}

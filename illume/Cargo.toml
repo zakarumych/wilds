@@ -1,7 +1,7 @@
 [package]
 name = "illume"
 version = "0.1.0"
-authors = ["zakarum"]
+authors = ["Zakarum <zakarumych@ya.ru>"]
 edition = "2018"
 license = "MIT OR Apache-2.0"
 readme = "../README.md"
@@ -24,7 +24,7 @@ thiserror = "1.0"
 tracing = "0.1"
 ordered-float = "2.0"
 bytemuck = "1.4"
-#shaderc = { version = "0.6", optional = true }
+shaderc = { version = "0.7", optional = true }
 erupt = { version = "0.16", optional = true, features = ["loading"] }
 #tvma = { path = "../tvma", optional = true }
 gpu-alloc-erupt = { version = "0.2", optional = true }

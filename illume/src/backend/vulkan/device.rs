@@ -456,6 +456,7 @@ impl Device {
 
         let buffer_index = self.inner.buffers.lock().insert(handle);
 
+        tracing::debug!("Buffer created {:p}", handle);
         Ok(MappableBuffer::new(
             info,
             self.downgrade(),
@@ -544,6 +545,7 @@ impl Device {
 
         let index = self.inner.fences.lock().insert(fence);
 
+        tracing::debug!("Fence created {:p}", fence);
         Ok(Fence::new(self.downgrade(), fence, index))
     }
 
@@ -596,6 +598,7 @@ impl Device {
 
         let index = self.inner.framebuffers.lock().insert(framebuffer);
 
+        tracing::debug!("Framebuffer created {:p}", framebuffer);
         Ok(Framebuffer::new(info, self.downgrade(), framebuffer, index))
     }
 
@@ -958,6 +961,7 @@ impl Device {
 
         drop(shader_stages);
 
+        tracing::debug!("GraphicsPipeline created {:p}", pipeline);
         Ok(GraphicsPipeline::new(
             info,
             self.downgrade(),
@@ -1000,6 +1004,7 @@ impl Device {
         let pipeline = pipelines[0];
         let index = self.inner.pipelines.lock().insert(pipeline);
 
+        tracing::debug!("ComputePipeline created {:p}", pipeline);
         Ok(ComputePipeline::new(
             info,
             self.downgrade(),
@@ -1076,6 +1081,7 @@ impl Device {
             Ok(()) => {
                 let index = self.inner.images.lock().insert(image);
 
+                tracing::debug!("Image created {:p}", image);
                 Ok(Image::new(
                     info,
                     self.downgrade(),
@@ -1259,6 +1265,7 @@ impl Device {
 
         let index = self.inner.image_views.lock().insert(view);
 
+        tracing::debug!("ImageView created {:p}", view);
         Ok(ImageView::new(info, self.downgrade(), view, index))
     }
 
@@ -1303,6 +1310,7 @@ impl Device {
 
         let index = self.inner.pipeline_layouts.lock().insert(pipeline_layout);
 
+        tracing::debug!("Pipeline layout created: {:p}", pipeline_layout);
         Ok(PipelineLayout::new(
             info,
             self.downgrade(),
@@ -1455,6 +1463,7 @@ impl Device {
 
         let index = self.inner.render_passes.lock().insert(render_pass);
 
+        tracing::debug!("Render pass created: {:p}", render_pass);
         Ok(RenderPass::new(info, self.downgrade(), render_pass, index))
     }
 
@@ -1481,6 +1490,7 @@ impl Device {
         let (handle, index) =
             self.create_semaphore_raw().map_err(oom_error_from_erupt)?;
 
+        tracing::debug!("Semaphore created: {:p}", handle);
         Ok(Semaphore::new(self.downgrade(), handle, index))
     }
 
@@ -1574,6 +1584,7 @@ impl Device {
 
         let index = self.inner.shaders.lock().insert(module);
 
+        tracing::debug!("Shader module created: {:p}", module);
         Ok(ShaderModule::new(info, self.downgrade(), module, index))
     }
 
@@ -1800,6 +1811,7 @@ impl Device {
                 )
         }));
 
+        tracing::debug!("AccelerationStructure created {:p}", handle);
         Ok(AccelerationStructure::new(
             info,
             self.downgrade(),
@@ -1975,6 +1987,7 @@ impl Device {
 
         let index = self.inner.pipelines.lock().insert(handle);
 
+        tracing::debug!("RayTracingPipeline created {:p}", handle);
         Ok(RayTracingPipeline::new(
             info,
             self.downgrade(),
@@ -2060,6 +2073,7 @@ impl Device {
 
         let sizes = DescriptorSizes::from_bindings(&info.bindings);
 
+        tracing::debug!("DescriptorSetLayout created {:p}", handle);
         Ok(DescriptorSetLayout::new(
             info,
             self.downgrade(),
@@ -2116,6 +2130,7 @@ impl Device {
         // let index = self.inner.descriptor_sets.lock().insert(handle);
         let pool_index = self.inner.descriptor_pools.lock().insert(pool);
 
+        tracing::debug!("DescriptorSet created {:p}", handle);
         Ok(DescriptorSet::new(
             info,
             self.downgrade(),
@@ -2163,8 +2178,14 @@ impl Device {
                             size, 0,
                             "Cannot write 0 sized buffer range into descriptor"
                         );
-                        debug_assert!(offset < buffer.info().size);
-                        debug_assert!(size < buffer.info().size - offset);
+                        debug_assert!(
+                            offset <= buffer.info().size,
+                            "Buffer ({:#?}) descriptor offset ({}) is out of bounds", buffer, offset,
+                        );
+                        debug_assert!(
+                            size <= buffer.info().size - offset,
+                            "Buffer ({:#?}) descriptor size ({}) is out of bounds", buffer, size
+                        );
                     }
                 }
                 Descriptors::AccelerationStructure(acceleration_structures) => {
@@ -2421,6 +2442,8 @@ impl Device {
         .map_err(oom_error_from_erupt)?;
 
         let index = self.inner.samplers.lock().insert(handle);
+
+        tracing::debug!("Sampler created {:p}", handle);
         Ok(Sampler::new(info, self.downgrade(), handle, index))
     }
 
@@ -2509,6 +2532,7 @@ impl Device {
             &bytes,
         )?;
 
+        tracing::debug!("ShaderBindingTable created");
         Ok(ShaderBindingTable {
             raygen: raygen_handlers.map(|range| StridedBufferRegion {
                 buffer: buffer.clone(),

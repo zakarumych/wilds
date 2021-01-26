@@ -42,7 +42,7 @@ impl SwapchainImage {
         &*self.supported_families
     }
 
-    pub(super) fn index(&self) -> u32 {
+    pub fn index(&self) -> u32 {
         self.index
     }
 
@@ -124,9 +124,14 @@ impl Swapchain {
     ) -> Result<Self, SurfaceError> {
         let handle = surface.handle();
 
-        assert!(
+        debug_assert!(
             device.graphics().instance.enabled().khr_surface,
             "Should be enabled given that there is a Surface"
+        );
+
+        assert!(
+            device.logical().enabled().khr_swapchain,
+            "`Feature::SurfacePresentation` must be enabled in order to create a `Swapchain`"
         );
 
         let instance = &device.graphics().instance;
@@ -160,6 +165,7 @@ impl Swapchain {
 
         surface.mark_used()?;
 
+        tracing::debug!("Swapchain created");
         Ok(Swapchain {
             surface: surface.clone(),
             free_semaphore: device
@@ -176,6 +182,7 @@ impl Swapchain {
 }
 
 impl Swapchain {
+    #[tracing::instrument]
     pub fn configure(
         &mut self,
         usage: ImageUsage,
@@ -233,11 +240,11 @@ impl Swapchain {
         .result()
         .map_err(surface_error_from_erupt)?;
 
-        let erupt_fromat = format.to_erupt();
+        let erupt_format = format.to_erupt();
 
         let sf = formats
             .iter()
-            .find(|sf| sf.format == erupt_fromat)
+            .find(|sf| sf.format == erupt_format)
             .ok_or_else(|| SurfaceError::FormatUnsupported { format })?;
 
         let composite_alpha = {
@@ -374,6 +381,7 @@ impl Swapchain {
             usage,
         });
 
+        tracing::debug!("Swapchain configured");
         Ok(())
     }
 
