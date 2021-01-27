@@ -1,5 +1,5 @@
 use {
-    super::physical::PhysicalDevice,
+    super::{physical::PhysicalDevice, unexpected_result},
     crate::{
         out_of_host_memory,
         physical::EnumerateDeviceError,
@@ -317,7 +317,7 @@ impl Graphics {
                     source: OutOfMemory,
                 }
             }
-            _ => EnumerateDeviceError::UnexpectedVulkanError { result: err },
+            _ => unexpected_result(err),
         })?;
 
         tracing::trace!("Physical devices {:?}", devices);
@@ -398,10 +398,7 @@ impl Graphics {
                     vk1_0::Result::ERROR_OUT_OF_DEVICE_MEMORY => {
                         OutOfMemory.into()
                     }
-                    _ => CreateSurfaceError::UnexpectedVulkanError {
-                        window: RawWindowHandleKind::Windows,
-                        result: err,
-                    },
+                    _ => unexpected_result(err),
                 })?
             }
 
@@ -462,13 +459,8 @@ impl Graphics {
                     vk1_0::Result::ERROR_OUT_OF_HOST_MEMORY => {
                         out_of_host_memory()
                     }
-                    vk1_0::Result::ERROR_OUT_OF_DEVICE_MEMORY => {
-                        OutOfMemory.into()
-                    }
-                    _ => CreateSurfaceError::UnexpectedVulkanError {
-                        window: RawWindowHandleKind::Windows,
-                        result: err,
-                    },
+                    vk1_0::Result::ERROR_OUT_OF_DEVICE_MEMORY => OutOfMemory,
+                    _ => unexpected_result(err),
                 })?
             }
             _ => {

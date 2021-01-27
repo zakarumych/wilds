@@ -1,5 +1,11 @@
 use {
-    super::{convert::ToErupt as _, device::Device, swapchain::SwapchainImage},
+    super::{
+        convert::{oom_error_from_erupt, ToErupt as _},
+        device::Device,
+        device_lost,
+        swapchain::SwapchainImage,
+        unexpected_result,
+    },
     crate::{
         encode::{CommandBuffer, Encoder},
         fence::Fence,
@@ -55,27 +61,13 @@ impl Queue {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum CreateEncoderError {
-    #[error(transparent)]
-    OutOfMemory {
-        #[from]
-        source: OutOfMemory,
-    },
-
-    #[error("Function returned unexpected error code: {result}")]
-    UnexpectedVulkanError { result: vk1_0::Result },
-}
-
 impl Queue {
     pub fn id(&self) -> QueueId {
         self.id
     }
 
     #[tracing::instrument]
-    pub fn create_encoder(
-        &mut self,
-    ) -> Result<Encoder<'static>, CreateEncoderError> {
+    pub fn create_encoder(&mut self) -> Result<Encoder<'static>, OutOfMemory> {
         if self.pool == vk1_0::CommandPool::null() {
             self.pool = unsafe {
                 self.device.logical().create_command_pool(
@@ -89,7 +81,7 @@ impl Queue {
                 )
             }
             .result()
-            .map_err(create_encoder_error_from_erupt)?;
+            .map_err(oom_error_from_erupt)?;
         }
 
         assert_ne!(self.pool, vk1_0::CommandPool::null());
@@ -103,7 +95,7 @@ impl Queue {
             )
         }
         .result()
-        .map_err(create_encoder_error_from_erupt)?;
+        .map_err(oom_error_from_erupt)?;
 
         let cbuf = CommandBuffer::new(
             buffers.remove(0),
@@ -177,7 +169,10 @@ impl Queue {
     }
 
     #[tracing::instrument]
-    pub fn present(&mut self, image: SwapchainImage) {
+    pub fn present(
+        &mut self,
+        image: SwapchainImage,
+    ) -> Result<PresentOk, PresentError> {
         assert_owner!(image, self.device);
 
         // FIXME: Check semaphore states.
@@ -193,43 +188,45 @@ impl Queue {
             image
         );
 
-        let mut result = vk1_0::Result::SUCCESS;
-
-        unsafe {
+        let mut result = unsafe {
             self.device.logical().queue_present_khr(
                 self.handle,
                 &PresentInfoKHRBuilder::new()
                     .wait_semaphores(&[image.info().signal.handle()])
                     .swapchains(&[image.handle()])
-                    .image_indices(&[image.index()])
-                    .results(std::slice::from_mut(&mut result)),
+                    .image_indices(&[image.index()]),
             )
+        };
+
+        match result.raw {
+            vk1_0::Result::SUCCESS => Ok(PresentOk::Success),
+            vk1_0::Result::SUBOPTIMAL_KHR => Ok(PresentOk::Suboptimal),
+            vk1_0::Result::ERROR_OUT_OF_DATE_KHR => {
+                Err(PresentError::OutOfDate)
+            }
+            vk1_0::Result::ERROR_SURFACE_LOST_KHR => {
+                Err(PresentError::SurfaceLost)
+            }
+            // vk1_0::Result::ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT => {}
+            result => Err(PresentError::OutOfMemory {
+                source: queue_error(result),
+            }),
         }
-        .expect("TODO: Handle present errors");
     }
 
     #[tracing::instrument]
-    pub fn wait_for_idle(&self) {
-        // FIXME: Handle DeviceLost error.
-        unsafe {
-            self.device
-                .logical()
-                .queue_wait_idle(self.handle)
-                .expect("Device lost")
-        }
+    pub fn wait_for_idle(&self) -> Result<(), OutOfMemory> {
+        unsafe { self.device.logical().queue_wait_idle(self.handle) }
+            .result()
+            .map_err(queue_error)
     }
 }
 
-pub(crate) fn create_encoder_error_from_erupt(
-    err: vk1_0::Result,
-) -> CreateEncoderError {
-    match err {
+fn queue_error(result: vk1_0::Result) -> OutOfMemory {
+    match result {
         vk1_0::Result::ERROR_OUT_OF_HOST_MEMORY => out_of_host_memory(),
-        vk1_0::Result::ERROR_OUT_OF_DEVICE_MEMORY => {
-            CreateEncoderError::OutOfMemory {
-                source: OutOfMemory,
-            }
-        }
-        _ => CreateEncoderError::UnexpectedVulkanError { result: err },
+        vk1_0::Result::ERROR_OUT_OF_DEVICE_MEMORY => OutOfMemory,
+        vk1_0::Result::ERROR_DEVICE_LOST => device_lost(),
+        result => unexpected_result(result),
     }
 }

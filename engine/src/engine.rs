@@ -9,19 +9,17 @@ use {
     cfg_if::cfg_if,
     eyre::{Report, WrapErr as _},
     flume::{bounded, Receiver, Sender},
+    futures::future::TryFutureExt as _,
     goods::{Asset, AssetDefaultFormat},
     hecs::{Entity, World},
     std::{
         cell::Cell,
+        error::Error,
         future::Future,
         pin::Pin,
         rc::Rc,
         task::{Context, Poll},
         time::Duration,
-    },
-    tokio::{
-        runtime::{self, Handle as TokioHandle},
-        task::yield_now,
     },
     type_map::TypeMap,
     winit::{
@@ -68,7 +66,6 @@ pub struct Engine {
     schedule: Vec<Box<dyn System>>,
     fixed_schedule: Vec<Box<dyn System>>,
     shared: Rc<Shared>,
-    runtime: TokioHandle,
     recv_make_prefabs: Receiver<MakePrefab>,
     send_make_prefabs: Sender<MakePrefab>,
     clocks: Clocks,
@@ -101,18 +98,18 @@ impl Engine {
         P: Prefab + Asset + Clone,
         F: goods::Format<P, AssetKey>,
     {
+        tracing::info!("Loading prefab '{}'", key);
+
         let handle = self.assets.load_with_format(key.clone(), format);
-        self.make_prefab(
-            async move {
-                handle.await.wrap_err_with(|| {
-                    format!("Failed to load prefab '{}'", key)
-                })
-            },
-            info,
-        )
+        self.make_prefab(key, info, handle.map_err(Report::from))
     }
 
-    pub fn make_prefab<P, F>(&self, prefab: F, info: P::Info) -> Entity
+    pub fn make_prefab<P, F>(
+        &self,
+        key: AssetKey,
+        info: P::Info,
+        prefab: F,
+    ) -> Entity
     where
         P: Prefab + Send + 'static,
         F: Future<Output = Result<P, Report>> + Send + 'static,
@@ -120,13 +117,18 @@ impl Engine {
         let entity = self.world.reserve_entity();
         let send_make_prefabs = self.send_make_prefabs.clone();
 
-        self.runtime.spawn(async move {
-            let loaded = match prefab.await {
-                Ok(prefab) => MakePrefab::spawn(prefab, info, entity),
-                Err(err) => MakePrefab::Error(err, entity),
+        smol::spawn(async move {
+            let prefab = prefab.await;
+
+            tracing::error!("Prefab loaded");
+
+            let loaded = match prefab {
+                Ok(prefab) => MakePrefab::spawn(key, prefab, info, entity),
+                Err(err) => MakePrefab::Error(key, err, entity),
             };
             let _ = send_make_prefabs.send(loaded);
-        });
+        })
+        .detach();
 
         entity
     }
@@ -134,9 +136,12 @@ impl Engine {
     fn build_prefabs(&mut self) {
         for loaded in self.recv_make_prefabs.try_iter() {
             match loaded {
-                MakePrefab::Spawn(build) => build(&mut self.world),
-                MakePrefab::Error(err, entity) => {
-                    tracing::error!("Failed to load prefab: {}", err);
+                MakePrefab::Spawn(key, build) => {
+                    tracing::info!("Prefab '{}' loaded", key);
+                    build(&mut self.world);
+                }
+                MakePrefab::Error(key, err, entity) => {
+                    tracing::error!("Failed to load prefab '{}': {}", key, err);
                     let _ = self.world.despawn(entity);
                 }
             }
@@ -224,7 +229,7 @@ impl Engine {
             if let Some(event) = self.shared.next_event.take() {
                 break event;
             }
-            yield_now().await;
+            smol::future::yield_now().await;
         };
 
         self.input.add(event.clone());
@@ -242,11 +247,7 @@ impl Engine {
         F: FnOnce(Self) -> A,
         A: Future<Output = Result<(), Report>> + 'static,
     {
-        let mut runtime = runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()?;
-
-        let config = runtime.block_on(Self::load_config())?;
+        let config = smol::block_on(Self::load_config())?;
 
         let registry = config
             .sources
@@ -273,10 +274,7 @@ impl Engine {
 
         let registry = registry.with(goods::DataUrlSource);
 
-        let assets = Assets::new(
-            registry.build(),
-            goods::Tokio(runtime.handle().clone()),
-        );
+        let assets = Assets::new(registry.build(), goods::Smol);
 
         let shared = Rc::new(Shared {
             event_loop_ptr: Cell::new(std::ptr::null()),
@@ -296,7 +294,6 @@ impl Engine {
             shared: shared.clone(),
             recv_make_prefabs,
             send_make_prefabs,
-            runtime: runtime.handle().clone(),
             fixed_step_delta: Duration::from_millis(10),
             clocks: Clocks::new(),
         };
@@ -330,7 +327,7 @@ impl Engine {
 
                 // Poll closure only once.
                 if let Poll::Ready(result) =
-                    runtime.block_on(AppEventWaitFuture {
+                    smol::block_on(AppEventWaitFuture {
                         app: app.as_mut(),
                         ready: &shared.waiting_for_event,
                     })
@@ -402,17 +399,18 @@ struct Shared {
 }
 
 enum MakePrefab {
-    Spawn(Box<dyn FnOnce(&mut World) + Send>),
-    Error(Report, Entity),
+    Spawn(AssetKey, Box<dyn FnOnce(&mut World) + Send>),
+    Error(AssetKey, Report, Entity),
 }
 
 impl MakePrefab {
-    fn spawn<P>(prefab: P, info: P::Info, entity: Entity) -> Self
+    fn spawn<P>(key: AssetKey, prefab: P, info: P::Info, entity: Entity) -> Self
     where
         P: Prefab + Send + 'static,
     {
-        MakePrefab::Spawn(Box::new(move |world| {
-            prefab.spawn(info, world, entity)
-        }))
+        MakePrefab::Spawn(
+            key,
+            Box::new(move |world| prefab.spawn(info, world, entity)),
+        )
     }
 }

@@ -978,8 +978,8 @@ impl<'a> Pass<'a> for RtPrepass {
             plights: pointlights.len() as u32,
             // frame: frame as u32,
             frame: 0,
-            shadow_rays: 32,
-            diffuse_rays: 1,
+            shadow_rays: 8,
+            diffuse_rays: 16,
             pad: 0.0,
         };
 

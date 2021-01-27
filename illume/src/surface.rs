@@ -34,10 +34,6 @@ pub enum SurfaceError {
 
     #[error("Surface is already used")]
     AlreadyUsed,
-
-    #[cfg(feature = "vulkan")]
-    #[error("Function returned unexpected error code: {result}")]
-    UnexpectedVulkanError { result: erupt::vk1_0::Result },
 }
 
 #[allow(dead_code)]
@@ -122,13 +118,6 @@ pub enum CreateSurfaceError {
         window: RawWindowHandleKind,
         #[source]
         source: Option<Box<dyn Error + Send + Sync>>,
-    },
-
-    #[cfg(feature = "vulkan")]
-    #[error("Function returned unexpected error code: {result}")]
-    UnexpectedVulkanError {
-        window: RawWindowHandleKind,
-        result: erupt::vk1_0::Result,
     },
 }
 

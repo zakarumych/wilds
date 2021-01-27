@@ -15,7 +15,7 @@ hitAttributeEXT vec2 attribs;
 
 void main()
 {
-    const vec3 back = gl_WorldRayDirectionEXT * 0.001;
+    const vec3 back = normalize(gl_WorldRayDirectionEXT) * 0.01;
     const uvec3 co = uvec3(gl_LaunchIDEXT.xy, globals.frame);
 
     uint shadow_rays = globals.shadow_rays;

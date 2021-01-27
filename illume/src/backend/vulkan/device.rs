@@ -7,8 +7,10 @@ use {
             ToErupt as _,
         },
         descriptor::DescriptorSizes,
+        device_lost,
         graphics::Graphics,
         physical::{Features, Properties},
+        unexpected_result,
     },
     crate::{
         accel::{
@@ -1612,8 +1614,11 @@ impl Device {
             .map(|fence| fence.handle())
             .collect::<SmallVec<[_; 16]>>();
 
-        unsafe { self.inner.logical.reset_fences(&fences) }
-            .expect("TODO: Handle device lost")
+        match unsafe { self.inner.logical.reset_fences(&fences) }.result() {
+            Ok(()) => {}
+            Err(vk1_0::Result::ERROR_DEVICE_LOST) => device_lost(),
+            Err(result) => unexpected_result(result),
+        }
     }
 
     #[tracing::instrument]
@@ -1624,8 +1629,8 @@ impl Device {
         match unsafe { self.inner.logical.get_fence_status(fence) }.raw {
             vk1_0::Result::SUCCESS => true,
             vk1_0::Result::NOT_READY => true,
-            vk1_0::Result::ERROR_DEVICE_LOST => panic!("Device lost"),
-            err => panic!("Unexpected error: {}", err),
+            vk1_0::Result::ERROR_DEVICE_LOST => device_lost(),
+            err => unexpected_result(err),
         }
     }
 
@@ -1646,8 +1651,13 @@ impl Device {
             .map(|fence| fence.handle())
             .collect::<SmallVec<[_; 16]>>();
 
-        unsafe { self.inner.logical.wait_for_fences(&fences, all, !0) }
-            .expect("TODO: Handle device lost")
+        match unsafe { self.inner.logical.wait_for_fences(&fences, all, !0) }
+            .result()
+        {
+            Ok(()) => {}
+            Err(vk1_0::Result::ERROR_DEVICE_LOST) => device_lost(),
+            Err(result) => unexpected_result(result),
+        }
     }
 
     /// Wait for whole device to become idle. That is, wait for all pending
@@ -1656,11 +1666,10 @@ impl Device {
     /// destruction.
     #[tracing::instrument]
     pub fn wait_idle(&self) {
-        unsafe {
-            self.inner
-                .logical
-                .device_wait_idle()
-                .expect("TODO: Handle device lost")
+        match unsafe { self.inner.logical.device_wait_idle() }.result() {
+            Ok(()) => {}
+            Err(vk1_0::Result::ERROR_DEVICE_LOST) => device_lost(),
+            Err(result) => unexpected_result(result),
         }
     }
 
@@ -1795,7 +1804,7 @@ impl Device {
             vk1_0::Result::ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS_KHR => panic!(
                 "INVALID_OPAQUE_CAPTURE_ADDRESS_KHR error was unexpected"
             ),
-            _ => panic!("Unexpected result {}", result),
+            _ => unexpected_result(result),
         })?;
 
         let index = self.inner.acceleration_strucutres.lock().insert(handle);
@@ -2640,10 +2649,6 @@ pub enum CreateRenderPassError {
         "Subpass {subpass} attachment index {attachment} for depth attachment is out of bounds"
     )]
     DepthAttachmentReferenceOutOfBound { subpass: usize, attachment: usize },
-
-    #[cfg(feature = "vulkan")]
-    #[error("Function returned unexpected error code: {result}")]
-    UnexpectedVulkanError { result: erupt::vk1_0::Result },
 }
 
 #[allow(dead_code)]
@@ -2698,7 +2703,7 @@ pub(crate) fn create_render_pass_error_from_erupt(
                 source: OutOfMemory,
             }
         }
-        _ => CreateRenderPassError::UnexpectedVulkanError { result: err },
+        _ => unexpected_result(err),
     }
 }
 

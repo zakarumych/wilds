@@ -181,14 +181,21 @@ pub struct QueueId {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum CreateEncoderError {
+pub enum PresentError {
     #[error(transparent)]
     OutOfMemory {
         #[from]
         source: OutOfMemory,
     },
+    #[error("Surface is out of date")]
+    OutOfDate,
 
-    #[cfg(feature = "vulkan")]
-    #[error("Function returned unexpected error code: {result}")]
-    UnexpectedVulkanError { result: erupt::vk1_0::Result },
+    #[error("Surface was lost")]
+    SurfaceLost,
+    // FullScreenExclusiveModeLost,
+}
+
+pub enum PresentOk {
+    Success,
+    Suboptimal,
 }

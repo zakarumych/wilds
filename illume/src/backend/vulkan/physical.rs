@@ -1,7 +1,7 @@
 use {
     super::{
         convert::from_erupt, device::Device, graphics::Graphics,
-        surface::surface_error_from_erupt,
+        surface::surface_error_from_erupt, unexpected_result,
     },
     crate::{
         arith_gt, assert_object, out_of_host_memory,
@@ -899,11 +899,7 @@ impl PhysicalDevice {
             Err(LoaderError::VulkanError(
                 vk1_0::Result::ERROR_OUT_OF_DEVICE_MEMORY,
             )) => return Err(OutOfMemory.into()),
-            Err(LoaderError::VulkanError(err)) => {
-                return Err(CreateDeviceError::UnexpectedVulkanError {
-                    result: err,
-                });
-            }
+            Err(LoaderError::VulkanError(err)) => unexpected_result(err),
             Ok(ok) => ok,
         };
 

@@ -23,17 +23,11 @@ impl Config {
     }
 
     #[cfg(not(target = "wasm32"))]
+    #[tracing::instrument]
     pub async fn load(path: PathBuf) -> Result<Self, Report> {
-        tokio::task::spawn_blocking(move || {
-            let config = ron::de::from_reader(
-                std::fs::File::open(&path).wrap_err_with(|| {
-                    format!("Failed to load config at {}", path.display())
-                })?,
-            )?;
-            Ok(config)
+        smol::unblock(move || {
+            Ok(ron::de::from_reader(std::fs::File::open(&path)?)?)
         })
         .await
-        .map_err(Report::from)
-        .and_then(std::convert::identity)
     }
 }
