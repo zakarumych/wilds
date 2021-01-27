@@ -266,10 +266,6 @@ pub enum CreateDeviceError<E: Error + 'static> {
     /// Implementation specific error.
     #[error("Failed to load functions")]
     FunctionLoadFailed,
-
-    #[cfg(feature = "vulkan")]
-    #[error("Function returned unexpected error code: {result}")]
-    UnexpectedVulkanError { result: erupt::vk1_0::Result },
 }
 
 /// Possible error which can be returned from `create_buffer_*`.

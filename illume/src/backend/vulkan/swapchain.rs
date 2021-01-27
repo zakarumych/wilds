@@ -2,6 +2,7 @@ use super::{
     convert::{from_erupt, FromErupt as _, ToErupt as _},
     device::{Device, WeakDevice},
     surface::{surface_error_from_erupt, Surface},
+    unexpected_result,
 };
 use crate::{
     format::Format,
@@ -223,7 +224,7 @@ impl Swapchain {
                 }
             }
             vk1_0::Result::ERROR_SURFACE_LOST_KHR => SurfaceError::SurfaceLost,
-            _ => SurfaceError::UnexpectedVulkanError { result: err },
+            _ => unexpected_result(err),
         })?;
 
         if !ImageUsage::from_erupt(caps.supported_usage_flags).contains(usage) {
@@ -407,7 +408,7 @@ impl Swapchain {
             // FIXME: Use fences to know that acqure semaphore is unused.
             let wait = self.free_semaphore.clone();
 
-            let index = unsafe {
+            let result = unsafe {
                 device.logical().acquire_next_image_khr(
                     inner.handle,
                     !0, /* wait indefinitely. This is OK as we never try to
@@ -417,8 +418,26 @@ impl Swapchain {
                     None,
                 )
             }
-            .result()
-            .map_err(surface_error_from_erupt)?;
+            .result();
+
+            let index = match result {
+                Ok(index) => index,
+                Err(vk1_0::Result::ERROR_OUT_OF_HOST_MEMORY) => {
+                    out_of_host_memory()
+                }
+                Err(vk1_0::Result::ERROR_OUT_OF_DEVICE_MEMORY) => {
+                    return Err(SurfaceError::OutOfMemory {
+                        source: OutOfMemory,
+                    });
+                }
+                Err(vk1_0::Result::ERROR_SURFACE_LOST_KHR) => {
+                    return Err(SurfaceError::SurfaceLost);
+                }
+                Err(vk1_0::Result::ERROR_OUT_OF_DATE_KHR) => {
+                    return Ok(None);
+                }
+                Err(result) => unexpected_result(result),
+            };
 
             let image_and_semaphores = &mut inner.images[index as usize];
 

@@ -58,6 +58,7 @@ pub struct Renderer {
     context: Context,
     blases: HashMap<Mesh, AccelerationStructure>,
     swapchain: Swapchain,
+    swapchain_format: Format,
     blue_noise_buffer_256x256x128: Buffer,
     pipeline: PathTracePipeline,
 }
@@ -126,7 +127,7 @@ impl Renderer {
 
         tracing::debug!("{:?}", device);
 
-        let format = *surface_caps
+        let swapchain_format = *surface_caps
             .formats
             .iter()
             .filter(|format| {
@@ -143,7 +144,7 @@ impl Renderer {
             })
             .ok_or_else(|| eyre!("No surface format found"))?;
 
-        tracing::debug!("Surface format: {:?}", format);
+        tracing::info!("Swapchain format: {:?}", swapchain_format);
 
         let mut context = Context::new(device, queue);
 
@@ -156,7 +157,7 @@ impl Renderer {
         let mut swapchain = context.create_swapchain(&mut surface)?;
         swapchain.configure(
             ImageUsage::COLOR_ATTACHMENT | ImageUsage::TRANSFER_DST,
-            format,
+            swapchain_format,
             PresentMode::Fifo,
         )?;
 
@@ -166,14 +167,15 @@ impl Renderer {
             &mut context,
             blue_noise_buffer_256x256x128.clone(),
             Extent2d {
-                width: 640,
-                height: 480,
+                width: 320,
+                height: 240,
             },
         )?;
 
         Ok(Renderer {
             blases: HashMap::new(),
             swapchain,
+            swapchain_format,
             context,
             blue_noise_buffer_256x256x128,
             pipeline,
@@ -232,10 +234,16 @@ impl Renderer {
                 .submit_no_semaphores(encoder.finish(), None);
         }
 
-        let frame = self
-            .swapchain
-            .acquire_image()?
-            .expect("Resize unimplemented");
+        let frame = loop {
+            if let Some(frame) = self.swapchain.acquire_image()? {
+                break frame;
+            }
+            self.swapchain.configure(
+                ImageUsage::COLOR_ATTACHMENT | ImageUsage::TRANSFER_DST,
+                self.swapchain_format,
+                PresentMode::Fifo,
+            )?;
+        };
 
         self.pipeline.draw(
             frame.info().image.clone(),
@@ -248,7 +256,17 @@ impl Renderer {
         )?;
 
         tracing::trace!("Presenting");
-        self.queue.present(frame);
+        match self.queue.present(frame) {
+            Ok(PresentOk::Suboptimal) | Err(PresentError::OutOfDate) => {
+                self.swapchain.configure(
+                    ImageUsage::COLOR_ATTACHMENT | ImageUsage::TRANSFER_DST,
+                    self.swapchain_format,
+                    PresentMode::Fifo,
+                )?;
+            }
+            Ok(_) => {}
+            Err(err) => return Err(err.into()),
+        };
 
         Ok(())
     }

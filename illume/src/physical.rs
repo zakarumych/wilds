@@ -9,10 +9,6 @@ pub enum EnumerateDeviceError {
         #[from]
         source: OutOfMemory,
     },
-
-    #[cfg(feature = "vulkan")]
-    #[error("Function returned unexpected error code: {result}")]
-    UnexpectedVulkanError { result: erupt::vk1_0::Result },
 }
 
 /// Contains descriptive information about device.

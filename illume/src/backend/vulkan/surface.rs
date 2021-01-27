@@ -1,4 +1,5 @@
 use {
+    super::unexpected_result,
     crate::{
         out_of_host_memory,
         surface::{SurfaceError, SurfaceInfo},
@@ -75,6 +76,6 @@ pub(crate) fn surface_error_from_erupt(err: vk1_0::Result) -> SurfaceError {
             }
         }
         vk1_0::Result::ERROR_SURFACE_LOST_KHR => SurfaceError::SurfaceLost,
-        _ => SurfaceError::UnexpectedVulkanError { result: err },
+        _ => unexpected_result(err),
     }
 }

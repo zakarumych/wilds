@@ -98,33 +98,33 @@ impl Pipeline for PathTracePipeline {
             bump,
         )?;
 
-        let diffuse_filter_output = self.diffuse_filter.draw(
-            atrous::Input {
-                normal_depth: rt_prepass_output.normal_depth.clone(),
-                unfiltered: rt_prepass_output.diffuse,
-            },
-            self.frame,
-            &[],
-            &[],
-            None,
-            ctx,
-            world,
-            bump,
-        )?;
+        // let diffuse_filter_output = self.diffuse_filter.draw(
+        //     atrous::Input {
+        //         normal_depth: rt_prepass_output.normal_depth.clone(),
+        //         unfiltered: rt_prepass_output.diffuse,
+        //     },
+        //     self.frame,
+        //     &[],
+        //     &[],
+        //     None,
+        //     ctx,
+        //     world,
+        //     bump,
+        // )?;
 
-        let direct_filter_output = self.direct_filter.draw(
-            atrous::Input {
-                normal_depth: rt_prepass_output.normal_depth.clone(),
-                unfiltered: rt_prepass_output.direct,
-            },
-            self.frame,
-            &[],
-            &[],
-            None,
-            ctx,
-            world,
-            bump,
-        )?;
+        // let direct_filter_output = self.direct_filter.draw(
+        //     atrous::Input {
+        //         normal_depth: rt_prepass_output.normal_depth.clone(),
+        //         unfiltered: rt_prepass_output.direct,
+        //     },
+        //     self.frame,
+        //     &[],
+        //     &[],
+        //     None,
+        //     ctx,
+        //     world,
+        //     bump,
+        // )?;
 
         let fence = &self.fences[(self.frame % 2) as usize];
         self.combine.draw(
@@ -132,8 +132,10 @@ impl Pipeline for PathTracePipeline {
                 albedo: rt_prepass_output.albedo,
                 normal_depth: rt_prepass_output.normal_depth,
                 emissive: rt_prepass_output.emissive,
-                direct: direct_filter_output.filtered,
-                diffuse: diffuse_filter_output.filtered,
+                // direct: direct_filter_output.filtered,
+                // diffuse: diffuse_filter_output.filtered,
+                direct: rt_prepass_output.direct,
+                diffuse: rt_prepass_output.diffuse,
                 combined: target.clone(),
             },
             self.frame,
