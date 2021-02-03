@@ -41,41 +41,6 @@ fn main() -> Result<(), Report> {
         }
     }
 
-    // Pre-build blue-noise
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("blue_noise");
-    let output = root.join(format!("RGBAF32_256x256x128"));
-
-    if !output.exists() {
-        let mut raw_blue_noise_bytes =
-            Vec::with_capacity(4 * 4 * 256 * 256 * 128);
-        let path_256_256 = root.join("256_256");
-
-        for i in 0..128 {
-            let path = path_256_256.join(format!("HDR_RGBA_{:04}.png", i));
-
-            tracing::debug!("Reading blue-noise from {}", path.display());
-
-            let noise_file = std::fs::read(path)?;
-            let noise_image = image::load_from_memory(&noise_file)?;
-            let noise_image = noise_image.as_rgba16().ok_or_else(|| {
-                eyre::eyre!("Noise image expected to be 16 bit RGBA")
-            })?;
-
-            for &image::Rgba([r, g, b, a]) in noise_image.pixels() {
-                raw_blue_noise_bytes
-                    .extend_from_slice(&(r as f32 / 65535.0).to_ne_bytes());
-                raw_blue_noise_bytes
-                    .extend_from_slice(&(g as f32 / 65535.0).to_ne_bytes());
-                raw_blue_noise_bytes
-                    .extend_from_slice(&(b as f32 / 65535.0).to_ne_bytes());
-                raw_blue_noise_bytes
-                    .extend_from_slice(&(a as f32 / 65535.0).to_ne_bytes());
-            }
-        }
-
-        std::fs::write(output, &raw_blue_noise_bytes)?;
-    }
-
     Ok(())
 }
 

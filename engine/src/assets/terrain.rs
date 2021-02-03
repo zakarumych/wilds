@@ -5,7 +5,7 @@ use {
         ready, Asset, AssetKey, Assets, Format, Prefab,
     },
     crate::{
-        physics::{BodyStatus, Colliders, RigidBodyDesc},
+        physics::PhysicsData,
         renderer::{
             Context, Material, Mesh, MeshBuilder, Normal3d, Position3d,
             PositionNormalTangent3dUV, Renderable, Tangent3d, VertexType as _,
@@ -16,24 +16,27 @@ use {
     futures::future::BoxFuture,
     hecs::{Entity, World},
     illume::{
-        BufferInfo, BufferUsage, IndexType, MemoryUsage, OutOfMemory,
-        PrimitiveTopology,
+        BufferInfo, BufferUsage, IndexType, OutOfMemory, PrimitiveTopology,
     },
     image::{
         load_from_memory, DynamicImage, GenericImageView, ImageError, Pixel,
     },
     nalgebra as na,
-    ncollide3d::shape::{HeightField, ShapeHandle},
-    nphysics3d::object::ColliderDesc,
     num_traits::{bounds::Bounded, cast::ToPrimitive},
+    parry3d::shape::HeightField,
+    rapier3d::{
+        dynamics::{RigidBodyBuilder, RigidBodySet},
+        geometry::{ColliderBuilder, ColliderSet, SharedShape},
+    },
     std::{convert::TryFrom as _, sync::Arc},
+    type_map::TypeMap,
 };
 
 pub fn create_terrain_shape(
     width: u32,
     depth: u32,
     height: impl Fn(u32, u32) -> f32,
-) -> HeightField<f32> {
+) -> HeightField {
     let mut matrix: na::DMatrix<f32> = na::DMatrix::zeros_generic(
         na::Dynamic::new(depth as usize),
         na::Dynamic::new(width as usize),
@@ -319,7 +322,7 @@ impl Format<TerrainAsset, AssetKey> for TerrainFormat {
 pub struct TerrainAsset {
     pub mesh: Mesh,
     pub material: Material,
-    pub shape: Arc<HeightField<f32>>,
+    pub shape: Arc<HeightField>,
 }
 
 /// Terrain entity consists of terrain marker and optionally
@@ -332,10 +335,23 @@ pub struct Terrain;
 impl Prefab for TerrainAsset {
     type Info = Global3;
 
-    fn spawn(self, global: Global3, world: &mut World, entity: Entity) {
-        let rigid_body = RigidBodyDesc::<f32>::new()
-            .status(BodyStatus::Static)
-            .build();
+    fn spawn(
+        self,
+        global: Global3,
+        world: &mut World,
+        resources: &mut TypeMap,
+        entity: Entity,
+    ) {
+        let sets = resources
+            .entry::<PhysicsData>()
+            .or_insert_with(PhysicsData::new);
+
+        let body = sets.bodies.insert(RigidBodyBuilder::new_static().build());
+        let collider = sets.colliders.insert(
+            ColliderBuilder::new(SharedShape(self.shape)).build(),
+            body,
+            &mut sets.bodies,
+        );
 
         let _ = world.insert(
             entity,
@@ -345,11 +361,8 @@ impl Prefab for TerrainAsset {
                     material: self.material,
                     // transform: None,
                 },
-                rigid_body,
-                Colliders::from(
-                    ColliderDesc::new(ShapeHandle::from_arc(self.shape))
-                        .margin(0.01),
-                ),
+                body,
+                collider,
                 global,
                 Terrain,
             ),

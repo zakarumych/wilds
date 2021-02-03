@@ -7,14 +7,13 @@ use {
     },
     bumpalo::Bump,
     cfg_if::cfg_if,
-    eyre::{Report, WrapErr as _},
+    eyre::Report,
     flume::{bounded, Receiver, Sender},
     futures::future::TryFutureExt as _,
     goods::{Asset, AssetDefaultFormat},
     hecs::{Entity, World},
     std::{
         cell::Cell,
-        error::Error,
         future::Future,
         pin::Pin,
         rc::Rc,
@@ -37,7 +36,7 @@ pub use winit::event::{
 pub type InputEvents = EventBroker<Event<'static, ()>>;
 
 pub struct SystemContext<'a> {
-    pub input: &'a InputEvents,
+    pub input: &'a mut InputEvents,
     pub world: &'a mut World,
     pub resources: &'a mut TypeMap,
     pub bump: &'a Bump,
@@ -138,7 +137,7 @@ impl Engine {
             match loaded {
                 MakePrefab::Spawn(key, build) => {
                     tracing::info!("Prefab '{}' loaded", key);
-                    build(&mut self.world);
+                    build(&mut self.world, &mut self.resources);
                 }
                 MakePrefab::Error(key, err, entity) => {
                     tracing::error!("Failed to load prefab '{}': {}", key, err);
@@ -181,7 +180,7 @@ impl Engine {
             system.run(SystemContext {
                 world: &mut self.world,
                 resources: &mut self.resources,
-                input: &self.input,
+                input: &mut self.input,
                 clocks,
                 bump,
             });
@@ -192,7 +191,7 @@ impl Engine {
                 system.run(SystemContext {
                     world: &mut self.world,
                     resources: &mut self.resources,
-                    input: &self.input,
+                    input: &mut self.input,
                     clocks,
                     bump,
                 });
@@ -399,7 +398,7 @@ struct Shared {
 }
 
 enum MakePrefab {
-    Spawn(AssetKey, Box<dyn FnOnce(&mut World) + Send>),
+    Spawn(AssetKey, Box<dyn FnOnce(&mut World, &mut TypeMap) + Send>),
     Error(AssetKey, Report, Entity),
 }
 
@@ -410,7 +409,9 @@ impl MakePrefab {
     {
         MakePrefab::Spawn(
             key,
-            Box::new(move |world| prefab.spawn(info, world, entity)),
+            Box::new(move |world, resources| {
+                prefab.spawn(info, world, resources, entity)
+            }),
         )
     }
 }

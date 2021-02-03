@@ -1,10 +1,9 @@
-use crate::AttachmentInfo;
 
 use {
     super::{
         access::supported_access,
         convert::{oom_error_from_erupt, ToErupt},
-        device::{Device, WeakDevice},
+        device::{WeakDevice},
     },
     crate::{
         accel::{

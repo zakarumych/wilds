@@ -1,0 +1,10 @@
+[package]
+name = "wilds-noise"
+version = "0.1.0"
+authors = ["Zakarum <zakarumych@ya.ru>"]
+edition = "2018"
+
+[dependencies]
+rand = "0.8"
+rustfft = "5.0"
+image = "0.23"

@@ -84,23 +84,23 @@ pub struct Player {
     window_size: PhysicalSize<u32>,
     window_id: WindowId,
     action_map: ActionMap,
-    controls: Entity,
+    faction: usize,
 }
 
 impl Player {
-    pub fn new(window: &Window, controls: Entity) -> Self {
-        Self::with_action_map(window, controls, ActionMap::default())
+    pub fn new(window: &Window, faction: usize) -> Self {
+        Self::with_action_map(window, faction, ActionMap::default())
     }
 
     pub fn with_action_map(
         window: &Window,
-        controls: Entity,
+        faction: usize,
         action_map: ActionMap,
     ) -> Self {
         Player {
             cursor_pos: [0.5; 2],
             action_map,
-            controls,
+            faction,
             window_size: window.inner_size(),
             window_id: window.id(),
         }
@@ -159,7 +159,9 @@ impl Player {
 impl System for Player {
     fn run(&mut self, ctx: SystemContext<'_>) {
         for event in ctx.input.read() {
-            if let Some(action) = self.translate_event(event) {
+            if let Some(action) = self.translate_event(&*event) {
+                event.consume();
+
                 match action {
                     Action::MoveToCursor => {
                         tracing::error!(

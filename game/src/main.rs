@@ -1,8 +1,7 @@
-mod pawn;
+// mod pawn;
 mod player;
 
 use {
-    self::pawn::*,
     bumpalo::Bump,
     color_eyre::Report,
     hecs::{Entity, EntityBuilder, World},
@@ -61,9 +60,7 @@ fn main() -> Result<(), Report> {
     tracing::info!("App started");
 
     Engine::run(|mut engine| async move {
-        engine.resources.insert(Constants { time_factor: 0.1 });
-
-        // engine.add_system(Physics::new());
+        engine.add_system(Physics::new());
         engine.add_system(SceneSystem);
 
         let window = engine.build_window(
@@ -143,20 +140,20 @@ fn main() -> Result<(), Report> {
         //     }
         // });
 
-        let scene = engine.load_prefab_with_format::<GltfAsset, _>(
-            "sponza/glTF/Sponza.gltf".into(),
-            Global3::from_scale(1.0),
-            GltfFormat::for_raytracing(),
-        );
-
-        // let _terrain = engine.load_prefab_with_format(
-        //     "terrain/island.ron".into(),
+        // let scene = engine.load_prefab_with_format::<GltfAsset, _>(
+        //     "sponza/glTF/Sponza.gltf".into(),
         //     Global3::from_scale(1.0),
-        //     TerrainFormat {
-        //         raster: false,
-        //         blas: true,
-        //     },
+        //     GltfFormat::for_raytracing(),
         // );
+
+        let _terrain = engine.load_prefab_with_format(
+            "terrain/island.ron".into(),
+            Global3::from_scale(1.0),
+            TerrainFormat {
+                raster: false,
+                blas: true,
+            },
+        );
 
         // let pawn = engine.load_prefab_with_format::<PawnAsset, _>(
         //     "pawn.ron".into(),

@@ -8,6 +8,7 @@ use {
     gltf::Node,
     hecs::{Entity, World},
     nalgebra as na,
+    type_map::TypeMap,
 };
 
 pub struct GltfScene {
@@ -17,7 +18,13 @@ pub struct GltfScene {
 impl Prefab for GltfAsset {
     type Info = Global3;
 
-    fn spawn(self, root: Global3, world: &mut World, entity: Entity) {
+    fn spawn(
+        self,
+        root: Global3,
+        world: &mut World,
+        _resources: &mut TypeMap,
+        entity: Entity,
+    ) {
         if !world.contains(entity) {
             tracing::warn!("Prefab loaded but entity is already despawned");
             return;

@@ -66,7 +66,7 @@ impl System for FollowingCameraSystem {
         let delta = ctx.clocks.delta.as_secs_f32();
 
         for event in ctx.input.read() {
-            match event {
+            match &*event {
                 Event::DeviceEvent { event, .. } => match event {
                     // &DeviceEvent::MouseMotion { delta: (x, y) } => {
                     //     self.pitch += y as f32 * delta * self.pitch_factor;

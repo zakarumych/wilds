@@ -293,107 +293,79 @@ fn ray_tracing_transform_matrix_from_nalgebra(
     }
 }
 
-fn load_blue_noise(ctx: &mut Context) -> Result<Buffer, OutOfMemory> {
-    let blue_noise = include_bytes!("../../blue_noise/RGBAF32_256x256x128");
-
-    ctx.create_buffer_static(
-        BufferInfo {
-            size: blue_noise.len() as _,
-            align: 255,
-            usage: BufferUsage::STORAGE,
-        },
-        &blue_noise[..],
-    )
-    .map(Into::into)
-}
-
 // fn load_blue_noise(ctx: &mut Context) -> Result<Buffer, OutOfMemory> {
-//     use std::{convert::TryFrom as _, mem::size_of_val};
-
-//     const KERNAL_DIM: usize = 7;
-
-//     const KERNEL: [[f32; KERNAL_DIM]; KERNAL_DIM] = [
-//         [
-//             0.000036, 0.000363, 0.001446, 0.002291, 0.001446, 0.000363,
-//             0.000036,
-//         ],
-//         [
-//             0.000363, 0.003676, 0.014662, 0.023226, 0.014662, 0.003676,
-//             0.000363,
-//         ],
-//         [
-//             0.001446, 0.014662, 0.058488, 0.092651, 0.058488, 0.014662,
-//             0.001446,
-//         ],
-//         [
-//             0.002291, 0.023226, 0.092651, 0.146768, 0.092651, 0.023226,
-//             0.002291,
-//         ],
-//         [
-//             0.001446, 0.014662, 0.058488, 0.092651, 0.058488, 0.014662,
-//             0.001446,
-//         ],
-//         [
-//             0.000363, 0.003676, 0.014662, 0.023226, 0.014662, 0.003676,
-//             0.000363,
-//         ],
-//         [
-//             0.000036, 0.000363, 0.001446, 0.002291, 0.001446, 0.000363,
-//             0.000036,
-//         ],
-//     ];
-
-//     const DIM: usize = 256;
-//     const COUNT: usize = DIM * DIM;
-//     const STEP: f32 = 1.0 / COUNT as f32;
-
-//     let mut data = [[[0f32; 4]; DIM]; DIM];
-
-//     for c in 0..4 {
-//         for s in 1..COUNT {
-//             // Next value to put.
-//             let v = s as f32 * STEP;
-
-//             let mut lx = 0;
-//             let mut ly = 0;
-//             let mut lb = 1.0;
-
-//             // Search over all pixels.
-//             for x in 0..DIM {
-//                 for y in 0..DIM {
-//                     if data[x][y][c] > 0.0 {
-//                         continue;
-//                     }
-
-//                     let mut b = 0.0;
-
-//                     for wx in 0..=6 {
-//                         for wy in 0..=6 {
-//                             b += data[(x + wx - 3) % DIM][(y + wy - 3) % DIM]
-//                                 [c]
-//                                 * KERNEL[wx][wy];
-//                         }
-//                     }
-
-//                     if lb > b {
-//                         lb = b;
-//                         lx = x;
-//                         ly = y;
-//                     }
-//                 }
-//             }
-
-//             data[lx][ly][c] = v;
-//         }
-//     }
+//     let blue_noise = include_bytes!("../../blue_noise/RGBAF32_1024x1024x128");
 
 //     ctx.create_buffer_static(
 //         BufferInfo {
-//             size: u64::try_from(size_of_val(&data)).unwrap(),
+//             size: blue_noise.len() as _,
 //             align: 255,
 //             usage: BufferUsage::STORAGE,
-//
 //         },
-//         &data,
+//         &blue_noise[..],
 //     )
+//     .map(Into::into)
 // }
+
+fn load_blue_noise(ctx: &mut Context) -> Result<Buffer, OutOfMemory> {
+    use wilds_noise::generate_blue_noise;
+
+    let path = std::path::Path::new("blue_noise.tmp");
+    if path.exists() {
+        if path.is_file() {
+            if let Ok(bytes) = std::fs::read(path) {
+                return ctx
+                    .create_buffer_static(
+                        BufferInfo {
+                            size: bytes.len() as _,
+                            align: 255,
+                            usage: BufferUsage::STORAGE,
+                        },
+                        &bytes[..],
+                    )
+                    .map(Into::into);
+            }
+        }
+    }
+
+    // Generate blue noise.
+    const SIZE: usize = 256;
+    const FMIN: f32 = 64.0;
+    const FMAX: f32 = 256.0;
+    const EXP: f32 = 1.5;
+
+    let mut bytes = Vec::with_capacity(4 * 4 * 256 * 256 * 128);
+
+    for _ in 0..128 {
+        let red = generate_blue_noise(SIZE, FMIN, FMAX, EXP);
+        let green = generate_blue_noise(SIZE, FMIN, FMAX, EXP);
+        let blue = generate_blue_noise(SIZE, FMIN, FMAX, EXP);
+        let alpha = generate_blue_noise(SIZE, FMIN, FMAX, EXP);
+
+        let iter = red
+            .values()
+            .zip(green.values())
+            .zip(blue.values())
+            .zip(alpha.values());
+
+        for (((r, g), b), a) in iter {
+            bytes.extend_from_slice(&r.re.abs().fract().to_ne_bytes());
+            bytes.extend_from_slice(&g.re.abs().fract().to_ne_bytes());
+            bytes.extend_from_slice(&b.re.abs().fract().to_ne_bytes());
+            bytes.extend_from_slice(&a.re.abs().fract().to_ne_bytes());
+        }
+    }
+
+    if !path.exists() {
+        let _ = std::fs::write(path, &bytes);
+    }
+    ctx.create_buffer_static(
+        BufferInfo {
+            size: bytes.len() as _,
+            align: 255,
+            usage: BufferUsage::STORAGE,
+        },
+        &bytes[..],
+    )
+    .map(Into::into)
+}

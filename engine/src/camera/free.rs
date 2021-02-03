@@ -76,7 +76,7 @@ impl System for FreeCameraSystem {
 
         if let Some((_, global)) = query.iter().next() {
             for event in ctx.input.read() {
-                match event {
+                match &*event {
                     Event::DeviceEvent { event, .. } => match event {
                         DeviceEvent::Key(KeyboardInput {
                             virtual_keycode: Some(VirtualKeyCode::Z),

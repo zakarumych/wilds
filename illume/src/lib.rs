@@ -1,11 +1,4 @@
-// #![deny(non_snake_case)]
-// #![deny(unreachable_patterns)]
-// #![deny(unused_unsafe)]
-// #![deny(missing_copy_implementations)]
-// #![deny(missing_debug_implementations)]
-// #![deny(unused_must_use)]
-// #![deny(unused_variables)]
-// #![allow(unused_imports)]
+#![allow(dead_code)]
 
 use std::{
     cmp::{Ord, Ordering, PartialOrd},

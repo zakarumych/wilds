@@ -116,9 +116,9 @@ vec3 nice_rand(uvec4 co) {
 vec3 blue_rand(uvec4 co) {
     uint x = co.x & 255;
     uint y = co.y & 255;
-    uint z = (co.z + co.w) & 127;
+    uint z = (co.w + co.z) & 127;
 
-    uint index = x + y * 256 + z * 65536;
+    uint index = x + y * 256 + z * 256 * 256;
     vec4 raw = blue_noise[index];
 
     return raw.xyz;

@@ -14,11 +14,15 @@ readme = "../README.md"
 [dependencies]
 # Assets
 goods = { version = "0.7.1", features = ["fs", "smol-spawn", "data-url", "trace", "ron-format"] }
+#goods = { version = "0.8", features = ["trace"] }
+#goods-ron = { version = "0.1" }
+#goods-fs = { version = "0.1" }
+
 gltf = "0.15"
 
 # Physics
-ncollide3d = "=0.27"
-nphysics3d = "0.19"
+parry3d = "=0.1"
+rapier3d = "0.5"
 
 # Graphics
 illume = { path = "../illume", features = ["serde-1"] }
@@ -76,6 +80,7 @@ type-map = "0.4"
 lru = "0.6"
 url = "2.0"
 rand = "0.8"
+wilds-noise = { version = "0.1.0", path = "../noise" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 smol = { version = "1.0" }

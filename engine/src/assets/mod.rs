@@ -6,6 +6,7 @@ mod terrain;
 pub use {
     self::{gltf::*, image::*, material::*, terrain::*},
     goods::*,
+    type_map::TypeMap,
 };
 
 use {
@@ -20,7 +21,13 @@ pub trait Prefab {
     type Info: Send + 'static;
 
     /// Spawns this prefab into world.
-    fn spawn(self, info: Self::Info, world: &mut World, entity: Entity);
+    fn spawn(
+        self,
+        info: Self::Info,
+        world: &mut World,
+        resources: &mut TypeMap,
+        entity: Entity,
+    );
 }
 
 /// Append string to asset key.
