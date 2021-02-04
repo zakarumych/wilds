@@ -1084,13 +1084,7 @@ impl Device {
                 let index = self.inner.images.lock().insert(image);
 
                 tracing::debug!("Image created {:p}", image);
-                Ok(Image::new(
-                    info,
-                    self.downgrade(),
-                    image,
-                    Some(block),
-                    Some(index),
-                ))
+                Ok(Image::new(info, self.downgrade(), image, block, index))
             }
             Err(err) => {
                 unsafe {

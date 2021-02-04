@@ -3,7 +3,7 @@ pub mod free;
 
 use nalgebra as na;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Camera {
     Perspective(na::Perspective3<f32>),
     Orthographic(na::Orthographic3<f32>),

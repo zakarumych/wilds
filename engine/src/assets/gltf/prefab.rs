@@ -3,26 +3,29 @@ use {
     crate::{
         assets::Prefab,
         renderer::Renderable,
+        resources::Resources,
         scene::{Global3, Local3},
     },
     gltf::Node,
     hecs::{Entity, World},
     nalgebra as na,
-    type_map::TypeMap,
 };
 
 pub struct GltfScene {
     nodes: Box<[Entity]>,
 }
 
-impl Prefab for GltfAsset {
+pub struct Gltf;
+
+impl Prefab for Gltf {
+    type Asset = GltfAsset;
     type Info = Global3;
 
     fn spawn(
-        self,
+        asset: GltfAsset,
         root: Global3,
         world: &mut World,
-        _resources: &mut TypeMap,
+        _resources: &mut Resources,
         entity: Entity,
     ) {
         if !world.contains(entity) {
@@ -30,9 +33,9 @@ impl Prefab for GltfAsset {
             return;
         }
 
-        let scene = match self.gltf.default_scene() {
+        let scene = match asset.gltf.default_scene() {
             Some(scene) => scene,
-            None => self.gltf.scenes().next().unwrap(),
+            None => asset.gltf.scenes().next().unwrap(),
         };
 
         match scene.nodes().len() {
@@ -48,7 +51,7 @@ impl Prefab for GltfAsset {
                 let (iso, scale) = node_transform(&node);
                 let global = root.append_iso_scale(&iso, &scale);
 
-                match node.mesh().and_then(|m| self.renderables.get(m.index()))
+                match node.mesh().and_then(|m| asset.renderables.get(m.index()))
                 {
                     Some(renderables) => match renderables.len() {
                         1 => {
@@ -72,14 +75,14 @@ impl Prefab for GltfAsset {
                     None => world.insert_one(entity, global).unwrap(),
                 };
 
-                spawn_children(entity, &node, &self, world);
+                spawn_children(entity, &node, &asset, world);
             }
             _ => {
                 tracing::info!("Gltf asset loaded");
                 let nodes = scene
                     .nodes()
                     .map(|node| {
-                        spawn_node(Base::Root(&root), node, &self, world)
+                        spawn_node(Base::Root(&root), node, &asset, world)
                     })
                     .collect();
 

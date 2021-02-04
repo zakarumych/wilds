@@ -13,6 +13,7 @@ pub mod fps_counter;
 pub mod light;
 pub mod physics;
 pub mod renderer;
+pub mod resources;
 pub mod scene;
 pub mod util;
 

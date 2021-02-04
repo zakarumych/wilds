@@ -12,7 +12,10 @@ pub use {
 
 use {
     self::{pass::*, pipeline::*},
-    crate::{camera::Camera, clocks::ClockIndex, scene::Global3},
+    crate::{
+        camera::Camera, clocks::ClockIndex, resources::Resources,
+        scene::Global3,
+    },
     bumpalo::Bump,
     color_eyre::Report,
     eyre::eyre,
@@ -22,7 +25,6 @@ use {
         collections::hash_map::{Entry, HashMap},
         ops::{Deref, DerefMut},
     },
-    type_map::TypeMap,
     winit::window::Window,
 };
 
@@ -167,8 +169,8 @@ impl Renderer {
             &mut context,
             blue_noise_buffer_256x256x128.clone(),
             Extent2d {
-                width: 320,
-                height: 240,
+                width: 2560 / 4,
+                height: 1080 / 4,
             },
         )?;
 
@@ -185,15 +187,13 @@ impl Renderer {
     pub fn draw(
         &mut self,
         world: &mut World,
-        resources: &TypeMap,
+        resources: &mut Resources,
         _clock: &ClockIndex,
         bump: &Bump,
     ) -> Result<(), Report> {
         const DEFAULT_CONSTANTS: RenderConstants = RenderConstants::new();
 
-        let constants = resources
-            .get::<RenderConstants>()
-            .unwrap_or(&DEFAULT_CONSTANTS);
+        let constants = &*resources.get_or(DEFAULT_CONSTANTS);
 
         self.context.flush_uploads(bump)?;
 
@@ -238,11 +238,13 @@ impl Renderer {
             if let Some(frame) = self.swapchain.acquire_image()? {
                 break frame;
             }
+            tracing::error!("{:#?}", self.swapchain);
             self.swapchain.configure(
                 ImageUsage::COLOR_ATTACHMENT | ImageUsage::TRANSFER_DST,
                 self.swapchain_format,
                 PresentMode::Fifo,
             )?;
+            tracing::error!("{:#?}", self.swapchain);
         };
 
         self.pipeline.draw(
@@ -258,11 +260,13 @@ impl Renderer {
         tracing::trace!("Presenting");
         match self.queue.present(frame) {
             Ok(PresentOk::Suboptimal) | Err(PresentError::OutOfDate) => {
+                tracing::error!("{:#?}", self.swapchain);
                 self.swapchain.configure(
                     ImageUsage::COLOR_ATTACHMENT | ImageUsage::TRANSFER_DST,
                     self.swapchain_format,
                     PresentMode::Fifo,
                 )?;
+                tracing::error!("{:#?}", self.swapchain);
             }
             Ok(_) => {}
             Err(err) => return Err(err.into()),
@@ -292,20 +296,6 @@ fn ray_tracing_transform_matrix_from_nalgebra(
         matrix: m.transpose().into(),
     }
 }
-
-// fn load_blue_noise(ctx: &mut Context) -> Result<Buffer, OutOfMemory> {
-//     let blue_noise = include_bytes!("../../blue_noise/RGBAF32_1024x1024x128");
-
-//     ctx.create_buffer_static(
-//         BufferInfo {
-//             size: blue_noise.len() as _,
-//             align: 255,
-//             usage: BufferUsage::STORAGE,
-//         },
-//         &blue_noise[..],
-//     )
-//     .map(Into::into)
-// }
 
 fn load_blue_noise(ctx: &mut Context) -> Result<Buffer, OutOfMemory> {
     use wilds_noise::generate_blue_noise;

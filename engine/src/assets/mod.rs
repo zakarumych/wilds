@@ -1,3 +1,4 @@
+mod generator;
 mod gltf;
 mod image;
 mod material;
@@ -5,8 +6,8 @@ mod terrain;
 
 pub use {
     self::{gltf::*, image::*, material::*, terrain::*},
+    crate::resources::Resources,
     goods::*,
-    type_map::TypeMap,
 };
 
 use {
@@ -18,14 +19,15 @@ pub type AssetKey = Arc<str>;
 pub type Assets = Cache<AssetKey>;
 
 pub trait Prefab {
+    type Asset: Asset + Clone + Send + 'static;
     type Info: Send + 'static;
 
     /// Spawns this prefab into world.
     fn spawn(
-        self,
+        asset: Self::Asset,
         info: Self::Info,
         world: &mut World,
-        resources: &mut TypeMap,
+        resources: &mut Resources,
         entity: Entity,
     );
 }

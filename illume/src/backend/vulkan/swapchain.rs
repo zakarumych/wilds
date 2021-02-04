@@ -19,10 +19,15 @@ use erupt::{
     },
     vk1_0,
 };
-use std::sync::{
-    atomic::{AtomicUsize, Ordering::*},
-    Arc,
+use std::{
+    convert::TryInto as _,
+    sync::{
+        atomic::{AtomicU64, AtomicUsize, Ordering::*},
+        Arc,
+    },
 };
+
+static UID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Debug)]
 pub struct SwapchainImage {
@@ -90,10 +95,8 @@ pub struct SwapchainImageInfo {
 #[derive(Debug)]
 struct SwapchainImageAndSemaphores {
     image: Image,
-    acquire: [Semaphore; 3],
-    acquire_index: usize,
-    release: [Semaphore; 3],
-    release_index: usize,
+    acquire: Semaphore,
+    release: Semaphore,
 }
 
 #[derive(Debug)]
@@ -280,7 +283,6 @@ impl Swapchain {
 
         let old_swapchain = if let Some(inner) = self.inner.take() {
             let handle = inner.handle;
-
             self.retired.push(inner);
 
             handle
@@ -327,16 +329,8 @@ impl Swapchain {
         let semaphores = (0..images.len())
             .map(|_| {
                 Ok((
-                    [
-                        device.clone().create_semaphore()?,
-                        device.clone().create_semaphore()?,
-                        device.clone().create_semaphore()?,
-                    ],
-                    [
-                        device.clone().create_semaphore()?,
-                        device.clone().create_semaphore()?,
-                        device.clone().create_semaphore()?,
-                    ],
+                    device.clone().create_semaphore()?,
+                    device.clone().create_semaphore()?,
                 ))
             })
             .collect::<Result<Vec<_>, _>>()
@@ -355,7 +349,7 @@ impl Swapchain {
                 .into_iter()
                 .zip(semaphores)
                 .map(|(i, (a, r))| SwapchainImageAndSemaphores {
-                    image: Image::new(
+                    image: Image::new_swapchain(
                         ImageInfo {
                             extent: Extent2d::from_erupt(caps.current_extent)
                                 .into(),
@@ -367,13 +361,10 @@ impl Swapchain {
                         },
                         self.device.clone(),
                         i,
-                        None,
-                        None,
+                        UID.fetch_add(1, Relaxed).try_into().unwrap(),
                     ),
                     acquire: a,
-                    acquire_index: 0,
                     release: r,
-                    release_index: 0,
                 })
                 .collect(),
             counter: Arc::new(AtomicUsize::new(0)),
@@ -444,18 +435,11 @@ impl Swapchain {
             inner.counter.fetch_add(1, Acquire);
 
             std::mem::swap(
-                &mut image_and_semaphores.acquire
-                    [image_and_semaphores.acquire_index % 3],
+                &mut image_and_semaphores.acquire,
                 &mut self.free_semaphore,
             );
 
-            image_and_semaphores.acquire_index += 1;
-
-            let signal = image_and_semaphores.release
-                [image_and_semaphores.release_index % 3]
-                .clone();
-
-            image_and_semaphores.release_index += 1;
+            let signal = image_and_semaphores.release.clone();
 
             Ok(Some(SwapchainImage {
                 info: SwapchainImageInfo {

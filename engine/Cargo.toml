@@ -35,7 +35,7 @@ png = "0.16"
 hecs = "0.3"
 
 # Linear algebra
-nalgebra = "=0.24"
+nalgebra = { version = "=0.24", features = ["serde-serialize"] }
 
 # Inverse Kinematics
 # ik = { version = "*", path = "../ik" }

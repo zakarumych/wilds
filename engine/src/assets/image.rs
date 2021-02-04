@@ -3,7 +3,7 @@ use {
     goods::{ready, AssetDefaultFormat, Cache, Format, Ready, SyncAsset},
     illume::{
         CreateImageError, ImageExtent, ImageInfo, ImageUsage, ImageView,
-        ImageViewInfo, MemoryUsage, Samples1,
+        ImageViewInfo, Samples1,
     },
     image::{
         load_from_memory, DynamicImage, GenericImageView as _, ImageError,

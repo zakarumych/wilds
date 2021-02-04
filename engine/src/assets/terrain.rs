@@ -11,6 +11,7 @@ use {
             PositionNormalTangent3dUV, Renderable, Tangent3d, VertexType as _,
             UV,
         },
+        resources::Resources,
         scene::Global3,
     },
     futures::future::BoxFuture,
@@ -25,11 +26,10 @@ use {
     num_traits::{bounds::Bounded, cast::ToPrimitive},
     parry3d::shape::HeightField,
     rapier3d::{
-        dynamics::{RigidBodyBuilder, RigidBodySet},
-        geometry::{ColliderBuilder, ColliderSet, SharedShape},
+        dynamics::RigidBodyBuilder,
+        geometry::{ColliderBuilder, SharedShape},
     },
     std::{convert::TryFrom as _, sync::Arc},
-    type_map::TypeMap,
 };
 
 pub fn create_terrain_shape(
@@ -332,23 +332,22 @@ pub struct TerrainAsset {
 #[derive(Clone, Copy, Debug)]
 pub struct Terrain;
 
-impl Prefab for TerrainAsset {
+impl Prefab for Terrain {
+    type Asset = TerrainAsset;
     type Info = Global3;
 
     fn spawn(
-        self,
+        asset: TerrainAsset,
         global: Global3,
         world: &mut World,
-        resources: &mut TypeMap,
+        resources: &mut Resources,
         entity: Entity,
     ) {
-        let sets = resources
-            .entry::<PhysicsData>()
-            .or_insert_with(PhysicsData::new);
+        let sets = resources.get_or_else(PhysicsData::new);
 
         let body = sets.bodies.insert(RigidBodyBuilder::new_static().build());
         let collider = sets.colliders.insert(
-            ColliderBuilder::new(SharedShape(self.shape)).build(),
+            ColliderBuilder::new(SharedShape(asset.shape)).build(),
             body,
             &mut sets.bodies,
         );
@@ -357,8 +356,8 @@ impl Prefab for TerrainAsset {
             entity,
             (
                 Renderable {
-                    mesh: self.mesh,
-                    material: self.material,
+                    mesh: asset.mesh,
+                    material: asset.material,
                     // transform: None,
                 },
                 body,

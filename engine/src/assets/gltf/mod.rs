@@ -8,7 +8,7 @@ mod texture;
 
 use {
     self::{
-        image::load_gltf_image, material::load_gltf_material,
+        image::load_gltf_image, material::load_gltf_material, prefab::Gltf,
         primitive::load_gltf_primitive, sampler::load_gltf_sampler,
         texture::load_gltf_texture,
     },

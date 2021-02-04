@@ -1,3 +1,4 @@
 (
-    sources: [(path: "assets")]
+    engine: ( sources: [(path: "assets")] ),
+    game: (),
 )

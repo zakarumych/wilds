@@ -23,8 +23,12 @@ use {
         cell::UnsafeCell,
         fmt::{self, Debug},
         hash::{Hash, Hasher},
+        num::NonZeroU64,
         ops::Deref,
-        sync::Arc,
+        sync::{
+            atomic::{AtomicUsize, Ordering::*},
+            Arc,
+        },
     },
 };
 
@@ -51,7 +55,7 @@ unsafe impl Sync for Buffer {}
 
 impl PartialEq for Buffer {
     fn eq(&self, rhs: &Self) -> bool {
-        self.inner.handle == rhs.inner.handle
+        std::ptr::eq(&*self.inner, &*rhs.inner)
     }
 }
 
@@ -62,7 +66,7 @@ impl Hash for Buffer {
     where
         H: Hasher,
     {
-        self.inner.handle.hash(hasher)
+        std::ptr::hash(&*self.inner, hasher)
     }
 }
 
@@ -118,6 +122,7 @@ impl Buffer {
     }
 
     pub(super) fn handle(&self) -> vk1_0::Buffer {
+        debug_assert!(!self.inner.handle.is_null());
         self.inner.handle
     }
 }
@@ -236,22 +241,37 @@ impl MappableBuffer {
     }
 }
 
-struct ImageInner {
-    info: ImageInfo,
-    handle: vk1_0::Image,
-    owner: WeakDevice,
-    memory_block: Option<MemoryBlock<vk1_0::DeviceMemory>>,
-    index: Option<usize>,
+#[derive(Clone)]
+enum ImageFlavor {
+    DeviceImage {
+        memory_block: Arc<MemoryBlock<vk1_0::DeviceMemory>>,
+        index: usize,
+    },
+    SwapchainImage {
+        uid: NonZeroU64,
+    },
+}
+
+impl ImageFlavor {
+    fn uid(&self) -> u64 {
+        match *self {
+            ImageFlavor::SwapchainImage { uid } => uid.get(),
+            _ => 0,
+        }
+    }
 }
 
 #[derive(Clone)]
 pub struct Image {
-    inner: Arc<ImageInner>,
+    info: ImageInfo,
+    handle: vk1_0::Image,
+    owner: WeakDevice,
+    flavor: ImageFlavor,
 }
 
 impl PartialEq for Image {
     fn eq(&self, rhs: &Self) -> bool {
-        self.inner.handle == rhs.inner.handle
+        (self.handle, self.flavor.uid()) == (rhs.handle, rhs.flavor.uid())
     }
 }
 
@@ -262,46 +282,70 @@ impl Hash for Image {
     where
         H: Hasher,
     {
-        self.inner.handle.hash(hasher)
+        (self.handle, self.flavor.uid()).hash(hasher)
     }
 }
 
 impl Debug for Image {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         if fmt.alternate() {
-            fmt.debug_struct("Image")
-                .field("info", &self.inner.info)
-                .field("owner", &self.inner.owner)
-                .field("handle", &self.inner.handle)
-                .field("memory_block", &self.inner.memory_block)
-                .field("index", &self.inner.index)
-                .finish()
+            let mut fmt = fmt.debug_struct("Image");
+            fmt.field("info", &self.info)
+                .field("owner", &self.owner)
+                .field("handle", &self.handle);
+
+            match &self.flavor {
+                ImageFlavor::DeviceImage {
+                    memory_block,
+                    index,
+                } => {
+                    fmt.field("memory_block", &**memory_block)
+                        .field("index", index);
+                }
+                _ => {}
+            }
+
+            fmt.finish()
         } else {
-            write!(fmt, "Image({:p})", self.inner.handle)
+            write!(fmt, "Image({:p})", self.handle)
         }
     }
 }
 
 impl Image {
     pub fn info(&self) -> &ImageInfo {
-        &self.inner.info
+        &self.info
     }
 
     pub(super) fn new(
         info: ImageInfo,
         owner: WeakDevice,
         handle: vk1_0::Image,
-        memory_block: Option<MemoryBlock<vk1_0::DeviceMemory>>,
-        index: Option<usize>,
+        memory_block: MemoryBlock<vk1_0::DeviceMemory>,
+        index: usize,
     ) -> Self {
         Image {
-            inner: Arc::new(ImageInner {
-                info,
-                owner,
-                handle,
-                memory_block,
+            info,
+            owner,
+            handle,
+            flavor: ImageFlavor::DeviceImage {
+                memory_block: Arc::new(memory_block),
                 index,
-            }),
+            },
+        }
+    }
+
+    pub(super) fn new_swapchain(
+        info: ImageInfo,
+        owner: WeakDevice,
+        handle: vk1_0::Image,
+        uid: NonZeroU64,
+    ) -> Self {
+        Image {
+            info,
+            owner,
+            handle,
+            flavor: ImageFlavor::SwapchainImage { uid },
         }
     }
 
@@ -309,16 +353,43 @@ impl Image {
         &self,
         owner: &impl PartialEq<WeakDevice>,
     ) -> bool {
-        *owner == self.inner.owner
+        *owner == self.owner
     }
 
     pub(super) fn owner(&self) -> &WeakDevice {
-        &self.inner.owner
+        &self.owner
     }
 
     pub(super) fn handle(&self) -> vk1_0::Image {
-        self.inner.handle
+        debug_assert!(!self.handle.is_null());
+        self.handle
     }
+
+    // pub(super) fn swapchain_acq(&self) {
+    //     match &self.flavor {
+    //         ImageFlavor::SwapchainImage { state } => {
+    //             state.fetch_add(1, Relaxed);
+    //         }
+    //         _ => unreachable!(),
+    //     }
+    // }
+
+    // pub(super) fn swapchain_rel(&self) {
+    //     match &self.flavor {
+    //         ImageFlavor::SwapchainImage { state } => {
+    //             state.fetch_sub(1, Relaxed);
+    //         }
+    //         _ => unreachable!(),
+    //     }
+    // }
+
+    // fn retired(&self) -> bool {
+    //     if let ImageFlavor::SwapchainImage { state } = &self.flavor {
+    //         state.load(Relaxed) == 0
+    //     } else {
+    //         false
+    //     }
+    // }
 }
 
 #[derive(Clone)]
@@ -391,6 +462,7 @@ impl ImageView {
     }
 
     pub(super) fn handle(&self) -> vk1_0::ImageView {
+        debug_assert!(!self.handle.is_null());
         self.handle
     }
 }
@@ -457,6 +529,7 @@ impl Fence {
     }
 
     pub(super) fn handle(&self) -> vk1_0::Fence {
+        debug_assert!(!self.handle.is_null());
         self.handle
     }
 }
@@ -523,6 +596,7 @@ impl Semaphore {
     }
 
     pub(super) fn handle(&self) -> vk1_0::Semaphore {
+        debug_assert!(!self.handle.is_null());
         self.handle
     }
 }
@@ -601,6 +675,7 @@ impl RenderPass {
     }
 
     pub(super) fn handle(&self) -> vk1_0::RenderPass {
+        debug_assert!(!self.handle.is_null());
         self.handle
     }
 }
@@ -674,6 +749,7 @@ impl Sampler {
     }
 
     pub(super) fn handle(&self) -> vk1_0::Sampler {
+        debug_assert!(!self.handle.is_null());
         self.handle
     }
 }
@@ -750,6 +826,7 @@ impl Framebuffer {
     }
 
     pub(super) fn handle(&self) -> vk1_0::Framebuffer {
+        debug_assert!(!self.handle.is_null());
         self.handle
     }
 }
@@ -824,6 +901,7 @@ impl ShaderModule {
     }
 
     pub(super) fn handle(&self) -> vk1_0::ShaderModule {
+        debug_assert!(!self.handle.is_null());
         self.handle
     }
 }
@@ -901,6 +979,7 @@ impl DescriptorSetLayout {
     }
 
     pub(super) fn handle(&self) -> vk1_0::DescriptorSetLayout {
+        debug_assert!(!self.handle.is_null());
         self.handle
     }
 
@@ -983,6 +1062,7 @@ impl DescriptorSet {
     }
 
     pub(super) fn handle(&self) -> vk1_0::DescriptorSet {
+        debug_assert!(!self.handle.is_null());
         self.handle
     }
 }
@@ -1057,6 +1137,7 @@ impl PipelineLayout {
     }
 
     pub(super) fn handle(&self) -> vk1_0::PipelineLayout {
+        debug_assert!(!self.handle.is_null());
         self.handle
     }
 }
@@ -1131,6 +1212,7 @@ impl ComputePipeline {
     }
 
     pub(super) fn handle(&self) -> vk1_0::Pipeline {
+        debug_assert!(!self.handle.is_null());
         self.handle
     }
 }
@@ -1205,6 +1287,7 @@ impl GraphicsPipeline {
     }
 
     pub(super) fn handle(&self) -> vk1_0::Pipeline {
+        debug_assert!(!self.handle.is_null());
         self.handle
     }
 }
@@ -1287,6 +1370,7 @@ impl AccelerationStructure {
     }
 
     pub(super) fn handle(&self) -> vkacc::AccelerationStructureKHR {
+        debug_assert!(!self.handle.is_null());
         self.handle
     }
 }
@@ -1364,6 +1448,7 @@ impl RayTracingPipeline {
     }
 
     pub(super) fn handle(&self) -> vk1_0::Pipeline {
+        debug_assert!(!self.handle.is_null());
         self.handle
     }
 

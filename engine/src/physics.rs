@@ -14,6 +14,8 @@ use {
     },
 };
 
+pub use rapier3d::*;
+
 pub struct Physics {
     pipeline: PhysicsPipeline,
     integration_parameters: IntegrationParameters,
@@ -36,6 +38,12 @@ pub struct PhysicsData {
     pub bodies: RigidBodySet,
     pub colliders: ColliderSet,
     pub joints: JointSet,
+}
+
+impl Default for PhysicsData {
+    fn default() -> Self {
+        PhysicsData::new()
+    }
 }
 
 impl PhysicsData {
@@ -69,15 +77,8 @@ impl Default for Constants {
 
 impl System for Physics {
     fn run(&mut self, ctx: SystemContext<'_>) {
-        let constants = *ctx
-            .resources
-            .entry::<Constants>()
-            .or_insert_with(Constants::new);
-
-        let sets = ctx
-            .resources
-            .entry::<PhysicsData>()
-            .or_insert_with(PhysicsData::new);
+        let constants = *ctx.resources.get_or_else(Constants::new);
+        let sets = ctx.resources.get_or_else(PhysicsData::new);
 
         self.pipeline.step(
             &constants.gravity,

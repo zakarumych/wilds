@@ -4,13 +4,14 @@ use {
         broker::EventBroker,
         clocks::{ClockIndex, Clocks},
         config::{AssetSource, Config},
+        resources::Resources,
     },
     bumpalo::Bump,
     cfg_if::cfg_if,
     eyre::Report,
     flume::{bounded, Receiver, Sender},
     futures::future::TryFutureExt as _,
-    goods::{Asset, AssetDefaultFormat},
+    goods::AssetDefaultFormat,
     hecs::{Entity, World},
     std::{
         cell::Cell,
@@ -20,7 +21,6 @@ use {
         task::{Context, Poll},
         time::Duration,
     },
-    type_map::TypeMap,
     winit::{
         event::Event,
         event_loop::{ControlFlow, EventLoop, EventLoopWindowTarget},
@@ -38,7 +38,7 @@ pub type InputEvents = EventBroker<Event<'static, ()>>;
 pub struct SystemContext<'a> {
     pub input: &'a mut InputEvents,
     pub world: &'a mut World,
-    pub resources: &'a mut TypeMap,
+    pub resources: &'a mut Resources,
     pub bump: &'a Bump,
     pub clocks: ClockIndex,
 }
@@ -59,7 +59,7 @@ where
 /// Root data structure for the game engine.
 pub struct Engine {
     pub world: World,
-    pub resources: TypeMap,
+    pub resources: Resources,
     pub assets: Assets,
     pub input: InputEvents,
     schedule: Vec<Box<dyn System>>,
@@ -72,15 +72,22 @@ pub struct Engine {
 }
 
 impl Engine {
+    pub fn create_entity(&self) -> Entity {
+        self.world.reserve_entity()
+    }
+
     /// Loads asset and enqueue it for spawning.
     /// Retuns `Entity` that will be supplied to `spawn` method after asset is
     /// loaded.
     /// If asset loading fails that `Entity` will be despawned.
-    pub fn load_prefab<P>(&self, key: AssetKey, info: P::Info) -> Entity
+    pub fn load_prefab<P>(&self, entity: Entity, key: AssetKey, info: P::Info)
     where
-        P: Prefab + AssetDefaultFormat<AssetKey> + Clone,
+        P: Prefab,
+        P::Asset: AssetDefaultFormat<AssetKey>,
     {
-        self.load_prefab_with_format(key, info, P::DefaultFormat::default())
+        let format =
+            <P::Asset as AssetDefaultFormat<_>>::DefaultFormat::default();
+        self.load_prefab_with_format::<P, _>(entity, key, info, format)
     }
 
     /// Loads asset and enqueue it for spawning.
@@ -89,31 +96,30 @@ impl Engine {
     /// If asset loading fails that `Entity` will be despawned.
     pub fn load_prefab_with_format<P, F>(
         &self,
+        entity: Entity,
         key: AssetKey,
         info: P::Info,
         format: F,
-    ) -> Entity
-    where
-        P: Prefab + Asset + Clone,
-        F: goods::Format<P, AssetKey>,
+    ) where
+        P: Prefab,
+        F: goods::Format<P::Asset, AssetKey>,
     {
         tracing::info!("Loading prefab '{}'", key);
 
         let handle = self.assets.load_with_format(key.clone(), format);
-        self.make_prefab(key, info, handle.map_err(Report::from))
+        self.make_prefab::<P, _>(entity, key, info, handle.map_err(Into::into))
     }
 
     pub fn make_prefab<P, F>(
         &self,
+        entity: Entity,
         key: AssetKey,
         info: P::Info,
         prefab: F,
-    ) -> Entity
-    where
-        P: Prefab + Send + 'static,
-        F: Future<Output = Result<P, Report>> + Send + 'static,
+    ) where
+        P: Prefab,
+        F: Future<Output = Result<P::Asset, Report>> + Send + 'static,
     {
-        let entity = self.world.reserve_entity();
         let send_make_prefabs = self.send_make_prefabs.clone();
 
         smol::spawn(async move {
@@ -122,14 +128,12 @@ impl Engine {
             tracing::error!("Prefab loaded");
 
             let loaded = match prefab {
-                Ok(prefab) => MakePrefab::spawn(key, prefab, info, entity),
+                Ok(prefab) => MakePrefab::spawn::<P>(key, prefab, info, entity),
                 Err(err) => MakePrefab::Error(key, err, entity),
             };
             let _ = send_make_prefabs.send(loaded);
         })
         .detach();
-
-        entity
     }
 
     fn build_prefabs(&mut self) {
@@ -241,13 +245,11 @@ impl Engine {
     /// Instead it calls provided closure with create engine instance
     /// and drive it to completion.
     /// Along with polling winit's event-loop for window events.
-    pub fn run<F, A>(closure: F) -> Result<(), Report>
+    pub fn run<F, A>(config: Config, closure: F) -> Result<(), Report>
     where
         F: FnOnce(Self) -> A,
         A: Future<Output = Result<(), Report>> + 'static,
     {
-        let config = smol::block_on(Self::load_config())?;
-
         let registry = config
             .sources
             .iter()
@@ -288,7 +290,7 @@ impl Engine {
             schedule: Vec::new(),
             fixed_schedule: Vec::new(),
             world: World::new(),
-            resources: TypeMap::new(),
+            resources: Resources::new(),
             input: EventBroker::new(),
             shared: shared.clone(),
             recv_make_prefabs,
@@ -398,19 +400,24 @@ struct Shared {
 }
 
 enum MakePrefab {
-    Spawn(AssetKey, Box<dyn FnOnce(&mut World, &mut TypeMap) + Send>),
+    Spawn(AssetKey, Box<dyn FnOnce(&mut World, &mut Resources) + Send>),
     Error(AssetKey, Report, Entity),
 }
 
 impl MakePrefab {
-    fn spawn<P>(key: AssetKey, prefab: P, info: P::Info, entity: Entity) -> Self
+    fn spawn<P>(
+        key: AssetKey,
+        asset: P::Asset,
+        info: P::Info,
+        entity: Entity,
+    ) -> Self
     where
-        P: Prefab + Send + 'static,
+        P: Prefab,
     {
         MakePrefab::Spawn(
             key,
             Box::new(move |world, resources| {
-                prefab.spawn(info, world, resources, entity)
+                P::spawn(asset, info, world, resources, entity)
             }),
         )
     }
