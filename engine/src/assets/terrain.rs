@@ -12,7 +12,6 @@ use {
             UV,
         },
         resources::Resources,
-        scene::Global3,
     },
     futures::future::BoxFuture,
     hecs::{Entity, World},
@@ -51,7 +50,11 @@ pub fn create_terrain_shape(
 
     HeightField::new(
         matrix,
-        na::Vector3::new(width as f32 * scale, 1.0, depth as f32 * scale),
+        na::Vector3::new(
+            (width - 1) as f32 * scale,
+            1.0,
+            (depth - 1) as f32 * scale,
+        ),
     )
 }
 
@@ -95,8 +98,8 @@ pub fn create_terrain_mesh(
 
     let mut data: Vec<u8> = Vec::with_capacity(total_size);
 
-    let xoff = width as f32 * 0.5;
-    let zoff = depth as f32 * 0.5;
+    let xoff = (width as f32 - 1.0) * 0.5;
+    let zoff = (depth as f32 - 1.0) * 0.5;
 
     for z in 0..depth {
         for x in 0..width {
@@ -140,13 +143,13 @@ pub fn create_terrain_mesh(
 
     for z in 1..depth {
         for x in 1..width {
+            let p00 = (x - 1) + (z - 1) * width;
+            let p01 = (x - 1) + (z - 0) * width;
+            let p10 = (x - 0) + (z - 1) * width;
+            let p11 = (x - 0) + (z - 0) * width;
+
             data.extend_from_slice(bytemuck::cast_slice::<u32, _>(&[
-                (x - 1) + (z - 1) * width,
-                (x - 1) + (z - 0) * width,
-                (x - 0) + (z - 0) * width,
-                (x - 0) + (z - 0) * width,
-                (x - 0) + (z - 1) * width,
-                (x - 1) + (z - 1) * width,
+                p00, p10, p01, p10, p11, p01,
             ]));
         }
     }
