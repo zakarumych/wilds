@@ -18,6 +18,8 @@ struct Instance {
     uint mesh;
     uint albedo_sampler;
     vec4 albedo_factor;
+    uint emissive_sampler;
+    vec3 emissive_factor;
     uint normals_sampler;
     float normals_factor;
     uint anim;
@@ -46,8 +48,7 @@ struct Camera {
 layout(binding = 1, set = 0) buffer BlueNoise { vec4 blue_noise[]; };
 layout(binding = 2, set = 0, scalar) buffer Indices { uint i[]; } indices[];
 layout(binding = 3, set = 0, scalar) buffer Vertices { Vertex v[]; } vertices[];
-layout(binding = 4, set = 0) uniform sampler2D albedo[];
-layout(binding = 5, set = 0) uniform sampler2D normal[];
+layout(binding = 4, set = 0) uniform sampler2D textures[];
 
 layout(binding = 0, set = 1, std140) uniform Globals {
     Camera cam;
@@ -60,7 +61,7 @@ layout(binding = 0, set = 1, std140) uniform Globals {
     uint diffuse_rays;
     vec3 probes_dimensions;
     float pad1;
-    vec3 probes_offset;
+    vec3 probes_offset; 
     float pad2;
     uvec3 probes_extent;
     float pad3;

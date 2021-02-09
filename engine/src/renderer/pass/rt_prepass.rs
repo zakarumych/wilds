@@ -51,8 +51,7 @@ pub struct RtPrepass {
     per_frame_sets: [DescriptorSet; 2],
 
     meshes: SparseDescriptors<Mesh>,
-    albedo: SparseDescriptors<Texture>,
-    normal: SparseDescriptors<Texture>,
+    textures: SparseDescriptors<Texture>,
 
     output_albedo_image: Image,
     output_normal_depth_image: Image,
@@ -68,6 +67,8 @@ struct ShaderInstance {
     mesh: u32,
     albedo_sampler: u32,
     albedo_factor: [f32; 4],
+    emissive_sampler: u32,
+    emissive_factor: [f32; 3],
     normal_sampler: u32,
     normal_factor: f32,
     anim: u32,
@@ -140,17 +141,10 @@ impl RtPrepass {
                         stages: ShaderStageFlags::CLOSEST_HIT,
                         flags: DescriptorBindingFlags::PARTIALLY_BOUND | DescriptorBindingFlags::UPDATE_UNUSED_WHILE_PENDING,
                     },
-                    DescriptorSetLayoutBinding {
-                        binding: 5,
-                        ty: DescriptorType::CombinedImageSampler,
-                        count: MAX_INSTANCE_COUNT.into(),
-                        stages: ShaderStageFlags::CLOSEST_HIT,
-                        flags: DescriptorBindingFlags::PARTIALLY_BOUND | DescriptorBindingFlags::UPDATE_UNUSED_WHILE_PENDING,
-                    },
                     // G-Buffer
                     // Albedo
                     DescriptorSetLayoutBinding {
-                        binding: 6,
+                        binding: 5,
                         ty: DescriptorType::StorageImage,
                         count: 1,
                         stages: ShaderStageFlags::RAYGEN,
@@ -158,7 +152,7 @@ impl RtPrepass {
                     },
                     // normal-depth
                     DescriptorSetLayoutBinding {
-                        binding: 7,
+                        binding: 6,
                         ty: DescriptorType::StorageImage,
                         count: 1,
                         stages: ShaderStageFlags::RAYGEN,
@@ -166,7 +160,7 @@ impl RtPrepass {
                     },
                     // emissive
                     DescriptorSetLayoutBinding {
-                        binding: 8,
+                        binding: 7,
                         ty: DescriptorType::StorageImage,
                         count: 1,
                         stages: ShaderStageFlags::RAYGEN,
@@ -174,7 +168,7 @@ impl RtPrepass {
                     },
                     // direct
                     DescriptorSetLayoutBinding {
-                        binding: 9,
+                        binding: 8,
                         ty: DescriptorType::StorageImage,
                         count: 1,
                         stages: ShaderStageFlags::RAYGEN,
@@ -182,7 +176,7 @@ impl RtPrepass {
                     },
                     // diffuse
                     DescriptorSetLayoutBinding {
-                        binding: 10,
+                        binding: 9,
                         ty: DescriptorType::StorageImage,
                         count: 1,
                         stages: ShaderStageFlags::RAYGEN,
@@ -485,7 +479,7 @@ impl RtPrepass {
                 },
                 WriteDescriptorSet {
                     set: &set,
-                    binding: 6,
+                    binding: 5,
                     element: 0,
                     descriptors: Descriptors::StorageImage(&[
                         (output_albedo_view.clone(), Layout::General),
@@ -574,8 +568,7 @@ impl RtPrepass {
             output_direct_image,
             output_diffuse_image,
             meshes: SparseDescriptors::new(),
-            albedo: SparseDescriptors::new(),
-            normal: SparseDescriptors::new(),
+            textures: SparseDescriptors::new(),
         })
     }
 }
@@ -602,8 +595,8 @@ impl<'a> Pass<'a> for RtPrepass {
 
         let findex = (frame & 1) as u32;
 
-        let storage_buffers = BumpaloCellList::new();
-        let combined_image_samples = BumpaloCellList::new();
+        let storage_buffers = BumpaloCellList::new_in(bump);
+        let combined_image_samples = BumpaloCellList::new_in(bump);
         let bind_ray_tracing_descriptor_sets_array;
 
         // https://microsoft.github.io/DirectX-Specs/d3d/Raytracing.html#general-tips-for-building-acceleration-structures
@@ -636,12 +629,10 @@ impl<'a> Pass<'a> for RtPrepass {
                 let blas_address =
                     ctx.get_acceleration_structure_device_address(blas);
 
-                // let m = match renderable.transform {
-                //     Some(t) => global.to_homogeneous() * t,
-                //     None => global.to_homogeneous(),
-                // };
-
-                let m = global.to_homogeneous();
+                let m = match renderable.transform {
+                    Some(t) => global.to_homogeneous() * t,
+                    None => global.to_homogeneous(),
+                };
 
                 let (mut mesh_index, new) =
                     self.meshes.index(renderable.mesh.clone());
@@ -672,15 +663,17 @@ impl<'a> Pass<'a> for RtPrepass {
 
                     // FIXME: Leak
 
-                    let indices_tuple = storage_buffers.push_in(
-                        (indices_buffer, indices_offset, indices_size),
-                        bump,
-                    );
+                    let indices_tuple = storage_buffers.push((
+                        indices_buffer,
+                        indices_offset,
+                        indices_size,
+                    ));
 
-                    let vectors_tuple = storage_buffers.push_in(
-                        (vectors_buffer, vectors_offset, vectors_size),
-                        bump,
-                    );
+                    let vectors_tuple = storage_buffers.push((
+                        vectors_buffer,
+                        vectors_offset,
+                        vectors_size,
+                    ));
 
                     let indices_desc = Descriptors::StorageBuffer(
                         std::slice::from_ref(indices_tuple),
@@ -759,73 +752,36 @@ impl<'a> Pass<'a> for RtPrepass {
                     false
                 };
 
-                let albedo_index = if let Some(albedo) =
-                    &renderable.material.albedo
-                {
-                    let (albedo_index, new) = self.albedo.index(albedo.clone());
+                let albedo_sampler = texture_index(
+                    &renderable.material.albedo,
+                    &mut self.textures,
+                    &combined_image_samples,
+                    &mut writes,
+                    &self.set,
+                );
 
-                    if new {
-                        let descriptors = Descriptors::CombinedImageSampler(
-                            std::slice::from_ref(
-                                combined_image_samples.push_in(
-                                    (
-                                        albedo.image.clone(),
-                                        Layout::General,
-                                        albedo.sampler.clone(),
-                                    ),
-                                    bump,
-                                ),
-                            ),
-                        );
-                        writes.push(WriteDescriptorSet {
-                            set: &self.set,
-                            binding: 4,
-                            element: albedo_index,
-                            descriptors,
-                        });
-                    }
+                let emissive_sampler = texture_index(
+                    &renderable.material.emissive,
+                    &mut self.textures,
+                    &combined_image_samples,
+                    &mut writes,
+                    &self.set,
+                );
 
-                    albedo_index + 1
-                } else {
-                    0
-                };
-
-                let normal_index = if let Some(normal) =
-                    &renderable.material.normal
-                {
-                    let (normal_index, new) = self.normal.index(normal.clone());
-
-                    if new {
-                        let descriptors = Descriptors::CombinedImageSampler(
-                            std::slice::from_ref(
-                                combined_image_samples.push_in(
-                                    (
-                                        normal.image.clone(),
-                                        Layout::General,
-                                        normal.sampler.clone(),
-                                    ),
-                                    bump,
-                                ),
-                            ),
-                        );
-                        writes.push(WriteDescriptorSet {
-                            set: &self.set,
-                            binding: 5,
-                            element: normal_index,
-                            descriptors,
-                        });
-                    }
-
-                    normal_index + 1
-                } else {
-                    0
-                };
+                let normal_sampler = texture_index(
+                    &renderable.material.normal,
+                    &mut self.textures,
+                    &combined_image_samples,
+                    &mut writes,
+                    &self.set,
+                );
 
                 instances.push(ShaderInstance {
                     transform: m,
                     mesh: mesh_index,
-                    albedo_sampler: albedo_index,
-                    normal_sampler: normal_index,
+                    albedo_sampler,
+                    emissive_sampler,
+                    normal_sampler,
                     albedo_factor: {
                         let [r, g, b, a] = renderable.material.albedo_factor;
                         [
@@ -834,6 +790,10 @@ impl<'a> Pass<'a> for RtPrepass {
                             b.into_inner(),
                             a.into_inner(),
                         ]
+                    },
+                    emissive_factor: {
+                        let [r, g, b] = renderable.material.emissive_factor;
+                        [r.into_inner(), g.into_inner(), b.into_inner()]
                     },
                     normal_factor: renderable
                         .material
@@ -1204,4 +1164,36 @@ const fn globals_and_instances_align() -> u64 {
 
 fn globals_and_instances_size() -> u64 {
     acc_instances_end(1)
+}
+
+fn texture_index<'a>(
+    texture: &Option<Texture>,
+    sparce: &mut SparseDescriptors<Texture>,
+    stack: &'a BumpaloCellList<(ImageView, Layout, Sampler)>,
+    writes: &mut BVec<WriteDescriptorSet<'a>>,
+    set: &'a DescriptorSet,
+) -> u32 {
+    if let Some(texture) = texture {
+        let (index, new) = sparce.index(texture.clone());
+
+        if new {
+            let descriptors = Descriptors::CombinedImageSampler(
+                std::slice::from_ref(stack.push((
+                    texture.image.clone(),
+                    Layout::General,
+                    texture.sampler.clone(),
+                ))),
+            );
+            writes.push(WriteDescriptorSet {
+                set,
+                binding: 4,
+                element: index,
+                descriptors,
+            });
+        }
+
+        index
+    } else {
+        !0
+    }
 }

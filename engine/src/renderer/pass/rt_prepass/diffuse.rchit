@@ -82,4 +82,5 @@ void main() {
 
     vec3 albedo = sample_albedo(uv).xyz;
     prd.radiation += radiation * albedo;
+    prd.radiation += sample_emissive(uv);
 }

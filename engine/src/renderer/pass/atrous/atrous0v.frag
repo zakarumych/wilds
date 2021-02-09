@@ -6,7 +6,7 @@ layout(binding = 1, set = 0) uniform sampler2D unfiltered;
 
 layout(location = 0) out vec4 output_image;
 
-const int h = 8;
+const int h = 2;
 const int w = 0;
 const int l = 1;
 

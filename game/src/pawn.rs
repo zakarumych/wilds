@@ -5,8 +5,9 @@ use {
     std::sync::Arc,
     wilds::{
         assets::{Prefab, SyncAsset},
+        engine::{System, SystemContext},
         physics::{
-            dynamics::RigidBodyBuilder,
+            dynamics::{RigidBodyBuilder, RigidBodyHandle},
             geometry::{Capsule, ColliderBuilder, SharedShape},
             PhysicsData,
         },
@@ -20,8 +21,20 @@ use {
     },
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Pawn;
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+pub struct Pawn {
+    dir: na::Vector3<f32>,
+    force: na::Vector3<f32>,
+}
+
+impl Pawn {
+    pub fn new() -> Self {
+        Pawn {
+            dir: na::Vector3::new(1.0, 0.0, 1.0),
+            force: na::Vector3::default(),
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct PawnAsset {
@@ -36,8 +49,8 @@ impl PawnAsset {
         ctx: &mut Context,
     ) -> Result<Self, OutOfMemory> {
         let capsule = Capsule::new(
-            na::Point3::new(0.0, 0.0, radius),
-            na::Point3::new(0.0, 0.0, height - radius),
+            na::Point3::new(0.0, radius, 0.0),
+            na::Point3::new(0.0, height - radius, 0.0),
             radius,
         );
 
@@ -90,30 +103,30 @@ pub struct PawnRepr {
 
 impl SyncAsset for PawnAsset {
     type Context = Context;
-    type Error = OutOfMemory;
     type Repr = PawnRepr;
 
-    fn build(repr: PawnRepr, ctx: &mut Context) -> Result<Self, OutOfMemory> {
-        PawnAsset::new(repr.diameter, repr.height, ctx)
+    fn build(repr: PawnRepr, ctx: &mut Context) -> eyre::Result<Self> {
+        PawnAsset::new(repr.diameter, repr.height, ctx).map_err(Into::into)
     }
 }
 
 impl Prefab for Pawn {
     type Asset = PawnAsset;
-    type Info = na::Isometry3<f32>;
 
     fn spawn(
         asset: PawnAsset,
-        iso: na::Isometry3<f32>,
         world: &mut World,
         resources: &mut Resources,
         entity: Entity,
     ) {
         let sets = resources.get_or_else(PhysicsData::new);
 
-        let body = sets
-            .bodies
-            .insert(RigidBodyBuilder::new_dynamic().lock_rotations().build());
+        let body = sets.bodies.insert(
+            RigidBodyBuilder::new_dynamic()
+                // .restrict_rotations(false, true, false)
+                .lock_rotations()
+                .build(),
+        );
 
         let collider = sets.colliders.insert(
             ColliderBuilder::new(SharedShape(asset.shape)).build(),
@@ -127,13 +140,51 @@ impl Prefab for Pawn {
                 Renderable {
                     mesh: asset.mesh,
                     material: Material::color([0.7, 0.5, 0.3, 1.0]),
-                    // transform: None,
+                    transform: None,
                 },
                 body,
                 collider,
-                Global3::from_iso(iso),
-                Pawn,
+                Pawn::new(),
             ),
         );
+    }
+}
+
+pub struct PawnSystem;
+
+impl System for PawnSystem {
+    fn name(&self) -> &str {
+        "Pawn"
+    }
+
+    fn run(&mut self, ctx: SystemContext<'_>) {
+        let dt = ctx.clocks.delta.as_secs_f32();
+        let sets = ctx.resources.get_or_else(PhysicsData::new);
+        let mut query =
+            ctx.world.query::<(&RigidBodyHandle, &mut Pawn, &Global3)>();
+
+        for (_, (&body, pawn, global)) in query.iter() {
+            if global.iso.translation.vector.magnitude() > 10.0 {
+                pawn.dir = (-global.iso.translation.vector).normalize();
+            } else if rand::random::<f32>() > 0.9f32.powf(dt) {
+                pawn.dir = na::Vector3::new(
+                    rand::random::<f32>() - 0.5,
+                    rand::random::<f32>() - 0.5,
+                    rand::random::<f32>() - 0.5,
+                );
+                tracing::warn!("Change dir to '{}'", pawn.dir);
+            }
+
+            let body = sets.bodies.get_mut(body).unwrap();
+            let linvel = body.linvel();
+            pawn.force += (pawn.dir - *linvel)
+                .component_mul(&na::Vector3::new(1.0, 0.0, 1.0));
+
+            if pawn.force.magnitude() > 1.0 {
+                pawn.force /= pawn.force.magnitude();
+            }
+
+            body.apply_force(pawn.force, true)
+        }
     }
 }

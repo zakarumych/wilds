@@ -68,7 +68,7 @@ pub enum SamplerAddressMode {
 
 impl Default for SamplerAddressMode {
     fn default() -> Self {
-        SamplerAddressMode::Repeat
+        SamplerAddressMode::ClampToEdge
     }
 }
 
@@ -112,7 +112,7 @@ pub struct SamplerInfo {
     pub compare_op: Option<CompareOp>,
     #[cfg_attr(feature = "serde-1", serde(default))]
     pub min_lod: OrderedFloat<f32>,
-    #[cfg_attr(feature = "serde-1", serde(default = "defaults::max_lod"))]
+    #[cfg_attr(feature = "serde-1", serde(default))]
     pub max_lod: OrderedFloat<f32>,
     #[cfg_attr(feature = "serde-1", serde(default))]
     pub border_color: BorderColor,
@@ -126,14 +126,14 @@ impl SamplerInfo {
             mag_filter: Filter::Nearest,
             min_filter: Filter::Nearest,
             mipmap_mode: MipmapMode::Nearest,
-            address_mode_u: SamplerAddressMode::Repeat,
-            address_mode_v: SamplerAddressMode::Repeat,
-            address_mode_w: SamplerAddressMode::Repeat,
+            address_mode_u: SamplerAddressMode::ClampToEdge,
+            address_mode_v: SamplerAddressMode::ClampToEdge,
+            address_mode_w: SamplerAddressMode::ClampToEdge,
             mip_lod_bias: OrderedFloat(0.0),
             max_anisotropy: None,
             compare_op: None,
             min_lod: OrderedFloat(0.0),
-            max_lod: OrderedFloat(1000.0),
+            max_lod: OrderedFloat(0.0),
             border_color: BorderColor::FloatTransparentBlack,
             unnormalized_coordinates: false,
         }

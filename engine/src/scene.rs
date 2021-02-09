@@ -7,13 +7,19 @@ use {
     fastbitset::BumpBitSet,
     hecs::{Entity, EntityRef, World},
     nalgebra as na,
+    std::fmt::{self, Display},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Local3 {
     pub parent: Entity,
     pub iso: na::Isometry3<f32>,
-    pub scale: na::Vector3<f32>,
+}
+
+impl Display for Local3 {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(fmt, "{}@{}", self.parent.to_bits(), self.iso)
+    }
 }
 
 impl Local3 {
@@ -21,23 +27,17 @@ impl Local3 {
         Local3 {
             parent,
             iso: na::Isometry3::identity(),
-            scale: na::Vector3::new(1.0, 1.0, 1.0),
         }
     }
 
     pub fn from_iso(parent: Entity, iso: na::Isometry3<f32>) -> Self {
-        Local3 {
-            parent,
-            iso,
-            scale: na::Vector3::new(1.0, 1.0, 1.0),
-        }
+        Local3 { parent, iso }
     }
 
     pub fn from_translation(parent: Entity, tr: na::Translation3<f32>) -> Self {
         Local3 {
             parent,
             iso: na::Isometry3::from_parts(tr, na::UnitQuaternion::identity()),
-            scale: na::Vector3::new(1.0, 1.0, 1.0),
         }
     }
 
@@ -48,104 +48,145 @@ impl Local3 {
                 na::Translation3::new(0., 0., 0.),
                 rot,
             ),
-            scale: na::Vector3::new(1.0, 1.0, 1.0),
         }
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(transparent)]
 pub struct Global3 {
     pub iso: na::Isometry3<f32>,
-    pub skew: na::Matrix3<f32>,
+    // pub skew: na::Matrix3<f32>,
+}
+
+impl Display for Global3 {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Display::fmt(&self.iso, fmt)
+    }
 }
 
 impl Global3 {
     pub fn identity() -> Self {
         Global3 {
             iso: na::Isometry3::identity(),
-            skew: na::Matrix3::identity(),
+            // skew: na::Matrix3::identity(),
         }
     }
 
     pub fn from_iso(iso: na::Isometry3<f32>) -> Self {
         Global3 {
             iso,
-            skew: na::Matrix3::identity(),
+            // skew: na::Matrix3::identity(),
         }
     }
 
-    pub fn from_scale(scale: f32) -> Self {
+    // pub fn from_scale(scale: f32) -> Self {
+    //     Global3 {
+    //         iso: na::Isometry3::identity(),
+    //         skew: na::Matrix3::from_diagonal(&na::Vector3::new(
+    //             scale, scale, scale,
+    //         )),
+    //     }
+    // }
+
+    // pub fn from_iso_scale(iso: na::Isometry3<f32>, scale: f32) -> Self {
+    //     Global3 {
+    //         iso,
+    //         skew: na::Matrix3::from_diagonal(&na::Vector3::new(
+    //             scale, scale, scale,
+    //         )),
+    //     }
+    // }
+
+    pub fn append_iso(&self, iso: &na::Isometry3<f32>) -> Self {
+        let iso = self.iso * iso;
         Global3 {
-            iso: na::Isometry3::identity(),
-            skew: na::Matrix3::from_diagonal(&na::Vector3::new(
-                scale, scale, scale,
-            )),
+            iso,
+            // skew: self.skew,
         }
     }
 
-    pub fn from_nonuniform_scale(scale: na::Vector3<f32>) -> Self {
-        Global3 {
-            iso: na::Isometry3::identity(),
-            skew: na::Matrix3::from_diagonal(&scale),
-        }
-    }
+    // pub fn append_scale(&self, scale: &na::Vector3<f32>) -> Self {
+    //     let total =
+    //         self.to_homogeneous() * na::Matrix4::new_nonuniform_scaling(&scale);
+    //     let rotation = self.iso.rotation;
+    //     let inv_rotation = rotation.inverse().to_rotation_matrix();
+    //     let translation = total.column(3).xyz();
+    //     let rotskew = total.remove_column(3).remove_row(3);
+    //     let skew = inv_rotation * rotskew;
 
-    pub fn append_iso_scale(
-        &self,
-        iso: &na::Isometry3<f32>,
-        scale: &na::Vector3<f32>,
-    ) -> Self {
-        let total = self.to_homogeneous()
-            * iso.to_homogeneous()
-            * na::Matrix4::new_nonuniform_scaling(&scale);
-        let rotation = self.iso.rotation * iso.rotation;
-        let inv_rotation = rotation.inverse().to_rotation_matrix();
-        let translation = total.column(3).xyz();
-        let rotskew = total.remove_column(3).remove_row(3);
-        let skew = inv_rotation * rotskew;
+    //     Global3 {
+    //         iso: na::Isometry3 {
+    //             translation: na::Translation3 {
+    //                 vector: translation,
+    //             },
+    //             rotation,
+    //         },
+    //         // skew,
+    //     }
+    // }
 
-        Global3 {
-            iso: na::Isometry3 {
-                translation: na::Translation3 {
-                    vector: translation,
-                },
-                rotation,
-            },
-            skew,
-        }
-    }
+    // pub fn append_iso_scale(
+    //     &self,
+    //     iso: &na::Isometry3<f32>,
+    //     scale: &na::Vector3<f32>,
+    // ) -> Self {
+    //     let total = self.to_homogeneous()
+    //         * iso.to_homogeneous()
+    //         * na::Matrix4::new_nonuniform_scaling(&scale);
+    //     let rotation = self.iso.rotation * iso.rotation;
+    //     let inv_rotation = rotation.inverse().to_rotation_matrix();
+    //     let translation = total.column(3).xyz();
+    //     let rotskew = total.remove_column(3).remove_row(3);
+    //     let skew = inv_rotation * rotskew;
+
+    //     Global3 {
+    //         iso: na::Isometry3 {
+    //             translation: na::Translation3 {
+    //                 vector: translation,
+    //             },
+    //             rotation,
+    //         },
+    //         // skew,
+    //     }
+    // }
 
     pub fn append_local(&self, local: &Local3) -> Self {
-        self.append_iso_scale(&local.iso, &local.scale)
+        self.append_iso(&local.iso)
     }
 
-    pub fn append_global(&self, global: &Global3) -> Self {
-        let total = self.to_homogeneous() * global.to_homogeneous();
-        let rotation = self.iso.rotation * global.iso.rotation;
-        let inv_rotation = rotation.inverse().to_rotation_matrix();
-        let translation = total.column(3).xyz();
-        let rotskew = total.remove_column(3).remove_row(3);
-        let skew = inv_rotation * rotskew;
+    // pub fn append_global(&self, global: &Global3) -> Self {
+    //     let total = self.to_homogeneous() * global.to_homogeneous();
+    //     let rotation = self.iso.rotation * global.iso.rotation;
+    //     let inv_rotation = rotation.inverse().to_rotation_matrix();
+    //     let translation = total.column(3).xyz();
+    //     let rotskew = total.remove_column(3).remove_row(3);
+    //     let skew = inv_rotation * rotskew;
 
-        Global3 {
-            iso: na::Isometry3 {
-                translation: na::Translation3 {
-                    vector: translation,
-                },
-                rotation,
-            },
-            skew,
-        }
-    }
+    //     Global3 {
+    //         iso: na::Isometry3 {
+    //             translation: na::Translation3 {
+    //                 vector: translation,
+    //             },
+    //             rotation,
+    //         },
+    //         skew,
+    //     }
+    // }
 
     pub fn to_homogeneous(&self) -> na::Matrix4<f32> {
-        self.iso.to_homogeneous() * self.skew.to_homogeneous()
+        self.iso.to_homogeneous()
+        // * self.skew.to_homogeneous()
     }
 }
 
 pub struct SceneSystem;
 
 impl System for SceneSystem {
+    fn name(&self) -> &str {
+        "Scene"
+    }
+
     fn run(&mut self, ctx: SystemContext<'_>) {
         let mut updated = BumpBitSet::new();
         let mut despawn = BVec::new_in(ctx.bump);

@@ -109,7 +109,11 @@ pub fn load_gltf_primitive(
         None => Material::new(),
     };
 
-    Ok(Renderable { mesh, material })
+    Ok(Renderable {
+        mesh,
+        material,
+        transform: None,
+    })
 }
 
 enum IndicesAux {

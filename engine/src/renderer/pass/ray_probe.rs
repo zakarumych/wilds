@@ -144,23 +144,6 @@ impl RayProbe {
                         stages: ShaderStageFlags::CLOSEST_HIT,
                         flags: DescriptorBindingFlags::PARTIALLY_BOUND | DescriptorBindingFlags::UPDATE_UNUSED_WHILE_PENDING,
                     },
-                    DescriptorSetLayoutBinding {
-                        binding: 5,
-                        ty: DescriptorType::CombinedImageSampler,
-                        count: MAX_INSTANCE_COUNT.into(),
-                        stages: ShaderStageFlags::CLOSEST_HIT,
-                        flags: DescriptorBindingFlags::PARTIALLY_BOUND | DescriptorBindingFlags::UPDATE_UNUSED_WHILE_PENDING,
-                    },
-                    // Blue noise
-                    DescriptorSetLayoutBinding {
-                        binding: 6,
-                        ty: DescriptorType::StorageBuffer,
-                        count: 1,
-                        stages: ShaderStageFlags::RAYGEN
-                            | ShaderStageFlags::CLOSEST_HIT
-                            | ShaderStageFlags::COMPUTE,
-                        flags: DescriptorBindingFlags::empty(),
-                    },
                 ],
             })?;
 
@@ -549,7 +532,7 @@ impl<'a> Pass<'a> for RayProbe {
         let mut instances = BVec::new_in(bump);
         let mut acc_instances = BVec::new_in(bump);
         let mut anim_vertices_descriptors = BVec::new_in(bump);
-        let storage_images = BumpaloCellList::new();
+        let storage_images = BumpaloCellList::new_in(bump);
         let bind_descriptor_sets;
 
         let mut writes = BVec::new_in(bump);
@@ -570,12 +553,10 @@ impl<'a> Pass<'a> for RayProbe {
                 let blas_address =
                     ctx.get_acceleration_structure_device_address(blas);
 
-                // let m = match renderable.transform {
-                //     Some(t) => global.to_homogeneous() * t,
-                //     None => global.to_homogeneous(),
-                // };
-
-                let m = global.to_homogeneous();
+                let m = match renderable.transform {
+                    Some(t) => global.to_homogeneous() * t,
+                    None => global.to_homogeneous(),
+                };
 
                 let (mut mesh_index, new) =
                     self.meshes.index(renderable.mesh.clone());
@@ -702,9 +683,9 @@ impl<'a> Pass<'a> for RayProbe {
                         });
                     }
 
-                    albedo_index + 1
+                    albedo_index
                 } else {
-                    0
+                    !0
                 };
 
                 let normal_index = if let Some(normal) =
@@ -721,15 +702,15 @@ impl<'a> Pass<'a> for RayProbe {
                             )]));
                         writes.push(WriteDescriptorSet {
                             set: &self.set,
-                            binding: 5,
+                            binding: 4,
                             element: normal_index,
                             descriptors,
                         });
                     }
 
-                    normal_index + 1
+                    normal_index
                 } else {
-                    0
+                    !0
                 };
 
                 instances.push(ShaderInstance {
@@ -851,8 +832,7 @@ impl<'a> Pass<'a> for RayProbe {
                 binding: 5,
                 element: 0,
                 descriptors: Descriptors::StorageImage(std::slice::from_ref(
-                    storage_images
-                        .push_in((probes_data.clone(), Layout::General), bump),
+                    storage_images.push((probes_data.clone(), Layout::General)),
                 )),
             });
         }
@@ -864,10 +844,8 @@ impl<'a> Pass<'a> for RayProbe {
                 binding: 4,
                 element: 0,
                 descriptors: Descriptors::StorageImage(std::slice::from_ref(
-                    storage_images.push_in(
-                        (probes_compiled.clone(), Layout::General),
-                        bump,
-                    ),
+                    storage_images
+                        .push((probes_compiled.clone(), Layout::General)),
                 )),
             });
         }
@@ -903,7 +881,7 @@ impl<'a> Pass<'a> for RayProbe {
                 element: 0,
                 descriptors: Descriptors::StorageImage(std::slice::from_ref(
                     storage_images
-                        .push_in((output_image.clone(), Layout::General), bump),
+                        .push((output_image.clone(), Layout::General)),
                 )),
             });
             self.output_bound[findex as usize] = true;

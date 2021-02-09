@@ -1,9 +1,12 @@
 use {
     super::Camera,
-    crate::engine::{System, SystemContext},
+    crate::{
+        engine::{System, SystemContext},
+        scene::Global3,
+    },
     hecs::Entity,
     nalgebra as na,
-    std::f32::consts::FRAC_PI_2,
+    std::f32::consts::{FRAC_PI_2, PI, TAU},
     winit::event::{DeviceEvent, ElementState, Event, VirtualKeyCode},
 };
 
@@ -27,10 +30,10 @@ bitflags::bitflags! {
 /// System to fly camera freely.
 pub struct FollowingCameraSystem {
     pitch: f32,
-    yaw: f32,
+    roll: f32,
     distance: f32,
     pitch_factor: f32,
-    yaw_factor: f32,
+    roll_factor: f32,
     speed: f32,
     direction: Direction,
 }
@@ -39,18 +42,18 @@ impl FollowingCameraSystem {
     pub fn new() -> Self {
         FollowingCameraSystem {
             pitch: FRAC_PI_2 / 2.0,
-            yaw: FRAC_PI_2 / 2.0,
+            roll: 0.0,
             distance: 5.0,
             pitch_factor: 1.0,
-            yaw_factor: 1.0,
+            roll_factor: 1.0,
             speed: 1.0,
             direction: Direction::empty(),
         }
     }
 
-    pub fn with_factor(mut self, pitch: f32, yaw: f32) -> Self {
+    pub fn with_factor(mut self, pitch: f32, roll: f32) -> Self {
         self.pitch_factor = pitch;
-        self.yaw_factor = yaw;
+        self.roll_factor = roll;
         self
     }
 
@@ -61,6 +64,10 @@ impl FollowingCameraSystem {
 }
 
 impl System for FollowingCameraSystem {
+    fn name(&self) -> &str {
+        "Following camera"
+    }
+
     fn run(&mut self, ctx: SystemContext<'_>) {
         let world = ctx.world;
         let delta = ctx.clocks.delta.as_secs_f32();
@@ -68,21 +75,20 @@ impl System for FollowingCameraSystem {
         for event in ctx.input.read() {
             match &*event {
                 Event::DeviceEvent { event, .. } => match event {
-                    // &DeviceEvent::MouseMotion { delta: (x, y) } => {
-                    //     self.pitch += y as f32 * delta * self.pitch_factor;
-                    //     self.yaw += x as f32 * delta * self.yaw_factor;
+                    &DeviceEvent::MouseMotion { delta: (x, y) } => {
+                        self.roll -= y as f32 * self.pitch_factor;
+                        self.pitch -= x as f32 * self.roll_factor;
 
-                    //     self.pitch =
-                    // self.pitch.min(FRAC_PI_2).max(-FRAC_PI_2);
+                        self.roll = self.roll.min(FRAC_PI_2).max(-FRAC_PI_2);
 
-                    //     if self.yaw < -PI {
-                    //         self.yaw -= (self.yaw / TAU).floor() * TAU;
-                    //     }
+                        if self.pitch < -PI {
+                            self.pitch -= (self.pitch / TAU).floor() * TAU;
+                        }
 
-                    //     if self.yaw > PI {
-                    //         self.yaw -= (self.yaw / TAU).ceil() * TAU;
-                    //     }
-                    // }
+                        if self.pitch > PI {
+                            self.pitch -= (self.pitch / TAU).ceil() * TAU;
+                        }
+                    }
                     DeviceEvent::Key(input) => {
                         let flag = match input.virtual_keycode {
                             Some(VirtualKeyCode::W) => Direction::FORWARD,
@@ -115,43 +121,44 @@ impl System for FollowingCameraSystem {
         }
 
         if self.direction.contains(Direction::LEFT) {
-            self.yaw -= delta * self.yaw_factor;
+            self.pitch -= delta * self.pitch_factor;
         }
         if self.direction.contains(Direction::RIGHT) {
-            self.yaw += delta * self.yaw_factor;
+            self.pitch += delta * self.pitch_factor;
         }
 
         let found = world
             .query::<&FollowingCamera>()
             .with::<Camera>()
-            .with::<na::Isometry3<f32>>()
+            .with::<Global3>()
             .iter()
             .next()
             .map(|(e, f)| (e, *f));
 
         if let Some((camera, following)) = found {
-            let mut iso = world
-                .get::<na::Isometry3<f32>>(following.follows)
+            let mut global = world
+                .get::<Global3>(following.follows)
                 .ok()
                 .as_deref()
                 .cloned()
-                .unwrap_or_else(na::Isometry3::identity);
+                .unwrap_or_else(Global3::identity);
 
             let rotation = na::UnitQuaternion::from_euler_angles(
-                0.0,
+                self.roll,
                 -self.pitch,
-                self.yaw,
+                0.0,
             );
 
-            let translation =
-                rotation.transform_vector(&na::Vector3::z_axis()).into();
+            let translation = rotation
+                .transform_vector(&na::Vector3::new(0.0, 0.0, self.distance))
+                .into();
 
-            iso *= na::Isometry3 {
+            global.iso *= na::Isometry3 {
                 rotation,
                 translation,
             };
 
-            *world.get_mut::<na::Isometry3<f32>>(camera).unwrap() = iso;
+            *world.get_mut::<Global3>(camera).unwrap() = global;
         }
     }
 }

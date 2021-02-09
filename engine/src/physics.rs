@@ -1,5 +1,8 @@
 use {
-    crate::engine::{System, SystemContext},
+    crate::{
+        engine::{System, SystemContext},
+        scene::Global3,
+    },
     bumpalo::collections::Vec as BVec,
     nalgebra as na,
     rapier3d::{
@@ -76,9 +79,25 @@ impl Default for Constants {
 }
 
 impl System for Physics {
+    fn name(&self) -> &str {
+        "Physics"
+    }
+
     fn run(&mut self, ctx: SystemContext<'_>) {
         let constants = *ctx.resources.get_or_else(Constants::new);
+
+        // self.integration_parameters.dt = ctx.clocks.delta.as_secs_f32();
+
         let sets = ctx.resources.get_or_else(PhysicsData::new);
+
+        for (e, (global, body)) in
+            ctx.world.query::<(&Global3, &RigidBodyHandle)>().iter()
+        {
+            let body = sets.bodies.get_mut(*body).unwrap();
+            if *body.position() != global.iso {
+                body.set_position(global.iso, true);
+            }
+        }
 
         self.pipeline.step(
             &constants.gravity,
@@ -92,5 +111,12 @@ impl System for Physics {
             None,
             &(),
         );
+
+        for (_, (global, body)) in
+            ctx.world.query::<(&mut Global3, &RigidBodyHandle)>().iter()
+        {
+            let body = sets.bodies.get_mut(*body).unwrap();
+            global.iso = *body.position();
+        }
     }
 }

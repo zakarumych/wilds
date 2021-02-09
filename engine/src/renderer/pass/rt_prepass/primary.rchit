@@ -92,4 +92,5 @@ void main()
         traceRayEXT(tlas, 00, 0xff, 1, 0, 1, worls_space_pos - back, 0, dir, 1000.0, 2);
     }
     prd.diffuse += dprd.radiation / diffuse_rays;
+    prd.emissive += sample_emissive(uv);
 }

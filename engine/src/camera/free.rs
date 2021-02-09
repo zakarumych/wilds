@@ -5,13 +5,11 @@ use {
         scene::Global3,
     },
     nalgebra as na,
-    std::f32::consts::{FRAC_PI_2, PI},
+    std::f32::consts::{FRAC_PI_2, PI, TAU},
     winit::event::{
         DeviceEvent, ElementState, Event, KeyboardInput, VirtualKeyCode,
     },
 };
-
-const TAU: f32 = 6.28318530717958647692528676655900577f32;
 
 /// Free camera marker component.
 pub struct FreeCamera;
@@ -66,6 +64,9 @@ impl FreeCameraSystem {
 }
 
 impl System for FreeCameraSystem {
+    fn name(&self) -> &str {
+        "Free camera"
+    }
     fn run(&mut self, ctx: SystemContext<'_>) {
         let delta = ctx.clocks.delta.as_secs_f32();
         let mut query = ctx

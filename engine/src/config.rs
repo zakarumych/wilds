@@ -25,9 +25,6 @@ impl Config {
     #[cfg(not(target = "wasm32"))]
     #[tracing::instrument]
     pub async fn load(path: PathBuf) -> Result<Self, Report> {
-        smol::unblock(move || {
-            Ok(ron::de::from_reader(std::fs::File::open(&path)?)?)
-        })
-        .await
+        Ok(ron::de::from_reader(std::fs::File::open(&path)?)?)
     }
 }

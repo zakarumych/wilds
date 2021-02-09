@@ -406,7 +406,7 @@ impl<'a> Pass<'a> for CombinePass {
         let extent_push_constant = [extent.width, extent.height];
         render_pass_encoder.push_constants(
             &self.pipeline_layout,
-            ShaderStageFlags::VERTEX,
+            ShaderStageFlags::FRAGMENT,
             0,
             &extent_push_constant,
         );

@@ -41,7 +41,7 @@ pub enum Error {
 pub struct Renderable {
     pub mesh: Mesh,
     pub material: Material,
-    // pub transform: Option<na::Matrix4<f32>>,
+    pub transform: Option<na::Matrix4<f32>>,
 }
 
 pub struct RenderConstants {
@@ -193,7 +193,7 @@ impl Renderer {
     ) -> Result<(), Report> {
         const DEFAULT_CONSTANTS: RenderConstants = RenderConstants::new();
 
-        let constants = &*resources.get_or(DEFAULT_CONSTANTS);
+        let _ = &*resources.get_or(DEFAULT_CONSTANTS);
 
         self.context.flush_uploads(bump)?;
 
@@ -238,13 +238,12 @@ impl Renderer {
             if let Some(frame) = self.swapchain.acquire_image()? {
                 break frame;
             }
-            tracing::error!("{:#?}", self.swapchain);
+            tracing::info!("Swapchain is outdated. Reconfigure");
             self.swapchain.configure(
                 ImageUsage::COLOR_ATTACHMENT | ImageUsage::TRANSFER_DST,
                 self.swapchain_format,
                 PresentMode::Fifo,
             )?;
-            tracing::error!("{:#?}", self.swapchain);
         };
 
         self.pipeline.draw(
@@ -260,13 +259,12 @@ impl Renderer {
         tracing::trace!("Presenting");
         match self.queue.present(frame) {
             Ok(PresentOk::Suboptimal) | Err(PresentError::OutOfDate) => {
-                tracing::error!("{:#?}", self.swapchain);
+                tracing::info!("Swapchain is outdated. Reconfigure");
                 self.swapchain.configure(
                     ImageUsage::COLOR_ATTACHMENT | ImageUsage::TRANSFER_DST,
                     self.swapchain_format,
                     PresentMode::Fifo,
                 )?;
-                tracing::error!("{:#?}", self.swapchain);
             }
             Ok(_) => {}
             Err(err) => return Err(err.into()),

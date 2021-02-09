@@ -13,10 +13,10 @@ readme = "../README.md"
 
 [dependencies]
 # Assets
-goods = { version = "0.7.1", features = ["fs", "smol-spawn", "data-url", "trace", "ron-format"] }
-#goods = { version = "0.8", features = ["trace"] }
-#goods-ron = { version = "0.1" }
-#goods-fs = { version = "0.1" }
+goods = { version = "0.9", features = ["trace"], git = "https://github.com/zakarumych/goods", branch = "master" }
+goods-ron = { version = "0.2", git = "https://github.com/zakarumych/goods", branch = "master" }
+goods-fs = { version = "0.2", git = "https://github.com/zakarumych/goods", branch = "master" }
+goods-dataurl = { version = "0.2", git = "https://github.com/zakarumych/goods", branch = "master" }
 
 gltf = "0.15"
 
@@ -83,7 +83,7 @@ rand = "0.8"
 wilds-noise = { version = "0.1.0", path = "../noise" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-smol = { version = "1.0" }
+#smol = { version = "1.0" }
 
 [build-dependencies]
 eyre = "0.6"

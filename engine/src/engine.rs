@@ -1,6 +1,6 @@
 use {
     crate::{
-        assets::{AssetKey, Assets, Prefab},
+        assets::{Asset, AssetKey, Assets, Format, Prefab},
         broker::EventBroker,
         clocks::{ClockIndex, Clocks},
         config::{AssetSource, Config},
@@ -10,7 +10,11 @@ use {
     cfg_if::cfg_if,
     eyre::Report,
     flume::{bounded, Receiver, Sender},
-    futures::future::TryFutureExt as _,
+    futures::{
+        executor::{LocalPool, LocalSpawner},
+        future::TryFutureExt as _,
+        task::LocalSpawnExt as _,
+    },
     goods::AssetDefaultFormat,
     hecs::{Entity, World},
     std::{
@@ -44,13 +48,19 @@ pub struct SystemContext<'a> {
 }
 
 pub trait System {
+    fn name(&self) -> &str;
+
     fn run(&mut self, ctx: SystemContext<'_>);
 }
 
 impl<F> System for F
 where
-    F: FnMut(SystemContext<'_>),
+    F: FnMut(SystemContext<'_>) + 'static,
 {
+    fn name(&self) -> &str {
+        std::any::type_name::<F>()
+    }
+
     fn run(&mut self, ctx: SystemContext<'_>) {
         self(ctx)
     }
@@ -69,6 +79,7 @@ pub struct Engine {
     send_make_prefabs: Sender<MakePrefab>,
     clocks: Clocks,
     fixed_step_delta: Duration,
+    local_spawned: LocalSpawner,
 }
 
 impl Engine {
@@ -80,14 +91,17 @@ impl Engine {
     /// Retuns `Entity` that will be supplied to `spawn` method after asset is
     /// loaded.
     /// If asset loading fails that `Entity` will be despawned.
-    pub fn load_prefab<P>(&self, entity: Entity, key: AssetKey, info: P::Info)
+    pub fn load_prefab<P>(&self, key: AssetKey) -> Entity
     where
         P: Prefab,
-        P::Asset: AssetDefaultFormat<AssetKey>,
+        P::Asset: AssetDefaultFormat,
+        <P::Asset as Asset>::Repr: Send,
+        <P::Asset as Asset>::BuildFuture: Send,
+        <P::Asset as AssetDefaultFormat>::DefaultFormat:
+            Format<<P::Asset as Asset>::Repr, AssetKey>,
     {
-        let format =
-            <P::Asset as AssetDefaultFormat<_>>::DefaultFormat::default();
-        self.load_prefab_with_format::<P, _>(entity, key, info, format)
+        let format = <P::Asset as AssetDefaultFormat>::DefaultFormat::default();
+        self.load_prefab_with_format::<P, _>(key, format)
     }
 
     /// Loads asset and enqueue it for spawning.
@@ -96,44 +110,45 @@ impl Engine {
     /// If asset loading fails that `Entity` will be despawned.
     pub fn load_prefab_with_format<P, F>(
         &self,
-        entity: Entity,
         key: AssetKey,
-        info: P::Info,
         format: F,
-    ) where
+    ) -> Entity
+    where
         P: Prefab,
-        F: goods::Format<P::Asset, AssetKey>,
+        <P::Asset as Asset>::Repr: Send,
+        <P::Asset as Asset>::BuildFuture: Send,
+        F: goods::Format<<P::Asset as Asset>::Repr, AssetKey>,
     {
         tracing::info!("Loading prefab '{}'", key);
 
         let handle = self.assets.load_with_format(key.clone(), format);
-        self.make_prefab::<P, _>(entity, key, info, handle.map_err(Into::into))
+        let entity = self.world.reserve_entity();
+        self.make_prefab::<P, _>(entity, key, handle.map_err(Into::into));
+        entity
     }
 
-    pub fn make_prefab<P, F>(
-        &self,
-        entity: Entity,
-        key: AssetKey,
-        info: P::Info,
-        prefab: F,
-    ) where
+    pub fn make_prefab<P, F>(&self, entity: Entity, key: AssetKey, prefab: F)
+    where
         P: Prefab,
+        <P::Asset as Asset>::Repr: Send,
+        <P::Asset as Asset>::BuildFuture: Send,
         F: Future<Output = Result<P::Asset, Report>> + Send + 'static,
     {
         let send_make_prefabs = self.send_make_prefabs.clone();
 
-        smol::spawn(async move {
+        let fut = async move {
             let prefab = prefab.await;
 
             tracing::error!("Prefab loaded");
 
             let loaded = match prefab {
-                Ok(prefab) => MakePrefab::spawn::<P>(key, prefab, info, entity),
+                Ok(prefab) => MakePrefab::spawn::<P>(key, prefab, entity),
                 Err(err) => MakePrefab::Error(key, err, entity),
             };
             let _ = send_make_prefabs.send(loaded);
-        })
-        .detach();
+        };
+
+        self.local_spawned.spawn_local(fut).unwrap();
     }
 
     fn build_prefabs(&mut self) {
@@ -144,7 +159,11 @@ impl Engine {
                     build(&mut self.world, &mut self.resources);
                 }
                 MakePrefab::Error(key, err, entity) => {
-                    tracing::error!("Failed to load prefab '{}': {}", key, err);
+                    tracing::error!(
+                        "Failed to load prefab '{}': {:#}",
+                        key,
+                        err
+                    );
                     let _ = self.world.despawn(entity);
                 }
             }
@@ -225,18 +244,19 @@ impl Engine {
 
     /// Asynchronously wait for next event.
     pub async fn next(&mut self) -> Event<'static, ()> {
-        self.shared.waiting_for_event.set(true);
         // let event = self.events.recv_async().await;
 
         let event = loop {
             if let Some(event) = self.shared.next_event.take() {
                 break event;
             }
-            smol::future::yield_now().await;
+
+            self.shared.waiting_for_event.set(true);
+            yield_now().await;
+            self.shared.waiting_for_event.set(false);
         };
 
         self.input.add(event.clone());
-        self.shared.waiting_for_event.set(false);
         event
     }
 
@@ -263,19 +283,19 @@ impl Engine {
                             let path = match std::env::current_dir() {
                                 Ok(cd) => { cd.join(path) }
                                 Err(err) => {
-                                    tracing::error!("Failed to fetch current dir: {}", err);
+                                    tracing::error!("Failed to fetch current dir: {:#}", err);
                                     path.clone()
                                 }
                             };
-                            builder.with(goods::FileSource::new(path))
+                            builder.with(goods_fs::FileSource::new(path))
                         }
                     }
                 }
             });
 
-        let registry = registry.with(goods::DataUrlSource);
+        let registry = registry.with(goods_dataurl::DataUrlSource);
 
-        let assets = Assets::new(registry.build(), goods::Smol);
+        let assets = Assets::new(registry.build());
 
         let shared = Rc::new(Shared {
             event_loop_ptr: Cell::new(std::ptr::null()),
@@ -284,6 +304,9 @@ impl Engine {
         });
 
         let (send_make_prefabs, recv_make_prefabs) = bounded(512);
+
+        let mut local_pool = LocalPool::new();
+        let local_spawned = local_pool.spawner();
 
         let engine = Engine {
             assets,
@@ -297,6 +320,7 @@ impl Engine {
             send_make_prefabs,
             fixed_step_delta: Duration::from_millis(10),
             clocks: Clocks::new(),
+            local_spawned,
         };
 
         let event_loop = EventLoop::new();
@@ -307,16 +331,18 @@ impl Engine {
 
         // Here goes magic
         event_loop.run(move |event, el, flow| {
-            tracing::trace!("Event {:#?}", event);
+            // tracing::trace!("Event {:#?}", event);
 
             if let Some(app) = &mut app_opt {
+
                 // Set event. Excluding an event bound to a lifetime.
                 let old = match event.to_static() {
                     Some(event) => {
                         shared.next_event.replace(Some(event))
                     }
                     None => {
-                        shared.next_event.take()
+                        shared.next_event.take();
+                        return;
                     }
                 };
 
@@ -326,29 +352,29 @@ impl Engine {
                 // non-null.
                 shared.event_loop_ptr.set(el);
 
-                // Poll closure only once.
-                if let Poll::Ready(result) =
-                    smol::block_on(AppEventWaitFuture {
-                        app: app.as_mut(),
-                        ready: &shared.waiting_for_event,
-                    })
-                {
-                    // No place where we could return this error.
-                    // log and panic are only options.
-                    if let Err(err) = result {
-                        tracing::error!("Error: {}", err);
-                    }
+                let run_app = AppEventWaitFuture {
+                    app: app.as_mut(),
+                    ready: &shared.waiting_for_event,
+                };
 
-                    // Exit when closure resolves.
-                    *flow = ControlFlow::Exit;
+                local_pool.run_until_stalled();
+                let poll = local_pool.run_until(run_app);
+                // let poll = futures::executor::block_on(run_app);
+
+                // Unset event loop before it is invalidated.
+                shared.event_loop_ptr.set(std::ptr::null());
+
+                // Poll closure only once.
+                if let Poll::Ready(result) = poll
+                {
                     app_opt = None;
+
+                    // No place where we could return this error.
+                    result.unwrap();
                 } else {
                     // *flow = ControlFlow::Wait;
                     *flow = ControlFlow::Poll;
                 }
-
-                // Unset event loop before it is invalidated.
-                shared.event_loop_ptr.set(std::ptr::null());
             } else {
                 *flow = ControlFlow::Exit;
             }
@@ -405,20 +431,37 @@ enum MakePrefab {
 }
 
 impl MakePrefab {
-    fn spawn<P>(
-        key: AssetKey,
-        asset: P::Asset,
-        info: P::Info,
-        entity: Entity,
-    ) -> Self
+    fn spawn<P>(key: AssetKey, asset: P::Asset, entity: Entity) -> Self
     where
         P: Prefab,
     {
         MakePrefab::Spawn(
             key,
             Box::new(move |world, resources| {
-                P::spawn(asset, info, world, resources, entity)
+                P::spawn(asset, world, resources, entity)
             }),
         )
+    }
+}
+
+struct YieldNow {
+    yielded: bool,
+}
+
+fn yield_now() -> YieldNow {
+    YieldNow { yielded: false }
+}
+
+impl Future for YieldNow {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, ctx: &mut Context) -> Poll<()> {
+        if !self.yielded {
+            self.yielded = true;
+            ctx.waker().wake_by_ref();
+            Poll::Pending
+        } else {
+            Poll::Ready(())
+        }
     }
 }

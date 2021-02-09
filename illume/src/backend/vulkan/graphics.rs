@@ -98,8 +98,8 @@ pub enum InitError {
     #[error("Failed to load functions from vulkan library")]
     FunctionLoadFailed,
 
-    #[error(transparent)]
-    VulkanError {
+    #[error("Instance creation failed")]
+    CreateInstanceError {
         #[from]
         source: vk1_0::Result,
     },
@@ -269,7 +269,7 @@ impl Graphics {
                 return Err(InitError::FunctionLoadFailed);
             }
             Err(LoaderError::VulkanError(err)) => {
-                return Err(InitError::VulkanError { source: err });
+                return Err(InitError::CreateInstanceError { source: err });
             }
             Ok(ok) => ok,
         };

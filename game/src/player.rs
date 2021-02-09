@@ -157,6 +157,9 @@ impl Player {
 }
 
 impl System for Player {
+    fn name(&self) -> &str {
+        "Player"
+    }
     fn run(&mut self, ctx: SystemContext<'_>) {
         for event in ctx.input.read() {
             if let Some(action) = self.translate_event(&*event) {

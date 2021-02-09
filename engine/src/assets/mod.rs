@@ -19,13 +19,11 @@ pub type AssetKey = Arc<str>;
 pub type Assets = Cache<AssetKey>;
 
 pub trait Prefab {
-    type Asset: Asset + Clone + Send + 'static;
-    type Info: Send + 'static;
+    type Asset: Asset + Send + Sync;
 
     /// Spawns this prefab into world.
     fn spawn(
         asset: Self::Asset,
-        info: Self::Info,
         world: &mut World,
         resources: &mut Resources,
         entity: Entity,

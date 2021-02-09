@@ -1,13 +1,11 @@
 use {
     crate::renderer::Context,
-    goods::{ready, AssetDefaultFormat, Cache, Format, Ready, SyncAsset},
+    goods::{AssetDefaultFormat, SimpleFormat, SyncAsset},
     illume::{
         CreateImageError, ImageExtent, ImageInfo, ImageUsage, ImageView,
         ImageViewInfo, Samples1,
     },
-    image::{
-        load_from_memory, DynamicImage, GenericImageView as _, ImageError,
-    },
+    image::{load_from_memory, DynamicImage, GenericImageView as _},
 };
 
 /// Image asset.
@@ -25,16 +23,16 @@ impl ImageAsset {
 
 impl SyncAsset for ImageAsset {
     type Context = Context;
-    type Error = CreateImageError;
     type Repr = DynamicImage;
 
-    fn build(
-        image: DynamicImage,
-        ctx: &mut Context,
-    ) -> Result<Self, CreateImageError> {
-        let image = image.to_rgba8();
-        image_view_from_dyn_image(&DynamicImage::ImageRgba8(image), ctx)
-            .map(|image| ImageAsset { image })
+    fn build(image: DynamicImage, ctx: &mut Context) -> eyre::Result<Self> {
+        let image = image.into_rgba8();
+        let image = image_view_from_dyn_image(
+            &image::DynamicImage::ImageRgba8(image),
+            ctx,
+        )?;
+
+        Ok(ImageAsset { image })
     }
 }
 
@@ -42,21 +40,17 @@ impl SyncAsset for ImageAsset {
 #[derive(Debug, Default)]
 pub struct GuessImageFormat;
 
-impl<K> Format<ImageAsset, K> for GuessImageFormat {
-    type DecodeFuture = Ready<Result<DynamicImage, ImageError>>;
-    type Error = ImageError;
-
-    fn decode(
+impl<K> SimpleFormat<DynamicImage, K> for GuessImageFormat {
+    fn decode_simple(
         self,
         _key: K,
-        bytes: Vec<u8>,
-        _: &Cache<K>,
-    ) -> Self::DecodeFuture {
-        ready(load_from_memory(&bytes))
+        bytes: Box<[u8]>,
+    ) -> eyre::Result<DynamicImage> {
+        load_from_memory(&bytes).map_err(eyre::Report::from)
     }
 }
 
-impl<K> AssetDefaultFormat<K> for ImageAsset {
+impl AssetDefaultFormat for ImageAsset {
     type DefaultFormat = GuessImageFormat;
 }
 

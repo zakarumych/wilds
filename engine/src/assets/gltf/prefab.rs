@@ -19,11 +19,9 @@ pub struct Gltf;
 
 impl Prefab for Gltf {
     type Asset = GltfAsset;
-    type Info = Global3;
 
     fn spawn(
         asset: GltfAsset,
-        root: Global3,
         world: &mut World,
         _resources: &mut Resources,
         entity: Entity,
@@ -48,127 +46,127 @@ impl Prefab for Gltf {
 
                 let node = scene.nodes().next().unwrap();
 
-                let (iso, scale) = node_transform(&node);
-                let global = root.append_iso_scale(&iso, &scale);
-
                 match node.mesh().and_then(|m| asset.renderables.get(m.index()))
                 {
                     Some(renderables) => match renderables.len() {
                         1 => {
                             world
-                                .insert(
-                                    entity,
-                                    (global, renderables[0].clone()),
-                                )
+                                .insert(entity, (renderables[0].clone(),))
                                 .unwrap();
                         }
                         _ => {
-                            world.insert_one(entity, global).unwrap();
-                            world.spawn_batch(
-                                renderables
-                                    .iter()
-                                    .cloned()
-                                    .map(|r| (r, Local3::identity(entity))),
-                            );
+                            world.spawn_batch(renderables.iter().cloned().map(
+                                |r| {
+                                    (
+                                        r,
+                                        Local3::identity(entity),
+                                        Global3::identity(),
+                                    )
+                                },
+                            ));
                         }
                     },
-                    None => world.insert_one(entity, global).unwrap(),
+                    None => {}
                 };
 
-                spawn_children(entity, &node, &asset, world);
+                spawn_children(
+                    entity,
+                    na::Vector3::new(1.0, 1.0, 1.0),
+                    &node,
+                    &asset,
+                    world,
+                );
             }
             _ => {
                 tracing::info!("Gltf asset loaded");
                 let nodes = scene
                     .nodes()
                     .map(|node| {
-                        spawn_node(Base::Root(&root), node, &asset, world)
+                        spawn_node(
+                            entity,
+                            na::Vector3::new(1.0, 1.0, 1.0),
+                            node,
+                            &asset,
+                            world,
+                        )
                     })
                     .collect();
 
-                world.insert(entity, (GltfScene { nodes }, root)).unwrap();
+                world.insert(entity, (GltfScene { nodes },)).unwrap();
             }
         }
     }
 }
 
-enum Base<'a> {
-    Parent(Entity),
-    Root(&'a Global3),
-}
-
 fn spawn_node(
-    base: Base<'_>,
+    parent: Entity,
+    parent_scale: na::Vector3<f32>,
     node: Node<'_>,
     asset: &GltfAsset,
     world: &mut World,
 ) -> Entity {
-    let entity = match node
-        .mesh()
-        .and_then(|m| asset.renderables.get(m.index()))
-    {
-        Some(renderables) => match renderables.len() {
-            0 => spawn_empty(base, &node, world),
-            1 => spawn_renderable(base, &node, renderables[0].clone(), world),
-            _ => {
-                let entity = spawn_empty(base, &node, world);
-                world.spawn_batch(renderables.iter().cloned().map(|r| {
-                    (r, Global3::identity(), Local3::identity(entity))
-                }));
-                entity
-            }
-        },
-        None => spawn_empty(base, &node, world),
-    };
+    let (iso, scale) = node_transform(&node);
 
-    spawn_children(entity, &node, asset, world);
+    let entity =
+        match node.mesh().and_then(|m| asset.renderables.get(m.index())) {
+            Some(renderables) => match renderables.len() {
+                0 => spawn_empty(parent, iso, world),
+                1 => {
+                    let mut renderable = renderables[0].clone();
+                    renderable.transform =
+                        Some(na::Matrix4::new_nonuniform_scaling(&scale));
+                    spawn_renderable(parent, iso, renderable, world)
+                }
+                _ => {
+                    let entity = spawn_empty(parent, iso, world);
+                    world.spawn_batch(renderables.iter().cloned().map(|r| {
+                        (r, Global3::identity(), Local3::identity(entity))
+                    }));
+                    entity
+                }
+            },
+            None => spawn_empty(parent, iso, world),
+        };
+
+    spawn_children(
+        entity,
+        parent_scale.component_mul(&scale),
+        &node,
+        asset,
+        world,
+    );
     entity
 }
 
 fn spawn_children(
     entity: Entity,
+    scale: na::Vector3<f32>,
     node: &Node<'_>,
     asset: &GltfAsset,
     world: &mut World,
 ) {
     for child in node.children() {
-        spawn_node(Base::Parent(entity), child, asset, world);
+        spawn_node(entity, scale, child, asset, world);
     }
 }
 
-fn spawn_empty(base: Base<'_>, node: &Node<'_>, world: &mut World) -> Entity {
-    match base {
-        Base::Parent(parent) => {
-            let (iso, scale) = node_transform(&node);
-            let local = Local3 { iso, scale, parent };
-            world.spawn((local, Global3::identity()))
-        }
-        Base::Root(root) => {
-            let (iso, scale) = node_transform(&node);
-            let global = root.append_iso_scale(&iso, &scale);
-            world.spawn((global,))
-        }
-    }
+fn spawn_empty(
+    parent: Entity,
+    iso: na::Isometry3<f32>,
+    world: &mut World,
+) -> Entity {
+    let local = Local3 { iso, parent };
+    world.spawn((local, Global3::identity()))
 }
 
 fn spawn_renderable(
-    base: Base<'_>,
-    node: &Node<'_>,
+    parent: Entity,
+    iso: na::Isometry3<f32>,
     renderable: Renderable,
     world: &mut World,
 ) -> Entity {
-    match base {
-        Base::Parent(parent) => {
-            let (iso, scale) = node_transform(&node);
-            let local = Local3 { iso, scale, parent };
-            world.spawn((local, Global3::identity(), renderable))
-        }
-        Base::Root(root) => {
-            let (iso, scale) = node_transform(&node);
-            let global = root.append_iso_scale(&iso, &scale);
-            world.spawn((global, renderable))
-        }
-    }
+    let local = Local3 { iso, parent };
+    world.spawn((local, Global3::identity(), renderable))
 }
 
 fn node_transform(node: &Node) -> (na::Isometry3<f32>, na::Vector3<f32>) {

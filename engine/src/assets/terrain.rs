@@ -2,7 +2,7 @@ use {
     super::{
         append_key,
         material::{MaterialInfo, MaterialRepr},
-        ready, Asset, AssetKey, Assets, Format, Prefab,
+        Asset, AssetKey, Assets, Format, Prefab,
     },
     crate::{
         physics::PhysicsData,
@@ -29,13 +29,14 @@ use {
         dynamics::RigidBodyBuilder,
         geometry::{ColliderBuilder, SharedShape},
     },
-    std::{convert::TryFrom as _, sync::Arc},
+    std::{convert::TryFrom as _, future::ready, sync::Arc},
 };
 
 pub fn create_terrain_shape(
     width: u32,
     depth: u32,
     height: impl Fn(u32, u32) -> f32,
+    scale: f32,
 ) -> HeightField {
     let mut matrix: na::DMatrix<f32> = na::DMatrix::zeros_generic(
         na::Dynamic::new(depth as usize),
@@ -44,17 +45,21 @@ pub fn create_terrain_shape(
 
     for x in 0..width {
         for y in 0..depth {
-            matrix[(y as usize, x as usize)] = height(x, y);
+            matrix[(y as usize, x as usize)] = height(x, y) * scale;
         }
     }
 
-    HeightField::new(matrix, na::Vector3::new(width as f32, 1.0, depth as f32))
+    HeightField::new(
+        matrix,
+        na::Vector3::new(width as f32 * scale, 1.0, depth as f32 * scale),
+    )
 }
 
 pub fn create_terrain_mesh(
     width: u32,
     depth: u32,
     height: impl Fn(u32, u32) -> f32,
+    scale: f32,
     buffer_usage: BufferUsage,
     ctx: &mut Context,
 ) -> Result<Mesh, OutOfMemory> {
@@ -122,7 +127,7 @@ pub fn create_terrain_mesh(
 
             data.extend_from_slice(bytemuck::cast_slice(&[
                 PositionNormalTangent3dUV {
-                    position: Position3d([xf, h, zf]),
+                    position: Position3d([xf * scale, h * scale, zf * scale]),
                     normal: Normal3d(normal.into()),
                     uv: UV([u, v]),
                     tangent,
@@ -200,6 +205,7 @@ pub struct TerrainRepr {
     material: MaterialRepr,
     buffer_usage: BufferUsage,
     factor: f32,
+    scale: f32,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -215,12 +221,6 @@ pub enum TerrainError {
 
     #[error("Out of device memory")]
     OutOfMemory,
-
-    #[error("Failed to load texture: `{source}`")]
-    TextureError {
-        #[from]
-        source: goods::Error,
-    },
 }
 
 impl From<OutOfMemory> for TerrainError {
@@ -231,19 +231,19 @@ impl From<OutOfMemory> for TerrainError {
 
 impl Asset for TerrainAsset {
     type Context = Context;
-    type Error = TerrainError;
     type Repr = TerrainRepr;
 
-    type BuildFuture = BoxFuture<'static, Result<Self, TerrainError>>;
+    type BuildFuture = BoxFuture<'static, eyre::Result<Self>>;
 
     fn build(
         repr: TerrainRepr,
         ctx: &mut Context,
-    ) -> BoxFuture<'static, Result<Self, TerrainError>> {
+    ) -> BoxFuture<'static, Result<Self, eyre::Report>> {
         let (w, h, f) = image_heightmap(&repr.heightmap, repr.factor);
-        let shape = Arc::new(create_terrain_shape(w, h, &f));
+        let shape = Arc::new(create_terrain_shape(w, h, &f, repr.scale));
 
-        let mesh = create_terrain_mesh(w, h, &f, repr.buffer_usage, ctx);
+        let mesh =
+            create_terrain_mesh(w, h, &f, repr.scale, repr.buffer_usage, ctx);
         let material = repr.material.prebuild(ctx);
 
         Box::pin(async move {
@@ -263,7 +263,11 @@ pub struct TerrainInfo {
     #[serde(flatten)]
     material: MaterialInfo,
 
+    #[serde(default = "default_factor")]
     factor: f32,
+
+    #[serde(default = "default_scale")]
+    scale: f32,
 }
 
 #[derive(Debug)]
@@ -272,16 +276,15 @@ pub struct TerrainFormat {
     pub blas: bool,
 }
 
-impl Format<TerrainAsset, AssetKey> for TerrainFormat {
-    type DecodeFuture = BoxFuture<'static, Result<TerrainRepr, TerrainError>>;
-    type Error = TerrainError;
+impl Format<TerrainRepr, AssetKey> for TerrainFormat {
+    type DecodeFuture = BoxFuture<'static, eyre::Result<TerrainRepr>>;
 
     fn decode(
         self,
         key: AssetKey,
-        bytes: Vec<u8>,
+        bytes: Box<[u8]>,
         assets: &Assets,
-    ) -> BoxFuture<'static, Result<TerrainRepr, TerrainError>> {
+    ) -> BoxFuture<'static, eyre::Result<TerrainRepr>> {
         let info = match ron::de::from_bytes::<TerrainInfo>(&bytes) {
             Ok(info) => info,
             Err(err) => return Box::pin(ready(Err(err.into()))),
@@ -304,6 +307,7 @@ impl Format<TerrainAsset, AssetKey> for TerrainFormat {
         }
 
         let factor = info.factor;
+        let scale = info.scale;
 
         Box::pin(async move {
             let heightmap = load_from_memory(&heightmap_bytes.await?)?;
@@ -313,6 +317,7 @@ impl Format<TerrainAsset, AssetKey> for TerrainFormat {
                 material,
                 buffer_usage,
                 factor,
+                scale,
             })
         })
     }
@@ -334,11 +339,9 @@ pub struct Terrain;
 
 impl Prefab for Terrain {
     type Asset = TerrainAsset;
-    type Info = Global3;
 
     fn spawn(
         asset: TerrainAsset,
-        global: Global3,
         world: &mut World,
         resources: &mut Resources,
         entity: Entity,
@@ -358,13 +361,19 @@ impl Prefab for Terrain {
                 Renderable {
                     mesh: asset.mesh,
                     material: asset.material,
-                    // transform: None,
+                    transform: None,
                 },
                 body,
                 collider,
-                global,
                 Terrain,
             ),
         );
     }
+}
+
+fn default_factor() -> f32 {
+    1.0
+}
+fn default_scale() -> f32 {
+    1.0
 }

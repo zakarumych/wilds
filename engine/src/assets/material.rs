@@ -64,7 +64,7 @@ impl TextureRepr {
 }
 
 impl TexturePrebuild {
-    async fn finish(self) -> Result<Texture, goods::Error> {
+    async fn finish(self) -> eyre::Result<Texture> {
         Ok(Texture {
             image: self.image.await?.image,
             sampler: self.sampler,
@@ -206,7 +206,7 @@ pub struct MaterialPrebuild {
 }
 
 impl MaterialPrebuild {
-    pub async fn finish(self) -> Result<Material, goods::Error> {
+    pub async fn finish(self) -> eyre::Result<Material> {
         Ok(Material {
             albedo: match self.albedo {
                 Some(albedo) => Some(albedo.finish().await?),

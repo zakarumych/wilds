@@ -4,6 +4,7 @@ use {
 };
 
 pub struct BumpaloCellList<'a, T> {
+    bump: &'a Bump,
     root: Cell<Node<'a, T>>,
 }
 
@@ -18,19 +19,20 @@ struct Cons<'a, T> {
 }
 
 impl<'a, T> BumpaloCellList<'a, T> {
-    pub const fn new() -> Self {
+    pub const fn new_in(bump: &'a Bump) -> Self {
         BumpaloCellList {
+            bump,
             root: Cell::new(Node::Nil),
         }
     }
 
-    pub fn push_in(&self, value: T, bump: &'a Bump) -> &mut T {
+    pub fn push(&self, value: T) -> &mut T {
         let mut node = BBox::new_in(
             Cons {
                 value: value.into(),
                 next: Node::Nil,
             },
-            bump,
+            self.bump,
         );
 
         let value = unsafe {

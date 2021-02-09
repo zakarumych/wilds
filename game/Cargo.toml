@@ -10,6 +10,7 @@ readme = "../README.md"
 [dependencies]
 hecs = "0.3"
 wilds = { path = "../engine", features = ["genmesh"] }
+goods-ron = { version = "0.2", git = "https://github.com/zakarumych/goods", branch = "master" }
 
 bumpalo = { version = "3.4", features = ["collections"] }
 eyre = "0.6"
@@ -24,6 +25,8 @@ nalgebra = "0.24"
 tracing-subscriber = { version = "0.2", features = ["fmt", "env-filter"] }
 tracing-error = { version = "0.1" }
 genmesh = { version = "0.6" }
+palette = { version = "0.5", default-features = false, features = ["std", "serializing"] }
+rand = "0.8"
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-smol = { version = "1.0" }
+#[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+#smol = { version = "1.0" }

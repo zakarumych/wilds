@@ -1,23 +1,34 @@
 mod config;
+mod construct;
 mod pawn;
 mod player;
-mod sun;
+mod sky;
 mod terrain;
 
 use {
     bumpalo::Bump,
     color_eyre::Report,
-    std::{cmp::max, time::Duration},
+    goods_ron::RonFormat,
+    nalgebra as na,
+    std::{
+        f32::consts::{PI, TAU},
+        time::Duration,
+    },
     tracing_subscriber::layer::SubscriberExt as _,
     wilds::{
+        assets::{Gltf, GltfFormat},
         camera::{
-            following::FollowingCameraSystem,
+            following::{FollowingCamera, FollowingCameraSystem},
             free::{FreeCamera, FreeCameraSystem},
         },
         clocks::Clocks,
         engine::Engine,
         fps_counter::FpsCounter,
-        physics::Physics,
+        physics::{
+            dynamics::RigidBodyBuilder,
+            geometry::{ColliderBuilder, Cone, SharedShape},
+            Physics, PhysicsData,
+        },
         renderer::{Extent2d, RenderConstants, Renderer},
         scene::{Global3, SceneSystem},
     },
@@ -54,6 +65,7 @@ fn main() -> Result<(), Report> {
 
     Engine::run(engine, move |mut engine| async move {
         engine.add_system(Physics::new());
+
         engine.add_system(SceneSystem);
 
         let window = engine.build_window(
@@ -69,22 +81,23 @@ fn main() -> Result<(), Report> {
         let mut renderer = Renderer::new(&window)?;
         let mut clocks = Clocks::new();
 
-        sun::spawn_sun(&mut engine);
         terrain::spawn_terrain(&mut engine);
 
-        let camera = engine.world.spawn((
-            game.camera.into_camera(aspect),
-            // Camera::Matrix(na::Projective3::identity()),
-            Global3::identity(),
-            // FollowingCamera { follows: pawn },
-            FreeCamera,
-        ));
+        engine.add_system(sky::SkySystem {
+            angle: 0.0,
+            velocity: 0.0333,
+        });
 
-        engine.add_system(
-            FollowingCameraSystem::new()
-                .with_factor(0.01, 0.01 * aspect)
-                .with_speed(50.0),
+        engine.load_prefab_with_format::<sky::Sky, _>(
+            "mars.sky.ron".into(),
+            RonFormat,
         );
+
+        // engine.add_system(
+        //     FollowingCameraSystem::new()
+        //         .with_factor(0.01, 0.01 * aspect)
+        //         .with_speed(50.0),
+        // );
 
         engine.add_system(
             FreeCameraSystem::new()
@@ -92,14 +105,39 @@ fn main() -> Result<(), Report> {
                 .with_speed(3.0),
         );
 
+        engine.add_system(pawn::PawnSystem);
+
         window.request_redraw();
 
         let mut fps_counter = FpsCounter::new(Duration::from_secs(5));
         let mut ticker = Duration::from_secs(0);
 
+        engine
+            .resources
+            .get_or_default::<wilds::physics::Constants>()
+            .gravity
+            .y = -3.6848;
+
+        spawn_farms(&mut engine);
+        spawn_pawns(&mut engine);
+
+        let camera = engine.world.spawn((
+            game.camera.into_camera(aspect),
+            // Camera::Matrix(na::Projective3::identity()),
+            Global3::from_iso(na::Isometry {
+                translation: na::Vector3::new(0.0, 0.0, 0.0).into(),
+                rotation: na::UnitQuaternion::identity(),
+            }),
+            // FollowingCamera { follows: pawn },
+            FreeCamera,
+        ));
+
         loop {
             // Main game loop
-            match engine.next().await {
+
+            let event = engine.next().await;
+
+            match event {
                 Event::WindowEvent {
                     window_id,
                     event: WindowEvent::CloseRequested,
@@ -123,7 +161,7 @@ fn main() -> Result<(), Report> {
                     fps_counter.add_sample(clock.delta);
 
                     if ticker < clock.delta {
-                        ticker += max(Duration::from_secs(1), clock.delta);
+                        ticker += Duration::from_secs(1).max(clock.delta);
 
                         tracing::info!(
                             "FPS: {}",
@@ -143,19 +181,29 @@ fn main() -> Result<(), Report> {
                 Event::DeviceEvent {
                     event:
                         DeviceEvent::Key(KeyboardInput {
-                            virtual_keycode: Some(VirtualKeyCode::F),
+                            virtual_keycode: Some(key),
                             state: ElementState::Released,
                             ..
                         }),
                     ..
-                } => {
-                    let filter_enabled = &mut engine
-                        .resources
-                        .get_or_else(RenderConstants::new)
-                        .filter_enabled;
+                } => match key {
+                    VirtualKeyCode::F => {
+                        let filter_enabled = &mut engine
+                            .resources
+                            .get_or_else(RenderConstants::new)
+                            .filter_enabled;
 
-                    *filter_enabled = !*filter_enabled;
-                }
+                        *filter_enabled = !*filter_enabled;
+                    }
+                    VirtualKeyCode::B => {
+                        let mut q =
+                            engine.world.query_one::<&Global3>(camera).unwrap();
+                        let global = q.get().unwrap();
+
+                        tracing::error!("Camera pos is: '{}'", global);
+                    }
+                    _ => {}
+                },
                 _ => {}
             }
 
@@ -165,4 +213,77 @@ fn main() -> Result<(), Report> {
 
         Ok(())
     })
+}
+
+fn spawn_farms(engine: &mut Engine) {
+    let collider = ColliderBuilder::cylinder(4.0, 5.0)
+        .rotation(na::Vector3::new(PI, 0.0, 0.0))
+        .translation(0.0, 0.0, 0.0)
+        .build();
+
+    for i in 0..1 {
+        for j in 0..1 {
+            let x = i as f32 * (15.0 + rand::random::<f32>() * 3.0);
+            let y = 2.5;
+            let z = j as f32 * (15.0 + rand::random::<f32>() * 3.0);
+
+            let farm = engine.load_prefab_with_format::<Gltf, _>(
+                "constructs/farm-dome.gltf".into(),
+                GltfFormat::for_raytracing(),
+            );
+
+            let sets = engine.resources.get_or_else(PhysicsData::new);
+            let body = sets.bodies.insert(
+                RigidBodyBuilder::new_static().translation(x, y, z).build(),
+            );
+            let collider =
+                sets.colliders
+                    .insert(collider.clone(), body, &mut sets.bodies);
+            engine
+                .world
+                .insert(
+                    farm,
+                    (
+                        Global3::from_iso(na::Isometry3 {
+                            rotation:
+                                na::geometry::UnitQuaternion::from_euler_angles(
+                                    0.0,
+                                    rand::random::<f32>() * TAU,
+                                    0.0,
+                                ),
+                            translation: na::Vector3::new(x, y, z).into(),
+                        }),
+                        body,
+                        collider,
+                    ),
+                )
+                .unwrap();
+        }
+    }
+}
+
+fn spawn_pawns(engine: &mut Engine) {
+    for i in 0..5 {
+        for j in 0..5 {
+            let x = i as f32;
+            let y = 30.0;
+            let z = j as f32;
+
+            let pawn = engine.load_prefab_with_format::<pawn::Pawn, _>(
+                "pawns/simple.ron".into(),
+                goods_ron::RonFormat,
+            );
+
+            engine
+                .world
+                .insert(
+                    pawn,
+                    (Global3::from_iso(na::Isometry3 {
+                        rotation: na::geometry::UnitQuaternion::identity(),
+                        translation: na::Vector3::new(x, y, z).into(),
+                    }),),
+                )
+                .unwrap();
+        }
+    }
 }

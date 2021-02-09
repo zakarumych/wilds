@@ -20,19 +20,29 @@ Vertex instance_vertex(uint index) {
 vec4 sample_albedo(vec2 uv) {
     uint sampler_index = instances[gl_InstanceID].albedo_sampler;
     vec4 raw = vec4(1, 1, 1, 1);
-    if (sampler_index > 0)
+    if (sampler_index != 0xffffffff)
     {
-        raw = texture(albedo[sampler_index-1], uv);
+        raw = texture(textures[sampler_index], uv);
     }
     return raw * instances[gl_InstanceID].albedo_factor;
+}
+
+vec3 sample_emissive(vec2 uv) {
+    uint sampler_index = instances[gl_InstanceID].emissive_sampler;
+    vec3 raw = vec3(1, 1, 1);
+    if (sampler_index != 0xffffffff)
+    {
+        raw = texture(textures[sampler_index], uv).rgb;
+    }
+    return raw * instances[gl_InstanceID].emissive_factor;
 }
 
 vec3 sample_normal(vec2 uv) {
     uint sampler_index = instances[gl_InstanceID].normals_sampler;
     vec3 raw = vec3(0, 0, 1);
-    if (sampler_index > 0)
+    if (sampler_index != 0xffffffff)
     {
-        raw = texture(normal[sampler_index-1], uv).xyz;
+        raw = texture(textures[sampler_index], uv).xyz;
     }
     return normalize(vec3(raw.xy * instances[gl_InstanceID].normals_factor, raw.z));
 }

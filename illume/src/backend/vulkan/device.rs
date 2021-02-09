@@ -419,7 +419,7 @@ impl Device {
         .map_err(|err| {
             unsafe { self.inner.logical.destroy_buffer(Some(handle), None) }
 
-            tracing::error!("{}", err);
+            tracing::error!("{:#}", err);
             OutOfMemory
         })?;
 
@@ -486,7 +486,6 @@ impl Device {
     where
         T: Pod,
     {
-        // tracing::error!("!");
         assert!(info.is_valid());
         if arith_ne(info.size, size_of_val(data)) {
             panic!(
@@ -1065,7 +1064,7 @@ impl Device {
                 .map_err(|err| {
                     self.inner.logical.destroy_image(Some(image), None);
 
-                    tracing::error!("{}", err);
+                    tracing::error!("{:#}", err);
                     OutOfMemory
                 })
         }?;
@@ -1164,7 +1163,7 @@ impl Device {
     //             )
     //             .map_err(|err| {
     //                 self.inner.logical.destroy_image(Some(image), None);
-    //                 tracing::error!("{}", err);
+    //                 tracing::error!("{:#}", err);
     //                 OutOfMemory
     //             })
     //     }?;
@@ -2194,6 +2193,10 @@ impl Device {
                 Descriptors::AccelerationStructure(acceleration_structures) => {
                     for acceleration_structure in acceleration_structures {
                         assert_owner!(acceleration_structure, self);
+                        assert_eq!(
+                            acceleration_structure.info().level,
+                            AccelerationStructureLevel::Top
+                        );
                     }
                 }
             }

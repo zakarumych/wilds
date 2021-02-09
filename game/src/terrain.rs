@@ -1,17 +1,21 @@
-use wilds::{
-    assets::{Terrain, TerrainFormat},
-    engine::Engine,
-    scene::Global3,
+use {
+    hecs::Entity,
+    wilds::{
+        assets::{Terrain, TerrainFormat},
+        engine::Engine,
+        scene::Global3,
+    },
 };
 
-pub fn spawn_terrain(engine: &mut Engine) {
-    engine.load_prefab_with_format::<Terrain, _>(
-        engine.create_entity(),
+pub fn spawn_terrain(engine: &mut Engine) -> Entity {
+    let terrain = engine.load_prefab_with_format::<Terrain, _>(
         "terrain/island.ron".into(),
-        Global3::from_scale(1.0),
         TerrainFormat {
             raster: false,
             blas: true,
         },
     );
+
+    engine.world.insert(terrain, (Global3::identity(),));
+    terrain
 }

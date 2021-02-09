@@ -8,7 +8,7 @@ mod texture;
 
 use {
     self::{
-        image::load_gltf_image, material::load_gltf_material, prefab::Gltf,
+        image::load_gltf_image, material::load_gltf_material,
         primitive::load_gltf_primitive, sampler::load_gltf_sampler,
         texture::load_gltf_texture,
     },
@@ -25,7 +25,10 @@ use {
     std::{collections::HashMap, sync::Arc},
 };
 
-#[derive(Debug)]
+use goods::AssetDefaultFormat;
+pub use prefab::Gltf;
+
+#[derive(Clone, Copy, Debug)]
 pub struct GltfFormat {
     pub mesh_vertices_usage: BufferUsage,
     pub mesh_indices_usage: BufferUsage,
@@ -58,13 +61,9 @@ pub struct GltfAsset {
 
 impl SyncAsset for GltfAsset {
     type Context = Context;
-    type Error = GltfLoadingError;
     type Repr = GltfRepr;
 
-    fn build(
-        repr: Self::Repr,
-        ctx: &mut Self::Context,
-    ) -> Result<Self, GltfLoadingError> {
+    fn build(repr: Self::Repr, ctx: &mut Self::Context) -> eyre::Result<Self> {
         let images = repr
             .gltf
             .images()
@@ -122,35 +121,36 @@ impl SyncAsset for GltfAsset {
 /// Contains parsed gltf tree and all sources loaded.
 pub struct GltfRepr {
     gltf: gltf::Gltf,
-    buffers: HashMap<String, Arc<[u8]>>,
+    buffers: HashMap<String, Box<[u8]>>,
     images: HashMap<String, ImageView>,
     config: GltfFormat,
 }
 
-impl Format<GltfAsset, AssetKey> for GltfFormat {
-    type DecodeFuture = BoxFuture<'static, Result<GltfRepr, GltfLoadingError>>;
-    type Error = GltfLoadingError;
+impl Format<GltfRepr, AssetKey> for GltfFormat {
+    type DecodeFuture = BoxFuture<'static, eyre::Result<GltfRepr>>;
 
     fn decode(
         self,
         key: AssetKey,
-        bytes: Vec<u8>,
+        bytes: Box<[u8]>,
         assets: &Assets,
-    ) -> BoxFuture<'static, Result<GltfRepr, GltfLoadingError>> {
+    ) -> BoxFuture<'static, eyre::Result<GltfRepr>> {
         match gltf::Gltf::from_slice(&bytes) {
             Err(err) => Box::pin(async move { Err(err.into()) }),
             Ok(gltf) => {
                 if gltf.scenes().len() == 0 {
-                    return Box::pin(async { Err(GltfLoadingError::NoScenes) });
+                    return Box::pin(async {
+                        Err(GltfLoadingError::NoScenes.into())
+                    });
                 }
 
                 let buffers =
                     try_join_all(gltf.buffers().filter_map(
                         |b| match b.source() {
                             gltf::buffer::Source::Bin => None,
-                            gltf::buffer::Source::Uri(uri) => Some(
-                                assets.load::<Arc<[u8]>>(append_key(&key, uri)),
-                            ),
+                            gltf::buffer::Source::Uri(uri) => {
+                                Some(assets.read(append_key(&key, uri)))
+                            }
                         },
                     ));
 
@@ -169,7 +169,8 @@ impl Format<GltfAsset, AssetKey> for GltfFormat {
                     ));
 
                 Box::pin(async move {
-                    let (buffers, images) = try_join!(buffers, images)?;
+                    // let (buffers, images) = try_join!(buffers, images)?;
+                    let (buffers, images) = (buffers.await?, images.await?);
 
                     let buffers_uri =
                         gltf.buffers().filter_map(|b| match b.source() {
@@ -212,12 +213,6 @@ pub enum GltfLoadingError {
 
     #[error("GLTF with no scenes")]
     NoScenes,
-
-    #[error(transparent)]
-    AssetError {
-        #[from]
-        source: goods::Error,
-    },
 
     #[error(transparent)]
     OutOfMemory {

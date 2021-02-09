@@ -56,7 +56,7 @@ impl RasterPass {
                     final_layout: Layout::DepthStencilAttachmentOptimal,
                 },
                 AttachmentInfo {
-                    format: Format::RGB8Unorm,
+                    format: Format::RGBA8Unorm,
                     samples: Samples::Samples1,
                     load_op: AttachmentLoadOp::DontCare,
                     store_op: AttachmentStoreOp::Store,
