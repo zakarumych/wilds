@@ -15,17 +15,13 @@ use {
     super::{append_key, image::ImageAsset, AssetKey, Assets, Format},
     crate::renderer::{Context, Renderable},
     ::image::ImageError,
-    futures::{
-        future::{try_join_all, BoxFuture},
-        try_join,
-    },
+    futures::future::{try_join_all, BoxFuture},
     gltf::accessor::{DataType, Dimensions},
     goods::SyncAsset,
     illume::{BufferUsage, ImageInfo, ImageView, OutOfMemory},
     std::{collections::HashMap, sync::Arc},
 };
 
-use goods::AssetDefaultFormat;
 pub use prefab::Gltf;
 
 #[derive(Clone, Copy, Debug)]

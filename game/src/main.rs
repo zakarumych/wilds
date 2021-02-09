@@ -118,8 +118,8 @@ fn main() -> Result<(), Report> {
             .gravity
             .y = -3.6848;
 
-        spawn_farms(&mut engine);
-        spawn_pawns(&mut engine);
+        // spawn_farms(&mut engine);
+        // spawn_pawns(&mut engine);
 
         let camera = engine.world.spawn((
             game.camera.into_camera(aspect),
@@ -195,12 +195,8 @@ fn main() -> Result<(), Report> {
 
                         *filter_enabled = !*filter_enabled;
                     }
-                    VirtualKeyCode::B => {
-                        let mut q =
-                            engine.world.query_one::<&Global3>(camera).unwrap();
-                        let global = q.get().unwrap();
-
-                        tracing::error!("Camera pos is: '{}'", global);
+                    VirtualKeyCode::P => {
+                        spawn_pawns(&mut engine);
                     }
                     _ => {}
                 },
@@ -263,11 +259,11 @@ fn spawn_farms(engine: &mut Engine) {
 }
 
 fn spawn_pawns(engine: &mut Engine) {
-    for i in 0..5 {
-        for j in 0..5 {
-            let x = i as f32;
-            let y = 30.0;
-            let z = j as f32;
+    for i in 0..10 {
+        for j in 0..10 {
+            let x = (i as f32) - 4.5;
+            let y = 5.0;
+            let z = (j as f32) - 4.5;
 
             let pawn = engine.load_prefab_with_format::<pawn::Pawn, _>(
                 "pawns/simple.ron".into(),

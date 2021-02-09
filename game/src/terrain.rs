@@ -16,6 +16,6 @@ pub fn spawn_terrain(engine: &mut Engine) -> Entity {
         },
     );
 
-    engine.world.insert(terrain, (Global3::identity(),));
+    let _ = engine.world.insert(terrain, (Global3::identity(),));
     terrain
 }
