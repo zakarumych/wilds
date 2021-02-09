@@ -9,7 +9,7 @@ use {
     bumpalo::Bump,
     cfg_if::cfg_if,
     eyre::Report,
-    flume::{bounded, Receiver, Sender},
+    flume::{unbounded, Receiver, Sender},
     futures::{
         executor::{LocalPool, LocalSpawner},
         future::TryFutureExt as _,
@@ -138,8 +138,6 @@ impl Engine {
 
         let fut = async move {
             let prefab = prefab.await;
-
-            tracing::error!("Prefab loaded");
 
             let loaded = match prefab {
                 Ok(prefab) => MakePrefab::spawn::<P>(key, prefab, entity),
@@ -303,7 +301,7 @@ impl Engine {
             waiting_for_event: Cell::new(false),
         });
 
-        let (send_make_prefabs, recv_make_prefabs) = bounded(512);
+        let (send_make_prefabs, recv_make_prefabs) = unbounded();
 
         let mut local_pool = LocalPool::new();
         let local_spawned = local_pool.spawner();
@@ -358,6 +356,7 @@ impl Engine {
                 };
 
                 local_pool.run_until_stalled();
+
                 let poll = local_pool.run_until(run_app);
                 // let poll = futures::executor::block_on(run_app);
 
