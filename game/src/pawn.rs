@@ -67,6 +67,14 @@ impl PawnAsset {
             let (normal, weight) = &mut normals[a as usize];
             *normal += n;
             *weight += 1;
+
+            let (normal, weight) = &mut normals[b as usize];
+            *normal += n;
+            *weight += 1;
+
+            let (normal, weight) = &mut normals[c as usize];
+            *normal += n;
+            *weight += 1;
         }
 
         let normals = normals.iter().copied().map(|(n, w)| n / w as f32);
@@ -164,15 +172,15 @@ impl System for PawnSystem {
             ctx.world.query::<(&RigidBodyHandle, &mut Pawn, &Global3)>();
 
         for (_, (&body, pawn, global)) in query.iter() {
-            if global.iso.translation.vector.magnitude() > 10.0 {
+            if global.iso.translation.vector.magnitude() > 50.0 {
                 pawn.dir = (-global.iso.translation.vector).normalize();
-            } else if rand::random::<f32>() > 0.9f32.powf(dt) {
+            } else if rand::random::<f32>() > 0.8f32.powf(dt) {
                 pawn.dir = na::Vector3::new(
                     rand::random::<f32>() - 0.5,
                     rand::random::<f32>() - 0.5,
                     rand::random::<f32>() - 0.5,
-                );
-                tracing::warn!("Change dir to '{}'", pawn.dir);
+                )
+                .normalize();
             }
 
             let body = sets.bodies.get_mut(body).unwrap();
