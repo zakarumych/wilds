@@ -85,7 +85,7 @@ fn main() -> Result<(), Report> {
 
         engine.add_system(sky::SkySystem {
             angle: 0.0,
-            velocity: 0.0333,
+            velocity: 0.0666,
         });
 
         engine.load_prefab_with_format::<sky::Sky, _>(
@@ -118,7 +118,7 @@ fn main() -> Result<(), Report> {
             .gravity
             .y = -3.6848;
 
-        // spawn_farms(&mut engine);
+        spawn_farms(&mut engine);
         // spawn_pawns(&mut engine);
 
         let camera = engine.world.spawn((
@@ -217,8 +217,8 @@ fn spawn_farms(engine: &mut Engine) {
         .translation(0.0, 0.0, 0.0)
         .build();
 
-    for i in 0..1 {
-        for j in 0..1 {
+    for i in -3..=3 {
+        for j in -3..=3 {
             let x = i as f32 * (15.0 + rand::random::<f32>() * 3.0);
             let y = 2.5;
             let z = j as f32 * (15.0 + rand::random::<f32>() * 3.0);
@@ -262,7 +262,7 @@ fn spawn_pawns(engine: &mut Engine) {
     for i in 0..10 {
         for j in 0..10 {
             let x = (i as f32) - 4.5;
-            let y = 5.0;
+            let y = 15.0;
             let z = (j as f32) - 4.5;
 
             let pawn = engine.load_prefab_with_format::<pawn::Pawn, _>(

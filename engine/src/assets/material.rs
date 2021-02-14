@@ -81,10 +81,10 @@ pub struct MaterialInfo {
     pub albedo_factor: [OrderedFloat<f32>; 4],
 
     #[serde(default)]
-    pub metallic_roughness: Option<TextureInfo>,
+    pub metalness_roughness: Option<TextureInfo>,
 
-    #[serde(default = "defaults::metallic_factor")]
-    pub metallic_factor: OrderedFloat<f32>,
+    #[serde(default = "defaults::metalness_factor")]
+    pub metalness_factor: OrderedFloat<f32>,
 
     #[serde(default = "defaults::roughness_factor")]
     pub roughness_factor: OrderedFloat<f32>,
@@ -109,8 +109,8 @@ mod defaults {
         [OrderedFloat(1.0); 4]
     }
 
-    pub const fn metallic_factor() -> OrderedFloat<f32> {
-        OrderedFloat(1.0)
+    pub const fn metalness_factor() -> OrderedFloat<f32> {
+        OrderedFloat(0.0)
     }
 
     pub const fn roughness_factor() -> OrderedFloat<f32> {
@@ -135,10 +135,10 @@ impl MaterialInfo {
         MaterialRepr {
             albedo: self.albedo.map(|info| info.load(prefix, assets)),
             albedo_factor: self.albedo_factor,
-            metallic_roughness: self
-                .metallic_roughness
+            metalness_roughness: self
+                .metalness_roughness
                 .map(|info| info.load(prefix, assets)),
-            metallic_factor: self.metallic_factor,
+            metalness_factor: self.metalness_factor,
             roughness_factor: self.roughness_factor,
             emissive: self.emissive.map(|info| info.load(prefix, assets)),
             emissive_factor: self.emissive_factor,
@@ -152,8 +152,8 @@ impl MaterialInfo {
 pub struct MaterialRepr {
     pub albedo: Option<TextureRepr>,
     pub albedo_factor: [OrderedFloat<f32>; 4],
-    pub metallic_roughness: Option<TextureRepr>,
-    pub metallic_factor: OrderedFloat<f32>,
+    pub metalness_roughness: Option<TextureRepr>,
+    pub metalness_factor: OrderedFloat<f32>,
     pub roughness_factor: OrderedFloat<f32>,
     pub emissive: Option<TextureRepr>,
     pub emissive_factor: [OrderedFloat<f32>; 3],
@@ -172,11 +172,11 @@ impl MaterialRepr {
                 .map(|albedo| albedo.prebuild(ctx))
                 .transpose()?,
             albedo_factor: self.albedo_factor,
-            metallic_roughness: self
-                .metallic_roughness
-                .map(|metallic_roughness| metallic_roughness.prebuild(ctx))
+            metalness_roughness: self
+                .metalness_roughness
+                .map(|metalness_roughness| metalness_roughness.prebuild(ctx))
                 .transpose()?,
-            metallic_factor: self.metallic_factor,
+            metalness_factor: self.metalness_factor,
             roughness_factor: self.roughness_factor,
             emissive: self
                 .emissive
@@ -196,8 +196,8 @@ impl MaterialRepr {
 pub struct MaterialPrebuild {
     pub albedo: Option<TexturePrebuild>,
     pub albedo_factor: [OrderedFloat<f32>; 4],
-    pub metallic_roughness: Option<TexturePrebuild>,
-    pub metallic_factor: OrderedFloat<f32>,
+    pub metalness_roughness: Option<TexturePrebuild>,
+    pub metalness_factor: OrderedFloat<f32>,
     pub roughness_factor: OrderedFloat<f32>,
     pub emissive: Option<TexturePrebuild>,
     pub emissive_factor: [OrderedFloat<f32>; 3],
@@ -213,13 +213,13 @@ impl MaterialPrebuild {
                 None => None,
             },
             albedo_factor: self.albedo_factor,
-            metallic_roughness: match self.metallic_roughness {
-                Some(metallic_roughness) => {
-                    Some(metallic_roughness.finish().await?)
+            metalness_roughness: match self.metalness_roughness {
+                Some(metalness_roughness) => {
+                    Some(metalness_roughness.finish().await?)
                 }
                 None => None,
             },
-            metallic_factor: self.metallic_factor,
+            metalness_factor: self.metalness_factor,
             roughness_factor: self.roughness_factor,
             emissive: match self.emissive {
                 Some(emissive) => Some(emissive.finish().await?),

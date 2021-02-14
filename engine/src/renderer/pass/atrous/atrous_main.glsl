@@ -1,25 +1,24 @@
 
 
+#define EULERS 2.71828182845904523536028747135266250
+
+float kern[] = {
+    0.0625,
+    0.25,
+    0.375,
+    0.25,
+    0.0625
+};
+
+float albedo_sigma = 0.1;
+float normal_sigma = 0.1;
+float depth_sigma = 0.1;
+
 void main() {
-    vec4 normal_depth = texture(normals_depth, gl_FragCoord.xy);
-    vec3 normal = normal_depth.xyz;
-    if (dot(normal, normal) < 0.9) {
-        output_image = vec4(0, 0, 0, 1);
-        return;
-    }
-    float depth = normal_depth.w;
-
-    // float kern[r+1];
-    // kern[r] = 1.0 / exp2(float(r) * 2.0);
-
-    // float sum = kern[r];
-    // float n = 0.0;
-    // for (int i = r - 1; i > 0; --i, ++n) {
-    //     kern[i] = kern[i+1] * ((float(r) * 2.0 - n) / (n + 1.0));
-    //     sum += kern[i];
-    // }
-
-    // kern[0] = 1.0 - 2.0 * sum;
+    vec4 normal_depth_p = texture(normals_depth, gl_FragCoord.xy);
+    vec3 normal_p = normal_depth_p.xyz;
+    float depth_p = normal_depth_p.w;
+    vec3 albedo_p = texture(unfiltered, gl_FragCoord.xy).rgb;
 
     float sum = 0;
     vec3 filtered = vec3(0, 0, 0);
@@ -27,18 +26,22 @@ void main() {
     for (int y = -h; y <= h; y += l) {
         for (int x = -w; x <= w; x += l) {
             vec2 xy = vec2(x, y);
-            vec4 normal_depth = texture(normals_depth, gl_FragCoord.xy + xy);
-            float depth_factor = min(normal_depth.w/depth, depth/normal_depth.w);
-            if (depth_factor > 0.8) {
-                float normal_factor = dot(normal, normal_depth.xyz);
-                if (normal_factor > 0.8) {
-                    float f = 1 / (5 + dot(xy, xy));
-                    sum += f;
-                    filtered += f * texture(unfiltered, gl_FragCoord.xy + xy).rgb;
-                }
-            }
-        }
+            vec4 normal_depth_q = texture(normals_depth, gl_FragCoord.xy + xy);
+            vec3 normal_q = normal_depth_q.xyz;
+            float depth_q = normal_depth_q.w;
+            vec3 albedo_q = texture(unfiltered, gl_FragCoord.xy + xy).rgb;
+
+            float wh = kern[(x + y) / l];
+            float wa = pow(EULERS, -(length(albedo_p - albedo_q) / albedo_sigma));
+            float wn = pow(EULERS, -(length(normal_p - normal_q) / normal_sigma));
+            float wd = pow(EULERS, -(length(depth_p - depth_q) / depth_sigma));
+
+            float W = wh * wa * wn * wd;
+
+            sum += W;
+            filtered += W * albedo_q;
+       }
     }
 
-    output_image = vec4(filtered / sum, 1);
+    output_image = vec4(filtered / sum, 1.0);
 }

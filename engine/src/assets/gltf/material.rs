@@ -24,7 +24,7 @@ pub fn load_gltf_material(
             [r.into(), g.into(), b.into(), a.into()]
         },
 
-        metallic_roughness: match pbr.metallic_roughness_texture() {
+        metalness_roughness: match pbr.metallic_roughness_texture() {
             Some(info) => match textures.get(info.texture().index()) {
                 Some(texture) => Some(texture.clone()),
                 None => {
@@ -33,7 +33,7 @@ pub fn load_gltf_material(
             },
             None => None,
         },
-        metallic_factor: pbr.metallic_factor().into(),
+        metalness_factor: pbr.metallic_factor().into(),
         roughness_factor: pbr.roughness_factor().into(),
 
         emissive: match material.emissive_texture() {

@@ -71,6 +71,6 @@ vec3 probe_cell_size() {
     return globals.probes_dimensions / vec3(globals.probes_extent - uvec3(1, 1, 1));
 }
 
-vec3 probe_rand(uvec4 co) {
-    return rand_sphere(blue_rand(co));
+vec3 probe_rand(Rng rng) {
+    return rand_sphere(blue_rand(rng));
 }

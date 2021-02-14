@@ -1,11 +1,6 @@
 #extension GL_EXT_scalar_block_layout : enable
 #extension GL_ARB_gpu_shader_int64 : enable
 
-struct RecursiveRay {
-    vec3 origin;
-    vec3 direction;
-};
-
 struct PrimaryHitPayload {
     vec3 normal;
     float depth;
@@ -13,11 +8,13 @@ struct PrimaryHitPayload {
     vec3 emissive;
     vec3 direct;
     vec3 diffuse;
+
+    // bool ab;
 };
 
 struct DiffuseHitPayload {
     vec3 radiation;
-    uint ray_index;
+    uint rng_start;
 };
 
 struct Vertex {
@@ -32,6 +29,8 @@ struct Instance {
     uint mesh;
     uint albedo_sampler;
     vec4 albedo_factor;
+    uint metalness_roughness_sampler;
+    vec2 metalness_roughness_factor;
     uint emissive_sampler;
     vec3 emissive_factor;
     uint normals_sampler;

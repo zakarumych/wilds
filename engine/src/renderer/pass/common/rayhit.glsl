@@ -1,3 +1,6 @@
+#ifndef COMMON_RAYHIT_H
+#define COMMON_RAYHIT_H
+
 #extension GL_EXT_nonuniform_qualifier : enable
 
 uvec3 instance_triangle_indices() {
@@ -27,6 +30,16 @@ vec4 sample_albedo(vec2 uv) {
     return raw * instances[gl_InstanceID].albedo_factor;
 }
 
+vec2 sample_metalness_roughness(vec2 uv) {
+    uint sampler_index = instances[gl_InstanceID].metalness_roughness_sampler;
+    vec2 raw = vec2(1.0, 1.0);
+    if (sampler_index != 0xffffffff)
+    {
+        raw = texture(textures[sampler_index], uv).rg;
+    }
+    return raw * instances[gl_InstanceID].metalness_roughness_factor;
+}
+
 vec3 sample_emissive(vec2 uv) {
     uint sampler_index = instances[gl_InstanceID].emissive_sampler;
     vec3 raw = vec3(1, 1, 1);
@@ -47,19 +60,23 @@ vec3 sample_normal(vec2 uv) {
     return normalize(vec3(raw.xy * instances[gl_InstanceID].normals_factor, raw.z));
 }
 
-vec3 local_normal(vec3 vertex_normal, vec4 tangh, vec2 uv) {
-    // uint sampler_index = instances[gl_InstanceID].normals_sampler;
-    // if (sampler_index > 0)
-    // {
-    //     vec3 raw = texture(normal[sampler_index-1], uv).xyz;
-    //     vec3 sampled_normal = normalize(vec3(raw.xy * instances[gl_InstanceID].normals_factor, raw.z));
+mat3 tangent_space(vec3 normal, vec4 tangh) {
+    vec3 bitang = cross(normal, tangh.xyz) * tangh.w;
+    return mat3(bitang, tangh.xyz, normal);
+}
 
-    //     vec3 bitang = cross(vertex_normal, tangh.xyz) * tangh.w;
-    //     mat3 tang_space = mat3(bitang, tangh.xyz, vertex_normal);
-    //     return tang_space * sampled_normal;
-    // }
-    // else
+vec3 sample_normal(mat3 tangent_space, vec2 uv) {
+    uint sampler_index = instances[gl_InstanceID].normals_sampler;
+    if (sampler_index != 0xffffffff)
     {
-        return vertex_normal;
+        vec3 raw = texture(textures[sampler_index], uv).xyz;
+        vec3 sampled_normal = normalize(vec3(raw.xy * instances[gl_InstanceID].normals_factor, raw.z));
+        return tangent_space * sampled_normal;
+    }
+    else
+    {
+        return tangent_space[2];
     }
 }
+
+#endif

@@ -1,4 +1,5 @@
 #version 460
+#define RAY_TRACING
 #extension GL_EXT_ray_tracing : require
 #extension GL_GOOGLE_include_directive : enable
 #extension GL_EXT_scalar_block_layout : enable
@@ -14,7 +15,9 @@ layout(binding = 5, set = 1, rgba32f) uniform restrict writeonly image2D new_pro
 
 void main()
 {
-    const uvec4 co = uvec4(gl_LaunchIDEXT.xy, globals.frame, 0);
+    Rng rng;
+    init_ray_rng(rng);
+
     const uint probe_index = gl_LaunchIDEXT.x;
     const vec3 probe_cell_size = probe_cell_size();
 
@@ -25,7 +28,7 @@ void main()
     );
 
     const vec3 origin = probe_cell_size * probe + globals.probes_offset;
-    vec3 dir = probe_rand(co);
+    vec3 dir = probe_rand(rng);
     prd.result = vec3(0);
     prd.shadow_rays = 1;
     traceRayEXT(tlas, 0, 0xff, 0, 0, 0, origin, 0.0, dir, 1000.0, 0);

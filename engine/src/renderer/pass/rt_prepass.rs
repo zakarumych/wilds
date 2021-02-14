@@ -67,6 +67,8 @@ struct ShaderInstance {
     mesh: u32,
     albedo_sampler: u32,
     albedo_factor: [f32; 4],
+    metalness_roughness_sampler: u32,
+    metalness_roughness_factor: [f32; 2],
     emissive_sampler: u32,
     emissive_factor: [f32; 3],
     normal_sampler: u32,
@@ -760,6 +762,14 @@ impl<'a> Pass<'a> for RtPrepass {
                     &self.set,
                 );
 
+                let metalness_roughness_sampler = texture_index(
+                    &renderable.material.metalness_roughness,
+                    &mut self.textures,
+                    &combined_image_samples,
+                    &mut writes,
+                    &self.set,
+                );
+
                 let emissive_sampler = texture_index(
                     &renderable.material.emissive,
                     &mut self.textures,
@@ -780,6 +790,7 @@ impl<'a> Pass<'a> for RtPrepass {
                     transform: m,
                     mesh: mesh_index,
                     albedo_sampler,
+                    metalness_roughness_sampler,
                     emissive_sampler,
                     normal_sampler,
                     albedo_factor: {
@@ -789,6 +800,12 @@ impl<'a> Pass<'a> for RtPrepass {
                             g.into_inner(),
                             b.into_inner(),
                             a.into_inner(),
+                        ]
+                    },
+                    metalness_roughness_factor: {
+                        [
+                            renderable.material.metalness_factor.into_inner(),
+                            renderable.material.roughness_factor.into_inner(),
                         ]
                     },
                     emissive_factor: {
@@ -939,7 +956,7 @@ impl<'a> Pass<'a> for RtPrepass {
             frame: frame as u32,
             // frame: 0,
             shadow_rays: 8,
-            diffuse_rays: 16,
+            diffuse_rays: 8,
             pad: 0.0,
         };
 

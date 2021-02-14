@@ -10,6 +10,15 @@ layout(location = 0) out vec4 output_color;
 
 layout(push_constant) uniform push_constants { uvec2 screen_size; };
 
+// vec4 draw_normal(vec3 n) {
+//     return vec4(n / 2.0 + vec3(0.5, 0.5, 0.5), 1.0);
+// }
+
+// vec4 draw_depth(float d) {
+//     d = d / (1 + d);
+//     return vec4(d, d, d, 1.0);
+// }
+
 void main() {
     vec3 albedo = texture(albedo, gl_FragCoord.xy / screen_size).rgb;
     vec3 emissive = texture(emissive, gl_FragCoord.xy / screen_size).rgb;

@@ -80,7 +80,7 @@ impl System for SkySystem {
             new_angle -= TAU;
         }
 
-        new_angle = 0.5;
+        // new_angle = 1.0;
 
         let mut sky_query = ctx
             .world
@@ -89,7 +89,7 @@ impl System for SkySystem {
 
         for (_, (dl, sl)) in sky_query.iter() {
             dl.direction =
-                na::Vector3::new(0.0, -new_angle.cos(), new_angle.sin());
+                na::Vector3::new(0.0, -new_angle.cos(), new_angle.sin()) * 10.0;
 
             let m = (new_angle.cos() + 1.2) / (old_angle.cos() + 1.2);
 

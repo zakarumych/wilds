@@ -177,22 +177,6 @@ impl ATrousFilter {
                 layout: pipeline_layout.clone(),
                 render_pass: render_pass.clone(),
                 rasterizer: rasterizer!{
-                    fragment_shader: frag1h,
-                }
-            })?,
-            ctx.create_graphics_pipeline(graphics_pipeline_info! {
-                vertex_shader: vert.clone(),
-                layout: pipeline_layout.clone(),
-                render_pass: render_pass.clone(),
-                rasterizer: rasterizer!{
-                    fragment_shader: frag2h,
-                }
-            })?,
-            ctx.create_graphics_pipeline(graphics_pipeline_info! {
-                vertex_shader: vert.clone(),
-                layout: pipeline_layout.clone(),
-                render_pass: render_pass.clone(),
-                rasterizer: rasterizer!{
                     fragment_shader: frag0v,
                 }
             })?,
@@ -201,7 +185,23 @@ impl ATrousFilter {
                 layout: pipeline_layout.clone(),
                 render_pass: render_pass.clone(),
                 rasterizer: rasterizer!{
+                    fragment_shader: frag1h,
+                }
+            })?,
+            ctx.create_graphics_pipeline(graphics_pipeline_info! {
+                vertex_shader: vert.clone(),
+                layout: pipeline_layout.clone(),
+                render_pass: render_pass.clone(),
+                rasterizer: rasterizer!{
                     fragment_shader: frag1v,
+                }
+            })?,
+            ctx.create_graphics_pipeline(graphics_pipeline_info! {
+                vertex_shader: vert.clone(),
+                layout: pipeline_layout.clone(),
+                render_pass: render_pass.clone(),
+                rasterizer: rasterizer!{
+                    fragment_shader: frag2h,
                 }
             })?,
             ctx.create_graphics_pipeline(graphics_pipeline_info! {
@@ -429,7 +429,7 @@ impl<'a> Pass<'a> for ATrousFilter {
                 &[ClearValue::Color(0.3, 0.4, 0.5, 1.0)],
             );
 
-            render_pass_encoder.bind_graphics_pipeline(&self.pipelines[i]);
+            render_pass_encoder.bind_graphics_pipeline(&self.pipelines[i % 2]);
             render_pass_encoder.bind_graphics_descriptor_sets(
                 &self.pipeline_layout,
                 0,

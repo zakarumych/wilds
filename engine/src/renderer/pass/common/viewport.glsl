@@ -1,4 +1,5 @@
-
+#ifndef COMMON_VIEWPORT_H
+#define COMMON_VIEWPORT_H
 
 void traceViewportPixelRay()
 {
@@ -14,3 +15,5 @@ void traceViewportPixelRay()
 
     traceRayEXT(tlas, 0, 0xff, 0, 0, 0, origin.xyz, 0.0, normalize((target - origin).xyz), 1000.0, 0);
 }
+
+#endif

@@ -147,7 +147,9 @@ impl Prefab for Pawn {
             (
                 Renderable {
                     mesh: asset.mesh,
-                    material: Material::color([0.7, 0.5, 0.3, 1.0]),
+                    material: Material::color([0.3, 1.0, 0.7, 1.0])
+                        .with_metalness(1.0)
+                        .with_roughness(0.1),
                     transform: None,
                 },
                 body,
@@ -173,14 +175,15 @@ impl System for PawnSystem {
 
         for (_, (&body, pawn, global)) in query.iter() {
             if global.iso.translation.vector.magnitude() > 50.0 {
-                pawn.dir = (-global.iso.translation.vector).normalize();
+                pawn.dir = (-global.iso.translation.vector).normalize() / 5.0;
             } else if rand::random::<f32>() > 0.8f32.powf(dt) {
                 pawn.dir = na::Vector3::new(
                     rand::random::<f32>() - 0.5,
                     rand::random::<f32>() - 0.5,
                     rand::random::<f32>() - 0.5,
                 )
-                .normalize();
+                .normalize()
+                    / 5.0;
             }
 
             let body = sets.bodies.get_mut(body).unwrap();

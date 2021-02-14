@@ -1,4 +1,5 @@
-
+#ifndef COMMON_SH_H
+#define COMMON_SH_H
 
 struct SphericalHarmonicsRgb {
     vec3 coeff[9];
@@ -147,3 +148,5 @@ vec3 evaluete_sherical_harmonics(vec3 norm, in SphericalHarmonicsRgb sh) {
         max(0, dot(vec4(norm, 1), Mb * vec4(norm, 1)))
     );
 }
+
+#endif

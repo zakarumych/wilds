@@ -18,6 +18,8 @@ struct Instance {
     uint mesh;
     uint albedo_sampler;
     vec4 albedo_factor;
+    uint metalness_roughness_sampler;
+    vec2 metalness_roughness_factor;
     uint emissive_sampler;
     vec3 emissive_factor;
     uint normals_sampler;

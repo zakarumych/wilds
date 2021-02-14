@@ -16,8 +16,8 @@ pub struct Texture {
 pub struct Material {
     pub albedo: Option<Texture>,
     pub albedo_factor: [OrderedFloat<f32>; 4],
-    pub metallic_roughness: Option<Texture>,
-    pub metallic_factor: OrderedFloat<f32>,
+    pub metalness_roughness: Option<Texture>,
+    pub metalness_factor: OrderedFloat<f32>,
     pub roughness_factor: OrderedFloat<f32>,
     pub emissive: Option<Texture>,
     pub emissive_factor: [OrderedFloat<f32>; 3],
@@ -39,8 +39,8 @@ impl Material {
         Material {
             albedo: None,
             albedo_factor: [OrderedFloat(1.0); 4],
-            metallic_roughness: None,
-            metallic_factor: OrderedFloat(1.0),
+            metalness_roughness: None,
+            metalness_factor: OrderedFloat(0.0),
             roughness_factor: OrderedFloat(1.0),
             emissive: None,
             emissive_factor: [OrderedFloat(0.0); 3],
@@ -55,5 +55,15 @@ impl Material {
             albedo_factor: [r.into(), g.into(), b.into(), a.into()],
             ..Material::new()
         }
+    }
+
+    pub fn with_metalness(mut self, factor: f32) -> Self {
+        self.metalness_factor = factor.into();
+        self
+    }
+
+    pub fn with_roughness(mut self, factor: f32) -> Self {
+        self.roughness_factor = factor.into();
+        self
     }
 }

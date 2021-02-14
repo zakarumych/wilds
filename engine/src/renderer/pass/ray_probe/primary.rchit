@@ -1,4 +1,5 @@
 #version 460
+#define RAY_TRACING
 #extension GL_EXT_ray_tracing : require
 #extension GL_GOOGLE_include_directive : enable
 #extension GL_EXT_scalar_block_layout : enable
@@ -85,7 +86,9 @@ vec3 query_diffuse_from_probes(vec3 origin, vec3 normal)
 
 void main()
 {
-    const uvec4 co = uvec4(gl_LaunchIDEXT, globals.frame);
+    Rng rng;
+    init_ray_rng(rng);
+
     const vec3 back = gl_WorldRayDirectionEXT * 0.001;
 
     uint shadow_rays = prd.shadow_rays;
@@ -100,19 +103,20 @@ void main()
     vec3 pos = v0.pos * barycentrics.x + v1.pos * barycentrics.y + v2.pos * barycentrics.z;
     vec2 uv = v0.uv * barycentrics.x + v1.uv * barycentrics.y + v2.uv * barycentrics.z;
 
-    vec3 world_space_pos = (gl_ObjectToWorldEXT * vec4(pos, 1.0));
-    vec3 world_space_origin = world_space_pos - back;
+    vec3 world_pos = (gl_ObjectToWorldEXT * vec4(pos, 1.0));
+    vec3 world_origin = world_pos - back;
     vec3 normal = normalize(v0.norm * barycentrics.x + v1.norm * barycentrics.y + v2.norm * barycentrics.z);
     vec4 tangh = v0.tangh * barycentrics.x + v1.tangh * barycentrics.y + v2.tangh * barycentrics.z;
-    normal = local_normal(normal, tangh, uv);
-    // normal *= gl_HitKindEXT == gl_HitKindFrontFacingTriangleEXT ? 1 : -1;
-    vec3 world_space_normal = normalize((gl_ObjectToWorldEXT * vec4(normal, 0.0)));
+    
+    mat3 world_tangent_space = mat3(gl_ObjectToWorldEXT) * tangent_space(normal, tangh);
+    vec3 world_normal = sample_normal(world_tangent_space, uv);
+    // world_normal *= gl_HitKindEXT == gl_HitKindFrontFacingTriangleEXT ? 1 : -1;
 
     vec3 radiance = vec3(0);
 
     if (dot(globals.dirlight.rad, vec3(1, 1, 1)) > 0.0001)
     {
-        float attenuation = -dot(normalize(globals.dirlight.dir), world_space_normal);
+        float attenuation = -dot(normalize(globals.dirlight.dir), world_normal);
         if (attenuation > 0.0)
         {
             float ray_contribution = attenuation / shadow_rays;
@@ -120,8 +124,8 @@ void main()
             unshadows = 0;
             for (uint i = 0; i < shadow_rays; ++i)
             {
-                vec3 r = normalize(rand_sphere(blue_rand(co + uvec4(0, 0, 0, i))) - globals.dirlight.dir);
-                traceRayEXT(tlas, shadow_ray_flags, 0xff, 0, 0, 1, world_space_pos - back, 0, r, 1000.0, 1);
+                vec3 r = normalize(rand_sphere(blue_rand(rng)) - globals.dirlight.dir);
+                traceRayEXT(tlas, shadow_ray_flags, 0xff, 0, 0, 1, world_pos - back, 0, r, 1000.0, 1);
             }
             radiance += globals.dirlight.rad * (ray_contribution * unshadows);
         }
@@ -131,8 +135,8 @@ void main()
     // {
     //     if (dot(plight[i].rad, vec3(1, 1, 1)) > 0.0001)
     //     {
-    //         vec3 tolight = plight[i].pos - world_space_pos;
-    //         float attenuation = dot(normalize(tolight), world_space_normal);
+    //         vec3 tolight = plight[i].pos - world_pos;
+    //         float attenuation = dot(normalize(tolight), world_normal);
     //         if (attenuation > 0.0)
     //         {
     //             float ls = dot(tolight, tolight);
@@ -143,14 +147,14 @@ void main()
     //             for (int i = 0; i < shadow_rays; ++i)
     //             {
     //                 vec3 r = normalize(rand_sphere(rand(co + uvec4(0, 0, 0, i + shadow_rays))) + tolight);
-    //                 traceRayEXT(tlas, shadow_ray_flags, 0xff, 0, 0, 1, world_space_pos - back, 0, r, l, 1);
+    //                 traceRayEXT(tlas, shadow_ray_flags, 0xff, 0, 0, 1, world_pos - back, 0, r, l, 1);
     //             }
     //             radiance += plight[i].rad * (ray_contribution * unshadows);
     //         }
     //     }
     // }
 
-    radiance += query_diffuse_from_probes(world_space_pos - back + world_space_normal * 0.001, world_space_normal);
+    radiance += query_diffuse_from_probes(world_pos - back + world_normal * 0.001, world_normal);
     radiance *= sample_albedo(uv).rgb;
 
     prd.result = radiance;

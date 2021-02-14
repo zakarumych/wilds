@@ -6,8 +6,8 @@ layout(binding = 1, set = 0) uniform sampler2D unfiltered;
 
 layout(location = 0) out vec4 output_image;
 
-const int h = 4;
+const int h = 9;
 const int w = 0;
-const int l = 2;
+const int l = 3;
 
 #include "atrous_main.glsl"
